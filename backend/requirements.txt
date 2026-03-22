@@ -1,0 +1,18 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-chess>=1.999
+stockfish>=3.28.0
+pydantic-settings>=2.6.0
+python-dotenv>=1.0.0
+
+# ── model_training dependencies (also needed at runtime for neural mode) ──────
+# Install PyTorch separately — use the CPU wheel to avoid a 2 GB CUDA download:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# Or for CUDA 12.x:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch
+
+# Data pipeline (only needed when running model_training scripts)
+zstandard>=0.22.0
+requests>=2.32.0

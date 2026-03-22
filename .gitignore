@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Model weights (too large for git)
+backend/models/*.pt
+backend/models/*.pth
+
+# Training data (too large for git)
+backend/data/
+backend/logs/
+
+# Environment files (contain secrets/paths)
+backend/.env
+frontend/.env.local
+
+# Node
+node_modules/
+frontend/dist/
+frontend/logs/
+
+# Misc
+.DS_Store
+*.log
+*.err
