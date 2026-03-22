@@ -10,7 +10,10 @@
       "Bash(jobs -l)",
       "Bash(kill -9 1049 1045 1043)",
       "Bash(cmd /c \"for /f \\\\\"tokens=5\\\\\" %p in \\('netstat -aon ^| findstr \\\\\"0.0.0.0:8000\\\\\"'\\) do @echo PID: %p & wmic process where processid^=%p get name^,commandline /format:list 2>nul\" 2>&1)",
-      "Bash(cmd /c \"netstat -abn 2>nul | findstr -A 2 \\\\\":8000\\\\\"\")"
+      "Bash(cmd /c \"netstat -abn 2>nul | findstr -A 2 \\\\\":8000\\\\\"\")",
+      "Bash(python C:/Users/shami/OneDrive/Documents/torch/tsv_tmp/parse.py)",
+      "Bash(python:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

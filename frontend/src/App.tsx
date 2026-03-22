@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { detectOpening } from './lib/openings'
 import Board from './components/Board'
 import Clock from './components/Clock'
 import Controls from './components/Controls'
@@ -67,6 +68,7 @@ export default function App() {
   }, [status])
 
   const clockStarted = white_ms < 300_000 || black_ms < 300_000
+  const openingName = history.length <= 30 ? detectOpening(history) : null
 
   const topSide = boardFlipped ? 'w' : 'b'
   const bottomSide = boardFlipped ? 'b' : 'w'
@@ -127,6 +129,15 @@ export default function App() {
             materialAdv={materialAdv}
             side={bottomCaptures}
           />
+
+          <div className="h-5 flex items-center justify-center">
+            <span
+              className="text-zinc-400 italic text-sm transition-opacity duration-500"
+              style={{ opacity: openingName ? 1 : 0 }}
+            >
+              {openingName ?? ''}
+            </span>
+          </div>
         </div>
 
         {/* Right panel */}
