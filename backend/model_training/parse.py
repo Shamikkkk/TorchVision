@@ -55,7 +55,7 @@ def parse(pgn_path: Path, out_path: Path, limit: int) -> None:
          open(out_path, "w", newline="", encoding="utf-8") as csv_fh:
 
         writer = csv.writer(csv_fh)
-        writer.writerow(["fen", "eval_cp"])
+        writer.writerow(["fen", "eval_cp", "best_move"])
 
         while count < limit:
             game = chess.pgn.read_game(pgn_fh)
@@ -84,8 +84,8 @@ def parse(pgn_path: Path, out_path: Path, limit: int) -> None:
                     continue
                 seen_fens.add(fen)
 
-                _uci, score = best_move_with_eval(fen, depth=LABEL_DEPTH)
-                writer.writerow([fen, f"{score:.1f}"])
+                uci, score = best_move_with_eval(fen, depth=LABEL_DEPTH)
+                writer.writerow([fen, f"{score:.1f}", uci])
                 count += 1
 
                 if count % REPORT_EVERY == 0:

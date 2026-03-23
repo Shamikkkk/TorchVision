@@ -28,22 +28,24 @@ _WEIGHTS_PATH = Path(__file__).resolve().parent.parent / "models" / "torch_chess
 _LOSS_CSV     = Path("data/loss_curves.csv")
 
 # ── Hyperparameters ─────────────────────────────────────────────────────────
-BATCH_SIZE   = 256
-EPOCHS       = 10
-LR_INIT      = 1e-3
-LR_FACTOR    = 0.5       # ReduceLROnPlateau factor
-LR_PATIENCE  = 2         # epochs without improvement before LR drop
-VAL_FRACTION = 0.05      # 5% held out for validation
-NUM_WORKERS  = 0         # set >0 on Linux for faster data loading
+BATCH_SIZE        = 256
+EPOCHS            = 10
+LR_INIT           = 1e-3
+LR_FACTOR         = 0.5       # ReduceLROnPlateau factor
+LR_PATIENCE       = 2         # epochs without improvement before LR drop
+VAL_FRACTION      = 0.05      # 5% held out for validation
+NUM_WORKERS       = 0         # set >0 on Linux for faster data loading
+POLICY_LOSS_WEIGHT = 0.5      # total_loss = value_loss + weight * policy_loss
 
 
 def collate(batch):  # type: ignore[no-untyped-def]
-    """Custom collate to handle ((board, scalar), score) tuples."""
-    (boards, scalars), scores = zip(*batch)
+    """Custom collate to handle ((board, scalar), score, move_idx) tuples."""
+    (boards, scalars), scores, move_indices = zip(*batch)
     return (
         torch.stack(boards),
         torch.stack(scalars),
         torch.tensor(scores, dtype=torch.float32).unsqueeze(1),
+        torch.tensor(move_indices, dtype=torch.long),
     )
 
 
@@ -67,12 +69,13 @@ def train(csv_path: Path) -> None:
         collate_fn=collate, num_workers=NUM_WORKERS,
     )
 
-    # ── Model, loss, optimiser ───────────────────────────────────────────────
+    # ── Model, losses, optimiser ─────────────────────────────────────────────
     model = ChessNet().to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[train] ChessNet: {n_params:,} parameters")
 
-    criterion = nn.MSELoss()
+    criterion_value  = nn.MSELoss()
+    criterion_policy = nn.CrossEntropyLoss()
     optimiser = torch.optim.Adam(model.parameters(), lr=LR_INIT)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimiser, factor=LR_FACTOR, patience=LR_PATIENCE, verbose=True
@@ -81,62 +84,90 @@ def train(csv_path: Path) -> None:
     # ── Training loop ────────────────────────────────────────────────────────
     best_val_loss = float("inf")
     _WEIGHTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    loss_rows: list[tuple[int, float, float]] = []
+    loss_rows: list[tuple[int, float, float, float, float, float, float]] = []
 
     for epoch in range(1, EPOCHS + 1):
         t0 = time.monotonic()
         model.train()
-        train_loss = 0.0
+        train_value_loss = 0.0
+        train_policy_loss = 0.0
 
-        for boards, scalars, targets in train_loader:
-            boards  = boards.to(device)
-            scalars = scalars.to(device)
-            targets = targets.to(device)
+        for boards, scalars, value_targets, policy_targets in train_loader:
+            boards         = boards.to(device)
+            scalars        = scalars.to(device)
+            value_targets  = value_targets.to(device)
+            policy_targets = policy_targets.to(device)
 
             optimiser.zero_grad()
-            preds = model(boards, scalars)
-            loss  = criterion(preds, targets)
+            value, policy = model(boards, scalars)
+
+            v_loss = criterion_value(value, value_targets)
+            p_loss = criterion_policy(policy, policy_targets)
+            loss   = v_loss + POLICY_LOSS_WEIGHT * p_loss
+
             loss.backward()
             optimiser.step()
-            train_loss += loss.item() * len(targets)
 
-        train_loss /= n_train
+            n = len(value_targets)
+            train_value_loss  += v_loss.item() * n
+            train_policy_loss += p_loss.item() * n
+
+        train_value_loss  /= n_train
+        train_policy_loss /= n_train
+        train_total_loss   = train_value_loss + POLICY_LOSS_WEIGHT * train_policy_loss
 
         # Validation
         model.eval()
-        val_loss = 0.0
+        val_value_loss = 0.0
+        val_policy_loss = 0.0
         with torch.no_grad():
-            for boards, scalars, targets in val_loader:
-                boards  = boards.to(device)
-                scalars = scalars.to(device)
-                targets = targets.to(device)
-                preds   = model(boards, scalars)
-                val_loss += criterion(preds, targets).item() * len(targets)
-        val_loss /= n_val
+            for boards, scalars, value_targets, policy_targets in val_loader:
+                boards         = boards.to(device)
+                scalars        = scalars.to(device)
+                value_targets  = value_targets.to(device)
+                policy_targets = policy_targets.to(device)
 
-        scheduler.step(val_loss)
+                value, policy = model(boards, scalars)
+                n = len(value_targets)
+                val_value_loss  += criterion_value(value, value_targets).item() * n
+                val_policy_loss += criterion_policy(policy, policy_targets).item() * n
+
+        val_value_loss  /= n_val
+        val_policy_loss /= n_val
+        val_total_loss   = val_value_loss + POLICY_LOSS_WEIGHT * val_policy_loss
+
+        scheduler.step(val_total_loss)
         elapsed = time.monotonic() - t0
-        loss_rows.append((epoch, train_loss, val_loss))
+        loss_rows.append((
+            epoch,
+            train_total_loss, train_value_loss, train_policy_loss,
+            val_total_loss,   val_value_loss,   val_policy_loss,
+        ))
 
         print(
             f"[train] Epoch {epoch:2d}/{EPOCHS} | "
-            f"train_loss={train_loss:.2f}  val_loss={val_loss:.2f} | "
+            f"train={train_total_loss:.4f} (v={train_value_loss:.2f} p={train_policy_loss:.4f})  "
+            f"val={val_total_loss:.4f} (v={val_value_loss:.2f} p={val_policy_loss:.4f}) | "
             f"{elapsed:.1f}s"
         )
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if val_total_loss < best_val_loss:
+            best_val_loss = val_total_loss
             torch.save(model.state_dict(), str(_WEIGHTS_PATH))
-            print(f"[train]   ✓ saved best model (val_loss={val_loss:.2f}) → {_WEIGHTS_PATH}")
+            print(f"[train]   ✓ saved best model (val_loss={val_total_loss:.4f}) → {_WEIGHTS_PATH}")
 
     # ── Save loss curves ─────────────────────────────────────────────────────
     _LOSS_CSV.parent.mkdir(parents=True, exist_ok=True)
     with open(_LOSS_CSV, "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["epoch", "train_loss", "val_loss"])
+        w.writerow([
+            "epoch",
+            "train_loss", "train_value_loss", "train_policy_loss",
+            "val_loss",   "val_value_loss",   "val_policy_loss",
+        ])
         w.writerows(loss_rows)
 
-    print(f"[train] Training complete. Best val_loss={best_val_loss:.2f}")
+    print(f"[train] Training complete. Best val_loss={best_val_loss:.4f}")
     print(f"[train] Weights → {_WEIGHTS_PATH}")
     print(f"[train] Loss curves → {_LOSS_CSV}")
 

@@ -10,7 +10,49 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 
 **Phase 1 (UI polish) — complete.**
 **Phase 2 (classical engine) — complete and working.**
-**Phase 3 (neural network) — architecture and training pipeline ready; weights not yet trained.**
+**Phase 3 (neural network) — AlphaZero architecture complete; weights not yet trained.**
+
+All 5 AlphaZero architectural changes are implemented:
+- **`architecture.py`** — 21 input planes, 8 residual blocks, policy head (value + policy dual output)
+- **`dataset.py`** — `fen_to_tensor` outputs `(21, 8, 8)`; `encode_move` maps moves to AlphaZero's 4672-index space
+- **`train.py`** — dual loss: value MSE + 0.5 × policy soft cross-entropy
+- **`mcts.py`** — `MCTS` and `BatchedMCTS` with virtual loss; `search_with_policy` returns visit distribution π
+- **`selfplay.py`** — full AlphaZero self-play loop: game generation → replay buffer → train → checkpoint
+
+### Engine mode priority (updated)
+`TorchEngine` in `backend/app/engine/model.py` selects mode at startup:
+1. **mcts** — if `backend/models/torch_chess.pt` exists **and has a policy head** (trained weights)
+2. **neural** — if `torch_chess.pt` exists but has value head only (legacy weights)
+3. **classical** — minimax depth 4 with hand-crafted PST evaluation (current default)
+4. **stockfish** — external binary, last resort only
+
+### Training the neural network
+Two paths to produce `backend/models/torch_chess.pt`:
+
+**Option A — Supervised (faster start, ~2 hrs on CPU):**
+```bash
+# 1. Download a Lichess PGN (~15 GB, streams on the fly)
+python -m model_training.download --year 2024 --month 1 --out data/
+
+# 2. Label positions with classical engine (adds best_move column to CSV)
+python -m model_training.parse --pgn data/lichess_db_standard_rated_2024-01.pgn --out data/positions.csv
+
+# 3. Train (value + policy heads)
+python -m model_training.train --csv data/positions.csv
+
+# Quick smoke test (1000 positions):
+python -m model_training.parse --pgn data/lichess.pgn --out data/positions.csv --limit 1000
+```
+
+**Option B — Self-play (no external data needed, slower to converge):**
+```bash
+python -m model_training.selfplay                        # 50 iterations default
+python -m model_training.selfplay --iterations 100 --simulations 200
+python -m model_training.selfplay --resume               # continue from checkpoint
+```
+Checkpoints saved to `data/selfplay_checkpoints/`; best weights overwrite `models/torch_chess.pt` each iteration.
+
+**Recommended:** run supervised training first (Option A) to get a reasonable starting point, then fine-tune with self-play (Option B `--resume`).
 
 ### Running the app
 Both servers must be started manually before running Claude Code. Open two terminals:
@@ -26,13 +68,7 @@ npm run dev                          # Vite picks 5173
 
 - Backend: `http://localhost:8000` — healthcheck: `GET /healthz`
 - Frontend: `http://localhost:5173`
-- Engine: **classical minimax** (depth 4, PST eval) — Stockfish held as last-resort fallback
-
-### Engine mode priority
-`TorchEngine` in `backend/app/engine/model.py` selects mode at startup:
-1. **neural** — if `backend/models/torch_chess.pt` exists (not yet trained)
-2. **classical** — minimax depth 4 with hand-crafted PST evaluation (current default)
-3. **stockfish** — external binary, last resort only
+- Engine: **classical minimax** (depth 4, PST eval) — default until `torch_chess.pt` is trained
 
 ### Known issue — killing uvicorn on Windows
 **Do not use `taskkill` from within Claude Code's bash tool** — it cannot kill processes started in your own terminal session. Always use `Ctrl+C` in the terminal where uvicorn is running.
@@ -42,23 +78,6 @@ If port 8000 is stuck after a crash, run this in PowerShell (not from Claude):
 netstat -ano | findstr :8000        # find the PID
 taskkill /PID <pid> /F              # kill it
 ```
-
-### Next steps — train the neural network
-Run from `backend/` with venv active:
-```bash
-# 1. Download a Lichess games database (~15 GB, streams/decompresses on the fly)
-python -m model_training.download --year 2024 --month 1 --out data/
-
-# 2. Label 500k opening positions with the classical engine (depth 2, ~30 min)
-python -m model_training.parse --pgn data/lichess_db_standard_rated_2024-01.pgn --out data/positions.csv
-
-# 3. Train ChessNet (~1–2 hrs on CPU; saves to backend/models/torch_chess.pt)
-python -m model_training.train --csv data/positions.csv
-
-# Quick smoke test with only 1000 positions:
-python -m model_training.parse --pgn data/lichess.pgn --out data/positions.csv --limit 1000
-```
-Once `torch_chess.pt` exists, restarting uvicorn automatically switches the engine to `mode = "neural"`.
 
 ---
 

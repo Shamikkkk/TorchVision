@@ -13,7 +13,9 @@
       "Bash(cmd /c \"netstat -abn 2>nul | findstr -A 2 \\\\\":8000\\\\\"\")",
       "Bash(python C:/Users/shami/OneDrive/Documents/torch/tsv_tmp/parse.py)",
       "Bash(python:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(source venv/Scripts/activate)"
     ]
   }
 }
