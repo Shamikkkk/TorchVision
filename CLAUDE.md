@@ -11,8 +11,25 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 **Phase 1 (UI polish) — complete.**
 **Phase 2 (classical engine) — complete and working.**
 **Phase 3 (neural network) — AlphaZero architecture complete; weights not yet trained.**
+**Game Analyzer — complete.**
 
-All 5 AlphaZero architectural changes are implemented:
+### Completed features
+- Move classification system: brilliant(!!) / best(!) / good / book(📖) / inaccuracy(?!) / mistake(?) / blunder(??) / miss — shown in EnginePanel and MoveList after every human move
+- Randomized player color per game; board auto-flips; engine plays first when human is black
+- Opening book detection via hardcoded `frozenset` of common SAN sequences (`chess_utils/opening_book.py`)
+- **Game Analyzer tab** (`🔍 Analyze`):
+  - `GET /api/analyze/games/{username}` — fetches last 10 chess.com games
+  - `POST /api/analyze/game/stream` — SSE streaming Stockfish analysis (depth ~0.3s/move)
+  - Components: `GameList`, `AnalysisBoard`, `MoveClassification`, `AccuracySummary`, `AnalyzerPanel`
+  - Keyboard navigation (← / →), accuracy %, per-classification counts, colored board highlights
+
+### Pending (next steps, in order)
+1. **Rename engine to "Pyro"** — rename `TorchEngine` class and references throughout `backend/app/engine/`
+2. **Tal-style evaluation** — add aggression/attack bonuses to `evaluate.py` (reward piece activity, king attacks, open files toward enemy king)
+3. **Stream parse pipeline** — update `model_training/parse.py` to stream-parse large Lichess PGNs without loading into memory
+4. **Train** — run supervised training (Option A) then fine-tune with self-play (Option B)
+
+### AlphaZero architecture (all 5 changes implemented)
 - **`architecture.py`** — 21 input planes, 8 residual blocks, policy head (value + policy dual output)
 - **`dataset.py`** — `fen_to_tensor` outputs `(21, 8, 8)`; `encode_move` maps moves to AlphaZero's 4672-index space
 - **`train.py`** — dual loss: value MSE + 0.5 × policy soft cross-entropy
@@ -108,8 +125,10 @@ taskkill /PID <pid> /F              # kill it
 torch/
 ├── frontend/          # Vite + React app
 │   ├── src/
-│   │   ├── components/    # Board, Clock, EvalBar, MoveList, GameOverModal, etc.
-│   │   ├── hooks/         # useGameSocket (single source of truth for game state)
+│   │   ├── components/
+│   │   │   ├── analyzer/  # AnalyzerPanel, AnalysisBoard, GameList, MoveClassification, AccuracySummary
+│   │   │   └── ...        # Board, Clock, EvalBar, MoveList, EnginePanel, GameOverModal, etc.
+│   │   ├── hooks/         # useGameSocket, useAnalyzer
 │   │   ├── lib/           # sounds.ts, wsClient.ts, chess.ts
 │   │   └── types/         # game.ts
 │   ├── index.html
@@ -120,13 +139,15 @@ torch/
 │   ├── app/
 │   │   ├── main.py            # FastAPI app, lifespan, CORS, router registration
 │   │   ├── ws/                # WebSocket game loop + 5-minute chess clock
-│   │   ├── routes/            # REST endpoints (/api/suggest returns eval)
+│   │   ├── routes/            # REST endpoints (/api/suggest, /api/analyze/*)
 │   │   ├── engine/
 │   │   │   ├── model.py       # TorchEngine — mode selection, best_move() interface
 │   │   │   ├── evaluate.py    # Hand-crafted eval: material + PST tables
 │   │   │   ├── search.py      # Minimax + alpha-beta (eval_fn is a parameter)
 │   │   │   └── suggest.py     # Async wrapper (run_in_executor)
-│   │   └── chess_utils/       # python-chess helpers
+│   │   └── chess_utils/
+│   │       ├── board.py       # Helpers: uci_to_san, is_sacrifice, has_mate_in_one, san_history
+│   │       └── opening_book.py  # Hardcoded BOOK_LINES frozenset + is_book_move()
 │   ├── model_training/        # Standalone data pipeline + training scripts
 │   │   ├── engine_classical.py  # Wraps search.py for use as a labeller
 │   │   ├── download.py          # Stream-download Lichess PGN (zstd)

@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .engine.model import TorchEngine
+from .routes import analyze as analyze_routes
 from .routes import engine as engine_routes
 from .ws.handler import ws_game_endpoint
 
@@ -45,4 +46,5 @@ async def health():
 
 
 app.include_router(engine_routes.router, prefix="/api")
+app.include_router(analyze_routes.router, prefix="/api/analyze")
 app.add_api_websocket_route("/ws/game", ws_game_endpoint)
