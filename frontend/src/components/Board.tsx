@@ -22,8 +22,9 @@ const LIGHT_SQ_STYLE = { backgroundColor: LIGHT }
 const NOTATION_STYLE = { fontSize: '11px', fontWeight: '600', color: 'rgba(0,0,0,0.45)' }
 
 export default function Board({ game }: Props) {
-  const { fen, boardFlipped, makeMove, status, lastMove } = game
+  const { fen, boardFlipped, humanColor, turn, makeMove, status, lastMove } = game
   const gameOver = status !== 'ongoing'
+  const isHumanTurn = turn === humanColor
 
   const [selectedSq, setSelectedSq] = useState<Square | null>(null)
   const [highlightedSquares, setHighlightedSquares] = useState<Record<string, { backgroundColor: string }>>({})
@@ -113,7 +114,7 @@ export default function Board({ game }: Props) {
 
   function onSquareClick(sq: Square) {
     clearAnnotations()
-    if (gameOver) return
+    if (gameOver || !isHumanTurn) return
     if (selectedSq && legalTargets.includes(sq)) {
       const chess = new Chess(fen)
       const piece = chess.get(selectedSq)
@@ -133,7 +134,7 @@ export default function Board({ game }: Props) {
     }
     const chess = new Chess(fen)
     const piece = chess.get(sq)
-    if (piece && piece.color === chess.turn()) {
+    if (piece && piece.color === chess.turn() && piece.color === humanColor) {
       setSelectedSq(sq)
     } else {
       setSelectedSq(null)
@@ -155,7 +156,7 @@ export default function Board({ game }: Props) {
   // onPieceDrop is only called for non-promotion drags; promotions are handled
   // by onPromotionCheck → dialog → onPromotionPieceSelect.
   function onDrop(source: Square, target: Square): boolean {
-    if (gameOver) return false
+    if (gameOver || !isHumanTurn) return false
     clearAnnotations()
     sendMove(source, target)
     setSelectedSq(null)
@@ -175,7 +176,7 @@ export default function Board({ game }: Props) {
       showPromotionDialog={!!pendingPromotion}
       promotionToSquare={pendingPromotion?.to ?? null}
       boardOrientation={boardFlipped ? 'black' : 'white'}
-      arePiecesDraggable={!gameOver}
+      arePiecesDraggable={!gameOver && isHumanTurn}
       areArrowsAllowed
       customArrowColor={ARROW_COLOR}
       customDarkSquareStyle={DARK_SQ_STYLE}

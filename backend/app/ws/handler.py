@@ -1,9 +1,20 @@
 import asyncio
 import logging
+import random
 
+import chess as _chess
 from fastapi import WebSocket, WebSocketDisconnect
 
-from ..chess_utils.board import apply_move, game_state_dict, new_board
+from ..chess_utils.board import (
+    apply_move,
+    game_state_dict,
+    has_mate_in_one,
+    is_sacrifice,
+    new_board,
+    san_history,
+    uci_to_san,
+)
+from ..chess_utils.opening_book import is_book_move
 from ..engine.suggest import suggest_move
 from .manager import manager
 
@@ -12,8 +23,21 @@ logger = logging.getLogger(__name__)
 CLOCK_MS = 300_000  # 5 minutes per side
 
 
-def _state(board, resigned=False, white_ms=CLOCK_MS, black_ms=CLOCK_MS, winner=None):  # type: ignore[no-untyped-def]
-    d = {**game_state_dict(board, resigned=resigned), "white_ms": white_ms, "black_ms": black_ms}
+def _state(
+    board,  # type: ignore[no-untyped-def]
+    *,
+    resigned: bool = False,
+    white_ms: int = CLOCK_MS,
+    black_ms: int = CLOCK_MS,
+    winner: str | None = None,
+    human_color: str = "w",
+) -> dict:  # type: ignore[type-arg]
+    d = {
+        **game_state_dict(board, resigned=resigned),
+        "white_ms": white_ms,
+        "black_ms": black_ms,
+        "human_color": human_color,
+    }
     if winner is not None:
         d["status"] = "timeout"
         d["winner"] = winner
@@ -30,6 +54,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
     clock_started = False
     game_over = False
     tick_task: asyncio.Task | None = None  # type: ignore[type-arg]
+    human_color: str = random.choice(["w", "b"])
 
     async def run_clock() -> None:
         nonlocal white_ms, black_ms, game_over
@@ -48,12 +73,22 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
 
             if timed_out:
                 game_over = True
-                await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, winner=winner))
+                await manager.send(
+                    websocket,
+                    _state(board, white_ms=white_ms, black_ms=black_ms, winner=winner, human_color=human_color),
+                )
                 return
 
             await manager.send(websocket, {"type": "tick", "white_ms": white_ms, "black_ms": black_ms})
 
-    await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms))
+    # Send initial state
+    await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
+
+    # If human is black, engine plays the first move immediately
+    if human_color == "b":
+        engine_uci = await suggest_move(board.fen(), engine)
+        _, board = apply_move(board, engine_uci)
+        await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
 
     try:
         while True:
@@ -71,7 +106,13 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                 black_ms = CLOCK_MS
                 clock_started = False
                 tick_task = None
-                await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms))
+                human_color = random.choice(["w", "b"])
+                await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
+                # Engine plays first if human is black
+                if human_color == "b":
+                    engine_uci = await suggest_move(board.fen(), engine)
+                    _, board = apply_move(board, engine_uci)
+                    await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
                 continue
 
             if msg_type == "resign" and not board.is_game_over() and not resigned:
@@ -79,11 +120,18 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                 if tick_task and not tick_task.done():
                     tick_task.cancel()
                 resigned = True
-                await manager.send(websocket, _state(board, resigned=True, white_ms=white_ms, black_ms=black_ms))
+                await manager.send(websocket, _state(board, resigned=True, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
                 continue
 
             if msg_type == "move" and not board.is_game_over() and not resigned and not game_over:
                 uci: str = data.get("uci", "")
+
+                # Capture pre-move state for best_was analysis
+                pre_move_board = board.copy()
+                pre_move_fen = board.fen()
+                pre_move_history = san_history(pre_move_board)
+                human_san = uci_to_san(pre_move_board, uci)
+
                 ok, board = apply_move(board, uci)
                 if not ok:
                     await manager.send(websocket, {"type": "error", "message": f"Illegal move: {uci}"})
@@ -97,12 +145,72 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                     game_over = True
                     if tick_task and not tick_task.done():
                         tick_task.cancel()
-                    await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms))
+                    await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
                     continue
 
-                await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms))
+                await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
 
+                # Engine computes its move from post-human-move position (gives eval_after too)
                 engine_uci = await suggest_move(board.fen(), engine)
+                eval_after: float | None = engine.last_eval
+
+                # --- Move classification ---
+                if is_book_move(pre_move_history, human_san):
+                    classification = "book"
+                    symbol = "\U0001f4d6"  # 📖
+                    best_san = human_san
+                    cp_loss = 0
+                    is_best = True
+                else:
+                    # Analyse pre-move position
+                    missed_mate = has_mate_in_one(pre_move_board)
+                    best_uci = await suggest_move(pre_move_fen, engine)
+                    eval_before: float | None = engine.last_eval
+                    best_san = uci_to_san(pre_move_board, best_uci)
+                    is_best = (uci == best_uci)
+
+                    # cp_loss is always positive and from human's perspective
+                    if eval_before is not None and eval_after is not None:
+                        if human_color == "w":
+                            cp_loss = max(0, int(eval_before - eval_after))
+                        else:
+                            cp_loss = max(0, int(eval_after - eval_before))
+                    else:
+                        cp_loss = 0
+
+                    human_move_obj = _chess.Move.from_uci(uci)
+                    if missed_mate:
+                        classification = "miss"
+                        symbol = "missed #"
+                    elif is_best and is_sacrifice(pre_move_board, human_move_obj) and cp_loss < 10:
+                        classification = "brilliant"
+                        symbol = "!!"
+                    elif is_best:
+                        classification = "best"
+                        symbol = "!"
+                    elif cp_loss <= 20:
+                        classification = "good"
+                        symbol = ""
+                    elif cp_loss <= 50:
+                        classification = "inaccuracy"
+                        symbol = "?!"
+                    elif cp_loss <= 150:
+                        classification = "mistake"
+                        symbol = "?"
+                    else:
+                        classification = "blunder"
+                        symbol = "??"
+
+                await manager.send(websocket, {
+                    "type": "best_was",
+                    "classification": classification,
+                    "human_move": human_san,
+                    "best_move": best_san,
+                    "cp_loss": cp_loss,
+                    "is_best": is_best,
+                    "symbol": symbol,
+                })
+
                 _, board = apply_move(board, engine_uci)
 
                 if board.is_game_over():
@@ -110,7 +218,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                     if tick_task and not tick_task.done():
                         tick_task.cancel()
 
-                await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms))
+                await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
 
     except WebSocketDisconnect:
         game_over = True

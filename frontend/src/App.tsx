@@ -56,7 +56,10 @@ export default function App() {
     capturedPieces,
     evalScore,
     evalMove,
+    bestWas,
+    moveSymbols,
     boardFlipped,
+    humanColor,
     materialAdv,
     newGame,
   } = game
@@ -84,9 +87,14 @@ export default function App() {
   return (
     <div className="min-h-screen bg-zinc-900 text-white flex flex-col items-center justify-center p-6 gap-4">
       {/* Title */}
-      <p className="text-zinc-500 text-xs font-semibold uppercase tracking-widest select-none">
-        ♟ Torch Chess
-      </p>
+      <div className="flex items-center gap-3">
+        <p className="text-zinc-500 text-xs font-semibold uppercase tracking-widest select-none">
+          ♟ Torch Chess
+        </p>
+        <span className="text-zinc-600 text-xs select-none">
+          Playing as {humanColor === 'w' ? 'White' : 'Black'}
+        </span>
+      </div>
 
       <div className="flex gap-4 items-start">
         {/* Eval bar — same height as board column */}
@@ -145,8 +153,8 @@ export default function App() {
           className="flex flex-col gap-3 rounded-2xl border border-zinc-700/50 bg-zinc-900 p-4"
           style={{ width: 280 }}
         >
-          <MoveList history={history} />
-          <EnginePanel evalMove={evalMove} evalScore={evalScore} />
+          <MoveList history={history} moveSymbols={moveSymbols} />
+          <EnginePanel evalMove={evalMove} evalScore={evalScore} bestWas={bestWas} />
           <Controls game={game} />
         </div>
       </div>

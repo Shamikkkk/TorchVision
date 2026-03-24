@@ -12,6 +12,7 @@ export interface StateMessage {
   white_ms: number
   black_ms: number
   winner?: Side
+  human_color?: Side
 }
 
 export interface TickMessage {
@@ -25,7 +26,17 @@ export interface ErrorMessage {
   message: string
 }
 
-export type ServerMessage = StateMessage | TickMessage | ErrorMessage
+export interface BestWasMessage {
+  type: 'best_was'
+  classification: 'brilliant' | 'best' | 'good' | 'inaccuracy' | 'mistake' | 'blunder' | 'miss' | 'book'
+  human_move: string
+  best_move: string
+  cp_loss: number
+  is_best: boolean
+  symbol: string
+}
+
+export type ServerMessage = StateMessage | TickMessage | ErrorMessage | BestWasMessage
 
 export interface MovePayload {
   type: 'move'
@@ -59,12 +70,15 @@ export interface GameState {
   history: string[]
   lastMove: string | null
   boardFlipped: boolean
+  humanColor: Side
   white_ms: number
   black_ms: number
   winner: Side | null
   capturedPieces: CapturedPieces
   evalScore: number | null
   evalMove: string | null
+  bestWas: BestWasMessage | null
+  moveSymbols: Record<number, string>
   makeMove: (uci: string) => void
   newGame: () => void
   resign: () => void

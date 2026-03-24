@@ -15,7 +15,8 @@
       "Bash(python:*)",
       "Bash(npx tsc:*)",
       "Bash(npm run:*)",
-      "Bash(source venv/Scripts/activate)"
+      "Bash(source venv/Scripts/activate)",
+      "Bash(echo \"exit: $?\")"
     ]
   }
 }

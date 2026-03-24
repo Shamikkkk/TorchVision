@@ -3,6 +3,7 @@ import { Chess } from 'chess.js'
 import type { Square } from 'chess.js'
 import { WsClient } from '../lib/wsClient'
 import type {
+  BestWasMessage,
   CapturedPieces,
   GameState,
   GameStatus,
@@ -96,12 +97,16 @@ export function useGameSocket(): ExtendedGameState {
   const [history, setHistory] = useState<string[]>([])
   const [lastMove, setLastMove] = useState<string | null>(null)
   const [boardFlipped, setBoardFlipped] = useState(false)
+  const [humanColor, setHumanColor] = useState<Side>('w')
   const [white_ms, setWhiteMs] = useState(CLOCK_MS)
   const [black_ms, setBlackMs] = useState(CLOCK_MS)
   const [winner, setWinner] = useState<Side | null>(null)
   const [capturedPieces, setCapturedPieces] = useState<CapturedPieces>({ byWhite: [], byBlack: [] })
   const [evalScore, setEvalScore] = useState<number | null>(null)
   const [evalMove, setEvalMove] = useState<string | null>(null)
+  const [bestWas, setBestWas] = useState<BestWasMessage | null>(null)
+  const [moveSymbols, setMoveSymbols] = useState<Record<number, string>>({})
+  const historyLenRef = useRef(0)
 
   const evalAbortRef = useRef<AbortController | null>(null)
 
@@ -133,17 +138,36 @@ export function useGameSocket(): ExtendedGameState {
         return
       }
       if (msg.type === 'state') {
+        const sanHistory = ensureSanHistory(msg.history)
+        historyLenRef.current = sanHistory.length
         chessRef.current.load(msg.fen)
         setFen(msg.fen)
         setTurn(msg.turn)
         setStatus(msg.status)
-        setHistory(ensureSanHistory(msg.history))
+        setHistory(sanHistory)
         setLastMove(msg.last_move)
         setWhiteMs(msg.white_ms)
         setBlackMs(msg.black_ms)
         setWinner(msg.winner ?? null)
         setCapturedPieces(computeCaptured(msg.fen))
         if (msg.status === 'ongoing') fetchEval(msg.fen)
+        // Auto-flip board to human's perspective when a new game starts (empty history)
+        if (msg.human_color) {
+          setHumanColor(msg.human_color)
+          if (sanHistory.length <= 1) {
+            // 0 = initial state before engine move; 1 = after engine's first move (human=black)
+            setBoardFlipped(msg.human_color === 'b')
+          }
+        }
+      }
+      if (msg.type === 'best_was') {
+        setBestWas(msg)
+        if (msg.symbol) {
+          const idx = historyLenRef.current - 1
+          if (idx >= 0) {
+            setMoveSymbols(prev => ({ ...prev, [idx]: msg.symbol }))
+          }
+        }
       }
     },
     [fetchEval],
@@ -163,6 +187,8 @@ export function useGameSocket(): ExtendedGameState {
   const newGame = useCallback(() => {
     setEvalScore(null)
     setEvalMove(null)
+    setBestWas(null)
+    setMoveSymbols({})
     wsRef.current?.send({ type: 'new_game' })
   }, [])
 
@@ -179,12 +205,15 @@ export function useGameSocket(): ExtendedGameState {
     history,
     lastMove,
     boardFlipped,
+    humanColor,
     white_ms,
     black_ms,
     winner,
     capturedPieces,
     evalScore,
     evalMove,
+    bestWas,
+    moveSymbols,
     makeMove,
     newGame,
     resign,
