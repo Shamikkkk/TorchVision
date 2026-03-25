@@ -132,3 +132,178 @@ def evaluate(board: chess.Board) -> int:
         else:
             score -= val
     return score
+
+
+# ---------------------------------------------------------------------------
+# Tal-style evaluation
+# ---------------------------------------------------------------------------
+
+TAL_AGGRESSION: float = 1.5
+
+_ATTACK_BONUS: dict[int, int] = {
+    chess.QUEEN:  40,
+    chess.ROOK:   25,
+    chess.BISHOP: 20,
+    chess.KNIGHT: 20,
+    chess.PAWN:   10,
+}
+
+
+def _king_attack_bonus(board: chess.Board, color: chess.Color) -> float:
+    """Bonus for pieces of *color* that attack squares in the enemy king zone."""
+    enemy = not color
+    king_sq = board.king(enemy)
+    if king_sq is None:
+        return 0.0
+    kf = chess.square_file(king_sq)
+    kr = chess.square_rank(king_sq)
+
+    # 3×3 zone around the enemy king
+    zone = {
+        chess.square(f, r)
+        for f in range(max(0, kf - 1), min(8, kf + 2))
+        for r in range(max(0, kr - 1), min(8, kr + 2))
+    }
+
+    # Unique (square, piece_type) pairs that attack any zone square
+    attackers: set[tuple[int, int]] = set()
+    for zone_sq in zone:
+        for sq in board.attackers(color, zone_sq):
+            piece = board.piece_at(sq)
+            if piece:
+                attackers.add((sq, piece.piece_type))
+
+    if not attackers:
+        return 0.0
+    total = sum(_ATTACK_BONUS.get(pt, 0) for _, pt in attackers)
+    return float(total * len(attackers))
+
+
+def _open_file_bonus(board: chess.Board, color: chess.Color) -> float:
+    """Bonus for open/semi-open files near the enemy king."""
+    enemy = not color
+    king_sq = board.king(enemy)
+    if king_sq is None:
+        return 0.0
+    kf = chess.square_file(king_sq)
+
+    bonus = 0.0
+    for f in range(max(0, kf - 1), min(8, kf + 2)):
+        mask = chess.BB_FILES[f]
+        own_pawn   = bool(board.pieces(chess.PAWN, color)   & mask)
+        enemy_pawn = bool(board.pieces(chess.PAWN, not color) & mask)
+        if not own_pawn and not enemy_pawn:
+            bonus += 50.0   # fully open
+        elif not own_pawn:
+            bonus += 30.0   # semi-open (attacker has no pawn here)
+    return bonus
+
+
+def _pawn_storm_bonus(board: chess.Board, color: chess.Color) -> float:
+    """Bonus for pawns of *color* storming the enemy king's flank."""
+    enemy = not color
+    king_sq = board.king(enemy)
+    if king_sq is None:
+        return 0.0
+    kf = chess.square_file(king_sq)
+
+    bonus = 0.0
+    for sq in board.pieces(chess.PAWN, color):
+        f = chess.square_file(sq)
+        if abs(f - kf) > 2:
+            continue
+        r = chess.square_rank(sq)
+        rank = r if color == chess.WHITE else (7 - r)
+        if rank == 4:    # 5th rank
+            bonus += 20.0
+        elif rank == 5:  # 6th rank
+            bonus += 35.0
+    return bonus
+
+
+def _piece_activity_bonus(board: chess.Board, color: chess.Color) -> float:
+    """Bonus for active, aggressive piece placement."""
+    enemy = not color
+    king_sq = board.king(enemy)
+    seventh_rank_idx = 6 if color == chess.WHITE else 1
+
+    bonus = 0.0
+    for sq, piece in board.piece_map().items():
+        if piece.color != color:
+            continue
+        r = chess.square_rank(sq)
+        rank = r if color == chess.WHITE else (7 - r)
+
+        if piece.piece_type == chess.KNIGHT and rank in (4, 5):
+            bonus += 15.0
+        elif piece.piece_type == chess.ROOK and r == seventh_rank_idx:
+            bonus += 25.0
+        elif piece.piece_type == chess.QUEEN and king_sq is not None:
+            if chess.square_distance(sq, king_sq) <= 3:
+                bonus += 30.0
+    return bonus
+
+
+def _king_safety_penalty(board: chess.Board, color: chess.Color) -> float:
+    """Bonus for *color* based on the enemy king's lack of safety."""
+    enemy = not color
+    king_sq = board.king(enemy)
+    if king_sq is None:
+        return 0.0
+    kf = chess.square_file(king_sq)
+    kr = chess.square_rank(king_sq)
+
+    bonus = 0.0
+
+    # Pawn shield: rank immediately in front of the enemy king
+    shield_rank = (kr + 1) if enemy == chess.WHITE else (kr - 1)
+    if 0 <= shield_rank <= 7:
+        shield_sqs = [
+            chess.square(f, shield_rank)
+            for f in range(max(0, kf - 1), min(8, kf + 2))
+        ]
+        pawn_count = sum(
+            1 for s in shield_sqs
+            if (p := board.piece_at(s)) and p.piece_type == chess.PAWN and p.color == enemy
+        )
+        if pawn_count == 0:
+            bonus += 50.0
+
+    # King stuck in center after losing castling rights
+    if kf in (3, 4):
+        if not (board.has_kingside_castling_rights(enemy) or
+                board.has_queenside_castling_rights(enemy)):
+            bonus += 60.0
+
+    return bonus
+
+
+def _tal_bonuses(board: chess.Board) -> float:
+    """Net Tal-style bonus from White's perspective."""
+    def _side(color: chess.Color) -> float:
+        return (
+            _king_attack_bonus(board, color)
+            + _open_file_bonus(board, color)
+            + _pawn_storm_bonus(board, color)
+            + _piece_activity_bonus(board, color)
+            + _king_safety_penalty(board, color)
+        )
+    return _side(chess.WHITE) - _side(chess.BLACK)
+
+
+def tal_style_eval(board: chess.Board) -> int:
+    """
+    Tal-style evaluation: PST base + aggression bonuses × TAL_AGGRESSION.
+
+    Rewards attacking the enemy king, open files toward it, pawn storms,
+    active pieces, and penalises an unsafe enemy king.
+    """
+    base = evaluate(board)
+    if base in (INF, -INF):
+        return base  # don't dilute mate scores
+    return int(base + _tal_bonuses(board) * TAL_AGGRESSION)
+
+
+def hand_crafted_eval(board: chess.Board) -> int:
+    """Alias for the plain PST evaluator (used by the fine-tuning script)."""
+    return evaluate(board)

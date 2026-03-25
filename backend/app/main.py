@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .engine.model import TorchEngine
+from .engine.model import PyroEngine
 from .routes import analyze as analyze_routes
 from .routes import engine as engine_routes
 from .ws.handler import ws_game_endpoint
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    engine = TorchEngine(settings.stockfish_path)
+    engine = PyroEngine(settings.stockfish_path)
     app.state.engine = engine
     logger.info("Engine ready (mode: %s)", engine.mode)
     print("Registered routes:")

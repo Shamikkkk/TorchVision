@@ -92,7 +92,7 @@ export default function App() {
       <div className="flex flex-col items-center gap-3">
         <div className="flex items-center gap-3">
           <p className="text-zinc-500 text-xs font-semibold uppercase tracking-widest select-none">
-            ♟ Torch Chess
+            ♟ Pyro Chess
           </p>
           {activeTab === 'play' && (
             <span className="text-zinc-600 text-xs select-none">

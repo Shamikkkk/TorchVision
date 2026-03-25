@@ -1,5 +1,5 @@
 """
-TorchEngine — chess engine with four modes in priority order:
+PyroEngine — chess engine with four modes in priority order:
 
   1. mcts      — MCTS guided by ChessNet policy + value heads
                  (activated when torch_chess.pt contains a policy head)
@@ -34,7 +34,7 @@ _CP_SCALE        = 2000.0   # centipawns → [-1, 1] for MCTS value normalisatio
 _MCTS_SIMS       = 200      # simulations per move in MCTS mode
 
 
-class TorchEngine:
+class PyroEngine:
     """
     Unified chess engine.  The ``best_move(fen)`` interface is stable across
     all modes so the rest of the application never needs to change.
@@ -58,15 +58,10 @@ class TorchEngine:
                     from .mcts import BatchedMCTS
                     self._mcts = BatchedMCTS(self, num_simulations=_MCTS_SIMS)
                     self.mode  = "mcts"
-                    logger.info(
-                        "MCTS engine ready (%d sims, weights: %s)",
-                        _MCTS_SIMS, _WEIGHTS_PATH,
-                    )
+                    logger.info("Pyro ready — Tal neural mode 🔥 (MCTS, %d sims)", _MCTS_SIMS)
                 else:
                     self.mode = "neural"
-                    logger.info(
-                        "Neural engine ready (minimax depth 4, weights: %s)", _WEIGHTS_PATH
-                    )
+                    logger.info("Pyro ready — Tal neural mode 🔥 (minimax depth 4)")
                 return
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -75,7 +70,7 @@ class TorchEngine:
 
         # --- Priority 3: classical (always works) ---
         self.mode = "classical"
-        logger.info("Classical engine ready (minimax depth 4, hand-crafted PST eval)")
+        logger.info("Pyro ready — Tal style, depth 4")
 
         # Probe Stockfish so we know if it's available as a last resort.
         try:

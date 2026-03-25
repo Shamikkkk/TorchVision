@@ -1,77 +1,91 @@
 """
-Parse a Lichess PGN file into a CSV of (fen, eval_centipawns) pairs.
+Parse a Lichess PGN file into a CSV of (fen, eval_cp, best_move) rows.
+
+Accepts both plain .pgn files and compressed .pgn.zst files.
+When given a .zst file the decompressor streams on the fly — the full
+decompressed PGN is never written to disk.
 
 For each game:
   - Skip if either player's rating < MIN_ELO (default 2000)
   - Replay the first MAX_OPENING_MOVES moves (default 15)
-  - Label each unique FEN with our classical engine at LABEL_DEPTH (default 2)
-  - Write to CSV: fen,eval
+  - Label each unique FEN with the classical engine at LABEL_DEPTH (default 2)
+  - Write to CSV: fen, eval_cp, best_move
 
 Usage (from backend/):
-    # Quick test with 1000 positions:
-    python -m model_training.parse --pgn data/lichess.pgn --out data/positions.csv --limit 1000
-
-    # Full run:
+    # Plain PGN:
     python -m model_training.parse --pgn data/lichess.pgn --out data/positions.csv
 
-Output CSV columns: fen, eval_cp
+    # Compressed (stream-decompressed, no disk writes):
+    python -m model_training.parse --pgn data/lichess_db_standard_rated_2024-01.pgn.zst \\
+        --out data/positions.csv --limit 1000
 """
 
 import argparse
 import csv
+import io
 import sys
 import time
 from pathlib import Path
 
 import chess
 import chess.pgn
+import zstandard as zstd
 
 from .engine_classical import best_move_with_eval
 
 MIN_ELO           = 2000
 MAX_OPENING_MOVES = 15
-LABEL_DEPTH       = 2   # depth-2 ≈ 1000 positions/sec in Python
+LABEL_DEPTH       = 2       # depth-2 ≈ 1000 positions/sec in Python
 TARGET_POSITIONS  = 500_000
-REPORT_EVERY      = 5_000  # print progress every N positions
+REPORT_EVERY      = 5_000   # print progress every N positions
 
 
 def _player_elo(game: chess.pgn.Game, color: str) -> int:
-    """Return the Elo of the given color ('White'/'Black'), or 0 if missing."""
     try:
         return int(game.headers.get(color + "Elo", "0"))
     except ValueError:
         return 0
 
 
+def _open_pgn_stream(pgn_path: Path) -> io.TextIOBase:
+    """Return a text-mode stream for *pgn_path*, decompressing .zst on the fly."""
+    if pgn_path.suffix == ".zst":
+        raw = open(pgn_path, "rb")
+        dctx = zstd.ZstdDecompressor()
+        zst_reader = dctx.stream_reader(raw, read_size=1 << 16, closefd=True)
+        return io.TextIOWrapper(zst_reader, encoding="utf-8", errors="replace")
+    return open(pgn_path, encoding="utf-8", errors="replace")
+
+
 def parse(pgn_path: Path, out_path: Path, limit: int) -> None:
     seen_fens: set[str] = set()
-    count = 0
+    positions = 0
     games_read = 0
     t0 = time.monotonic()
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(pgn_path, encoding="utf-8", errors="replace") as pgn_fh, \
+    with _open_pgn_stream(pgn_path) as pgn_fh, \
          open(out_path, "w", newline="", encoding="utf-8") as csv_fh:
 
         writer = csv.writer(csv_fh)
         writer.writerow(["fen", "eval_cp", "best_move"])
 
-        while count < limit:
+        while positions < limit:
             game = chess.pgn.read_game(pgn_fh)
             if game is None:
                 break
             games_read += 1
 
-            # Quality filter
-            if _player_elo(game, "White") < MIN_ELO or _player_elo(game, "Black") < MIN_ELO:
+            if (_player_elo(game, "White") < MIN_ELO or
+                    _player_elo(game, "Black") < MIN_ELO):
                 continue
 
             board = game.board()
             moves_played = 0
 
             for move in game.mainline_moves():
-                if moves_played >= MAX_OPENING_MOVES:
+                if moves_played >= MAX_OPENING_MOVES or positions >= limit:
                     break
                 board.push(move)
                 moves_played += 1
@@ -86,32 +100,31 @@ def parse(pgn_path: Path, out_path: Path, limit: int) -> None:
 
                 uci, score = best_move_with_eval(fen, depth=LABEL_DEPTH)
                 writer.writerow([fen, f"{score:.1f}", uci])
-                count += 1
+                positions += 1
 
-                if count % REPORT_EVERY == 0:
+                if positions % REPORT_EVERY == 0:
                     elapsed = time.monotonic() - t0
-                    rate = count / elapsed
-                    remaining = (limit - count) / rate if rate > 0 else float("inf")
+                    rate = positions / elapsed if elapsed > 0 else 0
+                    remaining = (limit - positions) / rate if rate > 0 else float("inf")
                     print(
-                        f"[parse] {count:,} positions | {games_read:,} games | "
-                        f"{rate:.0f} pos/s | ~{remaining/60:.1f} min remaining",
+                        f"[parse] {positions:,} positions | {games_read:,} games | "
+                        f"{rate:.0f} pos/s | ~{remaining / 60:.1f} min remaining",
                         flush=True,
                     )
 
-                if count >= limit:
-                    break
-
     elapsed = time.monotonic() - t0
     print(
-        f"[parse] Done. {count:,} positions from {games_read:,} games "
-        f"in {elapsed/60:.1f} min → {out_path}"
+        f"[parse] Done. {positions:,} positions from {games_read:,} games "
+        f"in {elapsed / 60:.1f} min → {out_path}"
     )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Label chess positions from a PGN file.")
+    parser = argparse.ArgumentParser(
+        description="Label chess positions from a PGN file (.pgn or .pgn.zst)."
+    )
     parser.add_argument("--pgn",   type=Path, required=True,
-                        help="Input PGN file (plain text, not compressed)")
+                        help="Input PGN file (.pgn or .pgn.zst)")
     parser.add_argument("--out",   type=Path, default=Path("data/positions.csv"),
                         help="Output CSV path")
     parser.add_argument("--limit", type=int,  default=TARGET_POSITIONS,
@@ -119,7 +132,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if not args.pgn.exists():
-        print(f"[parse] ERROR: PGN file not found: {args.pgn}", file=sys.stderr)
+        print(f"[parse] ERROR: file not found: {args.pgn}", file=sys.stderr)
         sys.exit(1)
 
     parse(args.pgn, args.out, args.limit)

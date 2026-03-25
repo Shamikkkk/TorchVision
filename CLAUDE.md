@@ -22,10 +22,17 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
   - `POST /api/analyze/game/stream` — SSE streaming Stockfish analysis (depth ~0.3s/move)
   - Components: `GameList`, `AnalysisBoard`, `MoveClassification`, `AccuracySummary`, `AnalyzerPanel`
   - Keyboard navigation (← / →), accuracy %, per-classification counts, colored board highlights
+- **Tal-style evaluation** (`app/engine/evaluate.py`):
+  - `tal_style_eval` = PST base + Tal bonuses × 1.5 aggression multiplier
+  - Bonuses: king attack (per-piece × attacker count), open files toward enemy king, pawn storm, piece activity, enemy king safety
+  - `tal_style_eval` is the default eval function in `search.py`
+  - Tactical depth extension: captures and checks search one ply deeper (no depth reduction)
+- **Tal fine-tuning** (`model_training/finetune_tal.py`):
+  - Parses `data/Tal.pgn`, labels positions with `tal_style_eval`
+  - Weighted sampling: sacrifice × 3, king attack × 2, normal × 1
+  - Fine-tunes existing `torch_chess.pt` with lr=1e-4, 20 epochs; backs up prior weights
 
 ### Pending (next steps, in order)
-1. **Rename engine to "Pyro"** — rename `TorchEngine` class and references throughout `backend/app/engine/`
-2. **Tal-style evaluation** — add aggression/attack bonuses to `evaluate.py` (reward piece activity, king attacks, open files toward enemy king)
 3. **Stream parse pipeline** — update `model_training/parse.py` to stream-parse large Lichess PGNs without loading into memory
 4. **Train** — run supervised training (Option A) then fine-tune with self-play (Option B)
 
@@ -37,7 +44,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 - **`selfplay.py`** — full AlphaZero self-play loop: game generation → replay buffer → train → checkpoint
 
 ### Engine mode priority (updated)
-`TorchEngine` in `backend/app/engine/model.py` selects mode at startup:
+`PyroEngine` in `backend/app/engine/model.py` selects mode at startup:
 1. **mcts** — if `backend/models/torch_chess.pt` exists **and has a policy head** (trained weights)
 2. **neural** — if `torch_chess.pt` exists but has value head only (legacy weights)
 3. **classical** — minimax depth 4 with hand-crafted PST evaluation (current default)
@@ -47,17 +54,33 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 Two paths to produce `backend/models/torch_chess.pt`:
 
 **Option A — Supervised (faster start, ~2 hrs on CPU):**
+
+Recommended: use `stream_parse` to go straight from network to CSV with nothing written to disk:
 ```bash
-# 1. Download a Lichess PGN (~15 GB, streams on the fly)
+# One-shot: HTTP stream → zstd decompressor → PGN parser → CSV (no PGN on disk)
+python -m model_training.stream_parse \
+    --year 2024 --month 1 \
+    --out data/positions.csv \
+    --limit 500000
+
+# Then train:
+python -m model_training.train --csv data/positions.csv
+```
+
+Alternatively download first then parse:
+```bash
+# 1. Download compressed archive (~1–3 GB, .zst kept on disk)
 python -m model_training.download --year 2024 --month 1 --out data/
 
-# 2. Label positions with classical engine (adds best_move column to CSV)
-python -m model_training.parse --pgn data/lichess_db_standard_rated_2024-01.pgn --out data/positions.csv
+# 2. Parse .zst directly (stream-decompressed, no full PGN written to disk)
+python -m model_training.parse \
+    --pgn data/lichess_db_standard_rated_2024-01.pgn.zst \
+    --out data/positions.csv
 
-# 3. Train (value + policy heads)
+# 3. Train
 python -m model_training.train --csv data/positions.csv
 
-# Quick smoke test (1000 positions):
+# Quick smoke test (1000 positions from a local .pgn or .pgn.zst):
 python -m model_training.parse --pgn data/lichess.pgn --out data/positions.csv --limit 1000
 ```
 
@@ -70,6 +93,13 @@ python -m model_training.selfplay --resume               # continue from checkpo
 Checkpoints saved to `data/selfplay_checkpoints/`; best weights overwrite `models/torch_chess.pt` each iteration.
 
 **Recommended:** run supervised training first (Option A) to get a reasonable starting point, then fine-tune with self-play (Option B `--resume`).
+
+**Option C — Tal fine-tuning (Tal-style personality; run after A or B):**
+```bash
+# data/Tal.pgn already exists in the repo
+python -m model_training.finetune_tal --pgn data/Tal.pgn
+```
+Backs up existing weights to `models/tal_finetuned_backup.pt` before overwriting.
 
 ### Running the app
 Both servers must be started manually before running Claude Code. Open two terminals:
@@ -141,7 +171,7 @@ torch/
 │   │   ├── ws/                # WebSocket game loop + 5-minute chess clock
 │   │   ├── routes/            # REST endpoints (/api/suggest, /api/analyze/*)
 │   │   ├── engine/
-│   │   │   ├── model.py       # TorchEngine — mode selection, best_move() interface
+│   │   │   ├── model.py       # PyroEngine — mode selection, best_move() interface
 │   │   │   ├── evaluate.py    # Hand-crafted eval: material + PST tables
 │   │   │   ├── search.py      # Minimax + alpha-beta (eval_fn is a parameter)
 │   │   │   └── suggest.py     # Async wrapper (run_in_executor)
@@ -150,11 +180,13 @@ torch/
 │   │       └── opening_book.py  # Hardcoded BOOK_LINES frozenset + is_book_move()
 │   ├── model_training/        # Standalone data pipeline + training scripts
 │   │   ├── engine_classical.py  # Wraps search.py for use as a labeller
-│   │   ├── download.py          # Stream-download Lichess PGN (zstd)
-│   │   ├── parse.py             # PGN → (FEN, eval_cp) CSV
+│   │   ├── download.py          # Download Lichess .pgn.zst (compressed only, no decompress)
+│   │   ├── parse.py             # .pgn or .pgn.zst → (FEN, eval_cp) CSV (streams .zst)
+│   │   ├── stream_parse.py      # HTTP stream → zstd → PGN → CSV (nothing written to disk)
 │   │   ├── dataset.py           # PyTorch Dataset + FEN→tensor encoding
 │   │   ├── architecture.py      # ChessNet: stem + 4 ResBlocks + MLP head (~1.3M params)
-│   │   └── train.py             # Training loop, saves torch_chess.pt
+│   │   ├── train.py             # Training loop, saves torch_chess.pt
+│   │   └── finetune_tal.py      # Fine-tune on Tal's games with Tal-style weighting
 │   ├── models/            # torch_chess.pt saved here after training
 │   ├── requirements.txt
 │   └── pyproject.toml

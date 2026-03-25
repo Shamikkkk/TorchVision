@@ -12,7 +12,7 @@ from __future__ import annotations
 import chess
 from typing import Callable
 
-from .evaluate import evaluate, INF
+from .evaluate import tal_style_eval, evaluate, INF
 
 EvalFn = Callable[[chess.Board], "int | float"]
 
@@ -55,8 +55,10 @@ def _minimax(
     if maximizing:  # White's turn — maximise score
         best: float = float("-inf")
         for move in _order_moves(board):
+            is_tactical = board.is_capture(move) or board.gives_check(move)
             board.push(move)
-            score, _ = _minimax(board, depth - 1, alpha, beta, False, eval_fn)
+            next_depth = depth if is_tactical else depth - 1
+            score, _ = _minimax(board, next_depth, alpha, beta, False, eval_fn)
             board.pop()
             if score > best:
                 best, best_move = score, move
@@ -68,8 +70,10 @@ def _minimax(
     else:  # Black's turn — minimise score
         best = float("inf")
         for move in _order_moves(board):
+            is_tactical = board.is_capture(move) or board.gives_check(move)
             board.push(move)
-            score, _ = _minimax(board, depth - 1, alpha, beta, True, eval_fn)
+            next_depth = depth if is_tactical else depth - 1
+            score, _ = _minimax(board, next_depth, alpha, beta, True, eval_fn)
             board.pop()
             if score < best:
                 best, best_move = score, move
@@ -82,7 +86,7 @@ def _minimax(
 def best_move(
     fen: str,
     depth: int = _DEFAULT_DEPTH,
-    eval_fn: EvalFn = evaluate,
+    eval_fn: EvalFn = tal_style_eval,
 ) -> tuple[str, float]:
     """
     Return ``(uci_move, centipawn_score)`` for the best move at ``depth``.

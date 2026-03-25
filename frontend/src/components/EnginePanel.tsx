@@ -83,8 +83,9 @@ export default function EnginePanel({ evalMove, evalScore, bestWas }: Props) {
 
   return (
     <div className="rounded-xl border border-zinc-700/50 overflow-hidden">
-      <div className="px-3 py-2 text-xs font-semibold text-zinc-500 uppercase tracking-widest border-b border-zinc-700">
-        Engine
+      <div className="px-3 py-2 border-b border-zinc-700">
+        <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Pyro</div>
+        <div className="text-xs text-zinc-600">Tal Style ⚔️</div>
       </div>
 
       {/* Section 1 — Last Move Analysis */}
