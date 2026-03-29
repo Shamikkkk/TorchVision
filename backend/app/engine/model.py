@@ -23,6 +23,7 @@ from stockfish import Stockfish, StockfishException
 
 from .evaluate import tal_style_eval
 from .opening_book import book as _opening_book
+from .tablebase import tablebase as _tablebase
 from . import search as _search
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,11 @@ class PyroEngine:
             self.mode = "classical"
 
         logger.info("Pyro ready — Tal style 🔥 (minimax depth %d, book loaded)", _MINIMAX_DEPTH)
+
+        if _tablebase.available:
+            logger.info("Tablebase: loaded ✅")
+        else:
+            logger.info("Tablebase: not loaded (place Syzygy .rtbw files in data/syzygy/)")
 
         # Probe Stockfish so we know if it's available as a last resort.
         try:
@@ -203,6 +209,14 @@ class PyroEngine:
         legal = list(board.legal_moves)
         if not legal:
             return ""
+
+        # Priority 0: Tablebase (perfect endgame play)
+        if len(board.piece_map()) <= 6:
+            tb_move = _tablebase.best_move(board)
+            if tb_move:
+                self.last_eval = 0.0
+                logger.debug("Tablebase move: %s", tb_move.uci())
+                return tb_move.uci()
 
         # Priority 1: opening book
         book_move = _opening_book.get_move(board)
