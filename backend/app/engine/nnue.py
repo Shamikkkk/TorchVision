@@ -114,7 +114,7 @@ class NNUEModel(nn.Module):
 # Evaluator
 # ---------------------------------------------------------------------------
 
-_CP_SCALE = 600.0
+_CP_SCALE = 1500.0
 
 
 class NNUEEvaluator:
@@ -201,7 +201,7 @@ class NNUEEvaluator:
         score = self._numpy_forward(stm, opp)
         # Model output is STM-perspective; convert to White-positive centipawns
         cp = score * _CP_SCALE
-        return cp if board.turn == chess.WHITE else -cp
+        return -cp if board.turn == chess.WHITE else cp
 
 
 # ---------------------------------------------------------------------------

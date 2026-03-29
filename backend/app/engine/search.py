@@ -50,6 +50,73 @@ def _order_moves(board: chess.Board) -> list[chess.Move]:
     return captures + quiets
 
 
+_QS_DEPTH_LIMIT = 4   # max capture-chain depth to prevent explosion
+
+
+def _quiescence(
+    board: chess.Board,
+    alpha: float,
+    beta: float,
+    maximizing: bool,
+    eval_fn: EvalFn,
+    deadline: float,
+    qs_depth: int = 0,
+) -> float:
+    """
+    Quiescence search — extends depth-0 nodes by searching captures only.
+
+    Prevents the horizon effect: a position that looks good at depth 0 may
+    have a hanging piece that gets taken on the next move.  The stand-pat
+    score lets the side-to-move choose not to capture if the position is
+    already good enough.
+
+    ``qs_depth`` counts how many capture plies deep we are; capped at
+    ``_QS_DEPTH_LIMIT`` to prevent infinite capture chains.
+    """
+    if time.monotonic() >= deadline:
+        raise _TimeUp
+
+    stand_pat: float = eval_fn(board)
+
+    if qs_depth >= _QS_DEPTH_LIMIT:
+        return stand_pat
+
+    if maximizing:
+        if stand_pat >= beta:
+            return beta
+        alpha = max(alpha, stand_pat)
+        best = stand_pat
+        for move in board.generate_pseudo_legal_captures():
+            if not board.is_legal(move):
+                continue
+            board.push(move)
+            score = _quiescence(board, alpha, beta, False, eval_fn, deadline, qs_depth + 1)
+            board.pop()
+            if score > best:
+                best = score
+            alpha = max(alpha, score)
+            if alpha >= beta:
+                break
+        return best
+    else:
+        if stand_pat <= alpha:
+            return alpha
+        beta = min(beta, stand_pat)
+        best = stand_pat
+        for move in board.generate_pseudo_legal_captures():
+            if not board.is_legal(move):
+                continue
+            board.push(move)
+            score = _quiescence(board, alpha, beta, True, eval_fn, deadline, qs_depth + 1)
+            board.pop()
+            if score < best:
+                best = score
+            beta = min(beta, score)
+            if alpha >= beta:
+                break
+        return best
+
+
 def _minimax(
     board: chess.Board,
     depth: int,
@@ -75,8 +142,10 @@ def _minimax(
         if cached_depth >= depth:
             return cached_score, cached_move
 
-    if depth == 0 or board.is_game_over():
+    if board.is_game_over():
         return eval_fn(board), None
+    if depth == 0:
+        return _quiescence(board, alpha, beta, maximizing, eval_fn, deadline), None
 
     best_move: chess.Move | None = None
 
@@ -127,6 +196,9 @@ def best_move(
     board = chess.Board(fen)
     legal = list(board.legal_moves)
     if not legal:
+        return "", 0.0
+
+    if board.is_repetition(2):
         return "", 0.0
 
     _tt.clear()
