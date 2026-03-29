@@ -10,7 +10,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 
 **Phase 1 (UI polish) — complete.**
 **Phase 2 (classical engine) — complete and working.**
-**Phase 3 (neural network) — AlphaZero architecture complete; weights not yet trained.**
+**Phase 3 (neural network) — NNUE trained; disabled in search pending scaling fix.**
 **Game Analyzer — complete.**
 
 ### Completed features
@@ -25,30 +25,55 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 - **Tal-style evaluation** (`app/engine/evaluate.py`):
   - `tal_style_eval` = PST base + Tal bonuses × 1.5 aggression multiplier
   - Bonuses: king attack (per-piece × attacker count), open files toward enemy king, pawn storm, piece activity, enemy king safety
+  - Opening bonuses: +80cp castling rights on home square, −60cp early queen development (before move 10)
   - `tal_style_eval` is the default eval function in `search.py`
-  - Tactical depth extension: captures and checks search one ply deeper (no depth reduction)
+- **Grandmaster opening book** (`app/engine/opening_book.py`):
+  - Parses Tal, Kasparov, Fischer, Carlsen PGNs at startup
+  - Records first 15 half-moves per game; weighted random selection (min freq 3)
+  - FEN key strips move counters so transpositions match
+- **Syzygy tablebase** (`app/engine/tablebase.py`):
+  - 290 files, 3-4-5 piece, ~1 GB — stored in `backend/data/syzygy/`
+  - `TablebaseProber`: probes WDL then DTZ; skips if >6 pieces or castling rights present
+  - Download script: `backend/data/syzygy/download_syzygy.py`
+- **Transposition table** (`app/engine/search.py`):
+  - Module-level `_tt` dict (1M entry cap); keyed on `board.fen()`
+  - Lookup before search, store after; cleared at start of each `best_move()` call
 - **Tal fine-tuning** (`model_training/finetune_tal.py`):
   - Parses `data/Tal.pgn`, labels positions with `tal_style_eval`
   - Weighted sampling: sacrifice × 3, king attack × 2, normal × 1
   - Fine-tunes existing `torch_chess.pt` with lr=1e-4, 20 epochs; backs up prior weights
+- **Premoves** (`frontend/src/components/Board.tsx`):
+  - State: `premove {from, to}` + `premoveSq` (piece selected during engine's turn)
+  - Red-orange highlight (`rgba(220,50,50,0.65)`) on queued premove squares
+  - Executes on `[fen, isHumanTurn]` effect — validates legality first, silently clears if illegal
+  - Right-click anywhere clears the premove; new game / game over clears automatically
+  - Auto-promotes to queen; smoothness issues to revisit
 
-### Pending (next steps, in order)
-3. **Stream parse pipeline** — update `model_training/parse.py` to stream-parse large Lichess PGNs without loading into memory
-4. **Train** — run supervised training (Option A) then fine-tune with self-play (Option B)
+### NNUE status (trained; disabled)
+- `models/nnue_deep_backup.pt` — 497,998 positions, Stockfish depth-12 labels, best val loss = 0.0305
+- **Currently disabled** in search: `eval_fn = tal_style_eval` hardcoded in `backend/app/engine/model.py`
+- **Root cause**: NNUE outputs small floats (~0–50 cp range); `tal_style_eval` returns large ints (±500 cp). The two scales are incompatible — search compares them incorrectly when mixed.
+- **Fix**: multiply `_nnue.evaluate()` output by 600 before passing to search (output is in normalized units, × 600 = centipawns), OR normalize `tal_style_eval` to the same range.
 
-### AlphaZero architecture (all 5 changes implemented)
-- **`architecture.py`** — 21 input planes, 8 residual blocks, policy head (value + policy dual output)
-- **`dataset.py`** — `fen_to_tensor` outputs `(21, 8, 8)`; `encode_move` maps moves to AlphaZero's 4672-index space
-- **`train.py`** — dual loss: value MSE + 0.5 × policy soft cross-entropy
-- **`mcts.py`** — `MCTS` and `BatchedMCTS` with virtual loss; `search_with_policy` returns visit distribution π
-- **`selfplay.py`** — full AlphaZero self-play loop: game generation → replay buffer → train → checkpoint
+### Next session TODO (in order)
+1. Fix NNUE scaling (× 600 in `nnue.py` or in `model.py` wrapper) and re-enable in search
+2. Replace `/api/suggest` eval bar with Stockfish eval + move suggestions
+3. Fix premove smoothness
+4. Phase 5: Download Alekhine/Shirov/Nezhmetdinov PGNs, retrain base model
 
-### Engine mode priority (updated)
-`PyroEngine` in `backend/app/engine/model.py` selects mode at startup:
-1. **mcts** — if `backend/models/torch_chess.pt` exists **and has a policy head** (trained weights)
-2. **neural** — if `torch_chess.pt` exists but has value head only (legacy weights)
-3. **classical** — minimax depth 4 with hand-crafted PST evaluation (current default)
-4. **stockfish** — external binary, last resort only
+### Engine move priority (runtime)
+`PyroEngine.best_move()` in `backend/app/engine/model.py`:
+0. **Syzygy tablebase** — ≤6 pieces, no castling rights → perfect play
+1. **Opening book** — grandmaster PGN positions, first 15 moves, freq ≥ 3
+2. **Minimax depth 4** — alpha-beta + transposition table + `tal_style_eval` (current default)
+3. **Stockfish** — external binary, last resort only
+
+### Engine startup mode (weights)
+`PyroEngine.__init__` selects eval mode:
+1. **mcts** — if `backend/models/torch_chess.pt` exists **and has a policy head**
+2. **neural** — if `torch_chess.pt` exists with value head only
+3. **classical** — `tal_style_eval` PST (current default, always available)
+4. **stockfish** — last resort
 
 ### Training the neural network
 Two paths to produce `backend/models/torch_chess.pt`:
@@ -171,12 +196,15 @@ torch/
 │   │   ├── ws/                # WebSocket game loop + 5-minute chess clock
 │   │   ├── routes/            # REST endpoints (/api/suggest, /api/analyze/*)
 │   │   ├── engine/
-│   │   │   ├── model.py       # PyroEngine — mode selection, best_move() interface
-│   │   │   ├── evaluate.py    # Hand-crafted eval: material + PST tables
-│   │   │   ├── search.py      # Minimax + alpha-beta (eval_fn is a parameter)
-│   │   │   └── suggest.py     # Async wrapper (run_in_executor)
+│   │   │   ├── model.py         # PyroEngine — mode selection, best_move() interface
+│   │   │   ├── evaluate.py      # Hand-crafted eval: material + PST + Tal bonuses + opening penalties
+│   │   │   ├── search.py        # Minimax + alpha-beta + transposition table (eval_fn is a parameter)
+│   │   │   ├── opening_book.py  # Grandmaster PGN book — weighted random move selection
+│   │   │   ├── tablebase.py     # Syzygy tablebase prober (WDL+DTZ, ≤6 pieces)
+│   │   │   ├── nnue.py          # NNUE eval wrapper (768→256→32→32→1)
+│   │   │   └── suggest.py       # Async wrapper (run_in_executor)
 │   │   └── chess_utils/
-│   │       ├── board.py       # Helpers: uci_to_san, is_sacrifice, has_mate_in_one, san_history
+│   │       ├── board.py         # Helpers: uci_to_san, is_sacrifice, has_mate_in_one, san_history
 │   │       └── opening_book.py  # Hardcoded BOOK_LINES frozenset + is_book_move()
 │   ├── model_training/        # Standalone data pipeline + training scripts
 │   │   ├── engine_classical.py  # Wraps search.py for use as a labeller
@@ -187,7 +215,12 @@ torch/
 │   │   ├── architecture.py      # ChessNet: stem + 4 ResBlocks + MLP head (~1.3M params)
 │   │   ├── train.py             # Training loop, saves torch_chess.pt
 │   │   └── finetune_tal.py      # Fine-tune on Tal's games with Tal-style weighting
-│   ├── models/            # torch_chess.pt saved here after training
+│   ├── models/            # torch_chess.pt, nnue.pt saved here after training
+│   ├── data/
+│   │   ├── syzygy/        # Syzygy 3-4-5 piece tablebase files (.rtbw/.rtbz) — ~1 GB
+│   │   │   └── download_syzygy.py  # Script to download tablebase files
+│   │   ├── Tal.pgn / Kasparov.pgn / Fischer.pgn / Carlsen.pgn  # Grandmaster PGNs
+│   │   └── positions_sf_deep.csv   # 497,998 positions labeled by Stockfish depth=12
 │   ├── requirements.txt
 │   └── pyproject.toml
 └── CLAUDE.md

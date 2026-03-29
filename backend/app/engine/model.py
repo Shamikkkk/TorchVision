@@ -22,6 +22,7 @@ import chess
 from stockfish import Stockfish, StockfishException
 
 from .evaluate import tal_style_eval
+from .nnue import nnue as _nnue
 from .opening_book import book as _opening_book
 from .tablebase import tablebase as _tablebase
 from . import search as _search
@@ -226,7 +227,8 @@ class PyroEngine:
             return book_move
 
         if self.mode in ("classical", "neural"):
-            uci, score = _search.best_move(fen, depth=_MINIMAX_DEPTH, eval_fn=tal_style_eval)
+            eval_fn = tal_style_eval  # TODO: re-enable _nnue.evaluate once scaling is fixed
+            uci, score = _search.best_move(fen, depth=_MINIMAX_DEPTH, eval_fn=eval_fn)
             self.last_eval = score
             return uci
 

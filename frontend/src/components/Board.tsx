@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Chessboard } from 'react-chessboard'
 import type { Square } from 'chess.js'
 import { Chess } from 'chess.js'
@@ -14,6 +14,7 @@ const DARK = '#B58863'
 const LAST_MOVE_COLOR = 'rgba(246,246,105,0.5)'
 const SELECTED_COLOR = 'rgba(32,178,170,0.5)'
 const HIGHLIGHT_COLOR = 'rgba(255, 170, 0, 0.8)'
+const PREMOVE_COLOR = 'rgba(220, 50, 50, 0.65)'
 const ARROW_COLOR = 'rgb(255, 170, 0)'
 
 // Module-level constants so these object references never change between renders.
@@ -29,6 +30,42 @@ export default function Board({ game }: Props) {
   const [selectedSq, setSelectedSq] = useState<Square | null>(null)
   const [highlightedSquares, setHighlightedSquares] = useState<Record<string, { backgroundColor: string }>>({})
   const [pendingPromotion, setPendingPromotion] = useState<{ from: Square; to: Square } | null>(null)
+  const [premove, setPremove] = useState<{ from: Square; to: Square } | null>(null)
+  const [premoveSq, setPremoveSq] = useState<Square | null>(null)
+
+  // Clear premove on new game (humanColor is reset by the server on each new game).
+  useEffect(() => {
+    setPremove(null)
+    setPremoveSq(null)
+  }, [humanColor])
+
+  // Clear premove when game ends.
+  useEffect(() => {
+    if (gameOver) {
+      setPremove(null)
+      setPremoveSq(null)
+    }
+  }, [gameOver])
+
+  // Execute the queued premove as soon as the engine responds and it becomes the human's turn.
+  useEffect(() => {
+    if (!isHumanTurn || !premove || gameOver) return
+    const chess = new Chess(fen)
+    const isLegal = chess.moves({ verbose: true }).some(
+      (m) => m.from === premove.from && m.to === premove.to,
+    )
+    if (isLegal) {
+      const result = chess.move({ from: premove.from, to: premove.to, promotion: 'q' })
+      if (result) {
+        if (result.captured) playCapture()
+        else playMove()
+        if (result.san.includes('+')) playCheck()
+      }
+      makeMove(`${premove.from}${premove.to}`)
+    }
+    // Whether legal or not, consume the premove.
+    setPremove(null)
+  }, [fen, isHumanTurn]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const lastMoveSqs = useMemo(() => {
     const sqs: Record<string, { backgroundColor: string }> = {}
@@ -65,9 +102,20 @@ export default function Board({ game }: Props) {
     return dots
   }, [legalTargets])
 
+  // Orange-red highlight for the queued premove squares and the "from" square being selected.
+  const premoveHighlights = useMemo(() => {
+    const sqs: Record<string, { backgroundColor: string }> = {}
+    if (premoveSq) sqs[premoveSq] = { backgroundColor: PREMOVE_COLOR }
+    if (premove) {
+      sqs[premove.from] = { backgroundColor: PREMOVE_COLOR }
+      sqs[premove.to]   = { backgroundColor: PREMOVE_COLOR }
+    }
+    return sqs
+  }, [premoveSq, premove])
+
   const customSquareStyles = useMemo(
-    () => ({ ...lastMoveSqs, ...selectedHighlight, ...legalDots, ...highlightedSquares }),
-    [lastMoveSqs, selectedHighlight, legalDots, highlightedSquares],
+    () => ({ ...lastMoveSqs, ...selectedHighlight, ...legalDots, ...highlightedSquares, ...premoveHighlights }),
+    [lastMoveSqs, selectedHighlight, legalDots, highlightedSquares, premoveHighlights],
   )
 
   function clearAnnotations() {
@@ -114,7 +162,37 @@ export default function Board({ game }: Props) {
 
   function onSquareClick(sq: Square) {
     clearAnnotations()
-    if (gameOver || !isHumanTurn) return
+    if (gameOver) return
+
+    // --- Premove selection (while engine is thinking) ---
+    if (!isHumanTurn) {
+      if (premoveSq) {
+        if (sq === premoveSq) {
+          // Clicking the same piece deselects.
+          setPremoveSq(null)
+        } else {
+          const chess = new Chess(fen)
+          const piece = chess.get(sq)
+          if (piece && piece.color === humanColor) {
+            // Clicked another own piece — re-select as the new from-square.
+            setPremoveSq(sq)
+          } else {
+            // Any other square is the premove destination.
+            setPremove({ from: premoveSq, to: sq })
+            setPremoveSq(null)
+          }
+        }
+      } else {
+        const chess = new Chess(fen)
+        const piece = chess.get(sq)
+        if (piece && piece.color === humanColor) {
+          setPremoveSq(sq)
+        }
+      }
+      return
+    }
+
+    // --- Normal move (human's turn) ---
     if (selectedSq && legalTargets.includes(sq)) {
       const chess = new Chess(fen)
       const piece = chess.get(selectedSq)
@@ -142,6 +220,9 @@ export default function Board({ game }: Props) {
   }
 
   function onSquareRightClick(sq: Square) {
+    // Right-click clears any queued premove.
+    setPremove(null)
+    setPremoveSq(null)
     setHighlightedSquares((prev) => {
       const next = { ...prev }
       if (next[sq]) {
