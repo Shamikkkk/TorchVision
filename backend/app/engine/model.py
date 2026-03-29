@@ -36,7 +36,7 @@ _WEIGHTS_PATH = Path(__file__).resolve().parent.parent.parent / "models" / "torc
 _BACKEND_DIR = str(Path(__file__).resolve().parent.parent.parent)
 
 _CP_SCALE        = 2000.0   # centipawns → [-1, 1] for MCTS value normalisation
-_MINIMAX_DEPTH   = 6
+_MINIMAX_DEPTH   = 4
 
 
 class PyroEngine:
@@ -71,7 +71,7 @@ class PyroEngine:
         if not hasattr(self, "mode"):
             self.mode = "classical"
 
-        logger.info("Pyro ready — NNUE 🧠 (minimax depth %d, book loaded)", _MINIMAX_DEPTH)
+        logger.info("Pyro ready — Tal style 🔥 (minimax depth %d, book loaded)", _MINIMAX_DEPTH)
 
         if _tablebase.available:
             logger.info("Tablebase: loaded ✅")
@@ -227,7 +227,7 @@ class PyroEngine:
             return book_move
 
         if self.mode in ("classical", "neural"):
-            eval_fn = _nnue.evaluate if _nnue.available else tal_style_eval
+            eval_fn = tal_style_eval
             uci, score = _search.best_move(fen, depth=_MINIMAX_DEPTH, eval_fn=eval_fn)
             self.last_eval = score
             return uci
