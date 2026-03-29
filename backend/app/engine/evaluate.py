@@ -291,19 +291,73 @@ def _tal_bonuses(board: chess.Board) -> float:
     return _side(chess.WHITE) - _side(chess.BLACK)
 
 
+def _castling_bonus(board: chess.Board) -> float:
+    """
+    +80cp for each side that still has castling rights with king on its start square.
+    Net is from White's perspective.
+    """
+    bonus = 0.0
+    if (board.king(chess.WHITE) == chess.E1 and
+            (board.has_kingside_castling_rights(chess.WHITE) or
+             board.has_queenside_castling_rights(chess.WHITE))):
+        bonus += 80.0
+    if (board.king(chess.BLACK) == chess.E8 and
+            (board.has_kingside_castling_rights(chess.BLACK) or
+             board.has_queenside_castling_rights(chess.BLACK))):
+        bonus -= 80.0
+    return bonus
+
+
+def _queen_early_penalty(board: chess.Board) -> float:
+    """
+    -60cp if a side moves its queen before move 10.
+    Detected by queen not being on its home square (d1/d8).
+    Net is from White's perspective.
+    """
+    if board.fullmove_number >= 10:
+        return 0.0
+    penalty = 0.0
+    white_queens = board.pieces(chess.QUEEN, chess.WHITE)
+    if white_queens and chess.D1 not in white_queens:
+        penalty -= 60.0
+    black_queens = board.pieces(chess.QUEEN, chess.BLACK)
+    if black_queens and chess.D8 not in black_queens:
+        penalty += 60.0
+    return penalty
+
+
 def tal_style_eval(board: chess.Board) -> int:
     """
-    Tal-style evaluation: PST base + aggression bonuses × TAL_AGGRESSION.
-
-    Rewards attacking the enemy king, open files toward it, pawn storms,
-    active pieces, and penalises an unsafe enemy king.
+    Tal-style evaluation: PST base + aggression bonuses × TAL_AGGRESSION
+    + opening principles (castling rights, no early queen).
     """
     base = evaluate(board)
     if base in (INF, -INF):
         return base  # don't dilute mate scores
-    return int(base + _tal_bonuses(board) * TAL_AGGRESSION)
+    opening = _castling_bonus(board) + _queen_early_penalty(board)
+    return int(base + _tal_bonuses(board) * TAL_AGGRESSION + opening)
 
 
 def hand_crafted_eval(board: chess.Board) -> int:
     """Alias for the plain PST evaluator (used by the fine-tuning script)."""
     return evaluate(board)
+
+
+# ---------------------------------------------------------------------------
+# NNUE-backed eval (with Tal-style fallback)
+# ---------------------------------------------------------------------------
+
+def nnue_eval(board: chess.Board) -> float:
+    """
+    Primary eval function for minimax search.
+
+    Uses the trained NNUE network when weights are available, falls back to
+    Tal-style PST evaluation otherwise.  The fallback means the engine is
+    always functional even before nnue.pt is trained.
+    """
+    from .nnue import nnue  # imported here to avoid a circular import at module load
+
+    result = nnue.evaluate(board)
+    if result is not None:
+        return result
+    return tal_style_eval(board)

@@ -133,9 +133,12 @@ class ChessDataset(Dataset[tuple[tuple[Tensor, Tensor], float, int]]):
     def __len__(self) -> int:
         return len(self._data)
 
-    def __getitem__(self, idx: int) -> tuple[tuple[Tensor, Tensor], float, int]:
+    def __getitem__(self, idx: int) -> tuple[tuple[Tensor, Tensor], float, int] | None:
         fen, score, uci = self._data[idx]
-        board_t  = fen_to_tensor(fen)
-        scalar_t = torch.tensor(fen_to_scalars(fen), dtype=torch.float32)
-        move_idx = encode_move(chess.Move.from_uci(uci))
+        try:
+            board_t  = fen_to_tensor(fen)
+            scalar_t = torch.tensor(fen_to_scalars(fen), dtype=torch.float32)
+            move_idx = encode_move(chess.Move.from_uci(uci))
+        except Exception:
+            return None
         return (board_t, scalar_t), score, move_idx

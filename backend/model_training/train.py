@@ -39,8 +39,20 @@ POLICY_LOSS_WEIGHT = 0.5      # total_loss = value_loss + weight * policy_loss
 
 
 def collate(batch):  # type: ignore[no-untyped-def]
-    """Custom collate to handle ((board, scalar), score, move_idx) tuples."""
-    (boards, scalars), scores, move_indices = zip(*batch)
+    """Custom collate to handle ((board, scalar), score, move_idx) tuples.
+
+    Filters out None items returned by ChessDataset.__getitem__ when
+    encode_move fails on an invalid UCI string.
+    """
+    batch = [item for item in batch if item is not None]
+    if not batch:
+        return None
+    # __getitem__ returns ((board_t, scalar_t), score, move_idx).
+    # Flatten to (board_t, scalar_t, score, move_idx) before zipping so the
+    # nested tuple doesn't confuse zip's unpacking.
+    boards, scalars, scores, move_indices = zip(*[
+        (b, s, sc, mi) for (b, s), sc, mi in batch
+    ])
     return (
         torch.stack(boards),
         torch.stack(scalars),
@@ -52,6 +64,8 @@ def collate(batch):  # type: ignore[no-untyped-def]
 def train(csv_path: Path) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[train] Device: {device}")
+    if torch.cuda.is_available():
+        print(f"[train] GPU: {torch.cuda.get_device_name(0)}")
 
     # ── Dataset split ────────────────────────────────────────────────────────
     full_ds = ChessDataset(csv_path)
@@ -78,7 +92,7 @@ def train(csv_path: Path) -> None:
     criterion_policy = nn.CrossEntropyLoss()
     optimiser = torch.optim.Adam(model.parameters(), lr=LR_INIT)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimiser, factor=LR_FACTOR, patience=LR_PATIENCE, verbose=True
+        optimiser, factor=LR_FACTOR, patience=LR_PATIENCE
     )
 
     # ── Training loop ────────────────────────────────────────────────────────
@@ -92,7 +106,10 @@ def train(csv_path: Path) -> None:
         train_value_loss = 0.0
         train_policy_loss = 0.0
 
-        for boards, scalars, value_targets, policy_targets in train_loader:
+        for batch in train_loader:
+            if batch is None:
+                continue
+            boards, scalars, value_targets, policy_targets = batch
             boards         = boards.to(device)
             scalars        = scalars.to(device)
             value_targets  = value_targets.to(device)
@@ -121,7 +138,10 @@ def train(csv_path: Path) -> None:
         val_value_loss = 0.0
         val_policy_loss = 0.0
         with torch.no_grad():
-            for boards, scalars, value_targets, policy_targets in val_loader:
+            for batch in val_loader:
+                if batch is None:
+                    continue
+                boards, scalars, value_targets, policy_targets = batch
                 boards         = boards.to(device)
                 scalars        = scalars.to(device)
                 value_targets  = value_targets.to(device)

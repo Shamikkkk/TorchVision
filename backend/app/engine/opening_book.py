@@ -1,0 +1,123 @@
+"""
+Opening book built from grandmaster PGN collections.
+
+Parses the first 15 moves of each game from Tal, Kasparov, Fischer, and
+Carlsen PGN files and records move frequencies per position.  The book is
+loaded once at module import so lookup is a pure dict hit at runtime.
+"""
+
+from __future__ import annotations
+
+import logging
+import random
+from pathlib import Path
+
+import chess
+import chess.pgn
+
+logger = logging.getLogger(__name__)
+
+# backend/data/ relative to this file (app/engine/ → app/ → backend/)
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+
+_PGN_FILES = [
+    _DATA_DIR / "Tal.pgn",
+    _DATA_DIR / "Kasparov.pgn",
+    _DATA_DIR / "Fischer.pgn",
+    _DATA_DIR / "Carlsen.pgn",
+]
+
+_OPENING_DEPTH   = 15   # record only the first N half-moves of each game
+_MIN_FREQUENCY   = 3    # moves seen fewer than this many times are ignored
+
+
+class OpeningBook:
+    def __init__(self) -> None:
+        # {position_key: {uci_move: frequency}}
+        self._book: dict[str, dict[str, int]] = {}
+        self._load()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _fen_key(board: chess.Board) -> str:
+        """Position key: pieces + active color + castling rights + en-passant.
+
+        Drops the half-move clock and full-move number so transpositions
+        that reach the same position via different move-counts still match.
+        """
+        parts = board.fen().split()
+        return " ".join(parts[:4])
+
+    def _load(self) -> None:
+        positions = 0
+        total_moves = 0
+        for pgn_path in _PGN_FILES:
+            if not pgn_path.exists():
+                logger.debug("Opening book: skipping missing file %s", pgn_path)
+                continue
+            games = 0
+            with open(pgn_path, encoding="utf-8", errors="ignore") as f:
+                while True:
+                    game = chess.pgn.read_game(f)
+                    if game is None:
+                        break
+                    board = game.board()
+                    for i, move in enumerate(game.mainline_moves()):
+                        if i >= _OPENING_DEPTH:
+                            break
+                        key = self._fen_key(board)
+                        uci = move.uci()
+                        if key not in self._book:
+                            self._book[key] = {}
+                            positions += 1
+                        self._book[key][uci] = self._book[key].get(uci, 0) + 1
+                        board.push(move)
+                        total_moves += 1
+                    games += 1
+            logger.debug("Opening book: loaded %d games from %s", games, pgn_path.name)
+
+        logger.info(
+            "Opening book ready — %d positions, %d moves from %d PGN files",
+            positions, total_moves, sum(1 for p in _PGN_FILES if p.exists()),
+        )
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    def get_move(self, board: chess.Board) -> str | None:
+        """Return a weighted-random book move or ``None`` if out of book.
+
+        Moves seen fewer than ``_MIN_FREQUENCY`` times are excluded to
+        avoid rare/dubious lines.  The chosen move is always verified
+        against the board's legal moves before being returned.
+        """
+        key = self._fen_key(board)
+        if key not in self._book:
+            return None
+
+        candidates = {
+            m: f for m, f in self._book[key].items() if f >= _MIN_FREQUENCY
+        }
+        if not candidates:
+            return None
+
+        # Weighted random selection
+        total = sum(candidates.values())
+        r = random.randint(0, total - 1)
+        for uci, freq in candidates.items():
+            r -= freq
+            if r < 0:
+                try:
+                    move = chess.Move.from_uci(uci)
+                    if move in board.legal_moves:
+                        return uci
+                except ValueError:
+                    pass
+        return None
+
+
+book = OpeningBook()

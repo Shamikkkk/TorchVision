@@ -146,7 +146,9 @@ class TalDataset(Dataset):  # type: ignore[type-arg]
 
 
 def _collate(batch):  # type: ignore[no-untyped-def]
-    (boards, scalars), targets, weights = zip(*batch)
+    boards, scalars, targets, weights = zip(*[
+        (b, s, t, w) for (b, s), t, w in batch
+    ])
     return (
         torch.stack(boards),
         torch.stack(scalars),
@@ -158,6 +160,8 @@ def _collate(batch):  # type: ignore[no-untyped-def]
 def finetune(pgn_path: str) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[tal] Device: {device}")
+    if torch.cuda.is_available():
+        print(f"[tal] GPU: {torch.cuda.get_device_name(0)}")
 
     print(f"[tal] Parsing {pgn_path}…")
     all_positions = parse_tal_games(pgn_path)

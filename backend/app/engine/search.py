@@ -1,22 +1,39 @@
 """
-Minimax search with alpha-beta pruning.
+Minimax search with alpha-beta pruning and iterative deepening.
 
 The search is colour-agnostic: White maximises, Black minimises.
 ``eval_fn`` is a plug-in — pass hand_crafted_eval for Phase 1,
 a neural-network callable for Phase 4.  The function signature is:
     eval_fn(board: chess.Board) -> int | float   (centipawns, White-positive)
+
+Iterative deepening: best_move() runs depth 1 → target depth, stopping
+early if the 5-second time limit is exceeded.  Each completed depth
+overwrites the result, so we always return the deepest fully-searched move.
 """
 
 from __future__ import annotations
 
-import chess
+import logging
+import time
 from typing import Callable
 
-from .evaluate import tal_style_eval, evaluate, INF
+import chess
+
+from .evaluate import tal_style_eval, INF
+
+logger = logging.getLogger(__name__)
 
 EvalFn = Callable[[chess.Board], "int | float"]
 
 _DEFAULT_DEPTH = 4
+_TIME_LIMIT    = 5.0   # seconds; iterative deepening stops if this is exceeded
+
+_tt: dict[str, tuple[float, int, chess.Move | None]] = {}
+_TT_MAX_SIZE = 1_000_000
+
+
+class _TimeUp(Exception):
+    """Raised internally to unwind the search tree when the deadline is hit."""
 
 
 def _order_moves(board: chess.Board) -> list[chess.Move]:
@@ -27,7 +44,7 @@ def _order_moves(board: chess.Board) -> list[chess.Move]:
     first raises alpha / lowers beta quickly and prunes more branches.
     """
     captures: list[chess.Move] = []
-    quiets: list[chess.Move] = []
+    quiets:   list[chess.Move] = []
     for move in board.legal_moves:
         (captures if board.is_capture(move) else quiets).append(move)
     return captures + quiets
@@ -40,13 +57,24 @@ def _minimax(
     beta: float,
     maximizing: bool,
     eval_fn: EvalFn,
+    deadline: float,
 ) -> tuple[float, chess.Move | None]:
     """
     Returns (score, best_move).
 
     score is from White's perspective throughout the tree.
     best_move is None at leaf nodes (no move was made).
+    Raises _TimeUp when the wall-clock deadline is exceeded.
     """
+    if time.monotonic() >= deadline:
+        raise _TimeUp
+
+    fen_key = board.fen()
+    if fen_key in _tt:
+        cached_score, cached_depth, cached_move = _tt[fen_key]
+        if cached_depth >= depth:
+            return cached_score, cached_move
+
     if depth == 0 or board.is_game_over():
         return eval_fn(board), None
 
@@ -55,32 +83,30 @@ def _minimax(
     if maximizing:  # White's turn — maximise score
         best: float = float("-inf")
         for move in _order_moves(board):
-            is_tactical = board.is_capture(move) or board.gives_check(move)
             board.push(move)
-            next_depth = depth if is_tactical else depth - 1
-            score, _ = _minimax(board, next_depth, alpha, beta, False, eval_fn)
+            score, _ = _minimax(board, depth - 1, alpha, beta, False, eval_fn, deadline)
             board.pop()
             if score > best:
                 best, best_move = score, move
             alpha = max(alpha, score)
             if alpha >= beta:
-                break  # β cut-off: Black already has a better option elsewhere
-        return best, best_move
-
+                break  # β cut-off
     else:  # Black's turn — minimise score
         best = float("inf")
         for move in _order_moves(board):
-            is_tactical = board.is_capture(move) or board.gives_check(move)
             board.push(move)
-            next_depth = depth if is_tactical else depth - 1
-            score, _ = _minimax(board, next_depth, alpha, beta, True, eval_fn)
+            score, _ = _minimax(board, depth - 1, alpha, beta, True, eval_fn, deadline)
             board.pop()
             if score < best:
                 best, best_move = score, move
             beta = min(beta, score)
             if alpha >= beta:
-                break  # α cut-off: White already has a better option elsewhere
-        return best, best_move
+                break  # α cut-off
+
+    if len(_tt) >= _TT_MAX_SIZE:
+        _tt.clear()
+    _tt[fen_key] = (best, depth, best_move)
+    return best, best_move
 
 
 def best_move(
@@ -91,6 +117,10 @@ def best_move(
     """
     Return ``(uci_move, centipawn_score)`` for the best move at ``depth``.
 
+    Uses iterative deepening (depth 1 → target depth) with a 5-second time
+    limit.  Each completed depth updates the result; if time runs out mid-
+    search the last fully-completed depth's move is returned.
+
     Score is from White's perspective (positive = White better).
     Falls back to the first legal move if the position is game-over.
     """
@@ -99,17 +129,36 @@ def best_move(
     if not legal:
         return "", 0.0
 
-    score, move = _minimax(
-        board,
-        depth,
-        float("-inf"),
-        float("inf"),
-        board.turn == chess.WHITE,
-        eval_fn,
+    _tt.clear()
+
+    logger.debug("Search starting depth=%d fen=%s", depth, fen[:40])
+    start    = time.monotonic()
+    deadline = start + _TIME_LIMIT
+
+    # Seed with first legal move — guarantees a valid result even if depth 1
+    # is interrupted before completing its first iteration.
+    best_uci   = legal[0].uci()
+    best_score = 0.0
+
+    for d in range(1, depth + 1):
+        try:
+            score, move = _minimax(
+                board, d,
+                float("-inf"), float("inf"),
+                board.turn == chess.WHITE,
+                eval_fn, deadline,
+            )
+            # Only commit results from fully-completed searches.
+            if move is not None:
+                best_uci   = move.uci()
+                best_score = float(score)
+        except _TimeUp:
+            logger.debug("Time limit hit at depth %d — returning best so far", d)
+            break
+
+    elapsed = time.monotonic() - start
+    logger.debug(
+        "Search complete move=%s score=%s elapsed=%.1fs", best_uci, best_score, elapsed
     )
-
-    if move is None:
-        # Shouldn't happen for non-terminal positions, but be safe.
-        move = legal[0]
-
-    return move.uci(), float(score)
+    logger.debug("TT size: %d entries", len(_tt))
+    return best_uci, best_score

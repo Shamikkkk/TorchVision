@@ -1,14 +1,16 @@
 """
 PyroEngine — chess engine with four modes in priority order:
 
-  1. mcts      — MCTS guided by ChessNet policy + value heads
-                 (activated when torch_chess.pt contains a policy head)
-  2. neural    — minimax depth-4 with ChessNet value head as eval function
-                 (activated when torch_chess.pt exists but has no policy head)
-  3. classical — minimax depth-4 with hand-crafted PST evaluation
-                 (always available; no external binary required)
-  4. stockfish — external Stockfish binary
-                 (last resort only; kept for comparison purposes)
+  1. tablebase — syzygy tablebase lookup (not yet implemented)
+  2. neural    — minimax depth-4 with ChessNet value head (when torch_chess.pt exists)
+  3. classical — minimax depth-4 with Tal-style PST evaluation (always available)
+  4. stockfish — external Stockfish binary (last resort only)
+
+Eval function for minimax (modes 2 & 3): tal_style_eval (fast, pure Python)
+NNUE (768→256→32→32→1) is used only for single-position UI assist via
+/api/suggest — too slow for the search tree until Phase 5 batch eval.
+
+NOTE: MCTS is disabled until the policy head is properly trained via self-play.
 """
 
 import logging
@@ -19,7 +21,8 @@ from pathlib import Path
 import chess
 from stockfish import Stockfish, StockfishException
 
-from .evaluate import evaluate
+from .evaluate import tal_style_eval
+from .opening_book import book as _opening_book
 from . import search as _search
 
 logger = logging.getLogger(__name__)
@@ -31,7 +34,7 @@ _WEIGHTS_PATH = Path(__file__).resolve().parent.parent.parent / "models" / "torc
 _BACKEND_DIR = str(Path(__file__).resolve().parent.parent.parent)
 
 _CP_SCALE        = 2000.0   # centipawns → [-1, 1] for MCTS value normalisation
-_MCTS_SIMS       = 200      # simulations per move in MCTS mode
+_MINIMAX_DEPTH   = 4
 
 
 class PyroEngine:
@@ -50,27 +53,23 @@ class PyroEngine:
         self._sf_params      = {"Skill Level": 10}
         self._sf_available   = False
 
-        # --- Priority 1 & 2: neural weights (mcts or neural mode) ---
+        # --- Priority 2: neural weights (minimax with NNUE eval) ---
+        # MCTS is disabled regardless of whether a policy head exists —
+        # it produces poor moves until the policy is trained via self-play.
         if _WEIGHTS_PATH.exists():
             try:
-                has_policy = self._load_nn()
-                if has_policy:
-                    from .mcts import BatchedMCTS
-                    self._mcts = BatchedMCTS(self, num_simulations=_MCTS_SIMS)
-                    self.mode  = "mcts"
-                    logger.info("Pyro ready — Tal neural mode 🔥 (MCTS, %d sims)", _MCTS_SIMS)
-                else:
-                    self.mode = "neural"
-                    logger.info("Pyro ready — Tal neural mode 🔥 (minimax depth 4)")
-                return
+                self._load_nn()
+                self.mode = "neural"
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "Neural weights found but failed to load (%s) — falling back", exc
                 )
 
         # --- Priority 3: classical (always works) ---
-        self.mode = "classical"
-        logger.info("Pyro ready — Tal style, depth 4")
+        if not hasattr(self, "mode"):
+            self.mode = "classical"
+
+        logger.info("Pyro ready — Tal style 🔥 (minimax depth %d, book loaded)", _MINIMAX_DEPTH)
 
         # Probe Stockfish so we know if it's available as a last resort.
         try:
@@ -87,12 +86,8 @@ class PyroEngine:
     # Neural network helpers
     # ------------------------------------------------------------------
 
-    def _load_nn(self) -> bool:
-        """Load ChessNet weights from disk.
-
-        Returns True if the weights include a policy head (→ mcts mode),
-        False if they are value-only (→ neural/minimax mode).
-        """
+    def _load_nn(self) -> None:
+        """Load ChessNet weights from disk into ``self._nn_model``."""
         import torch  # noqa: PLC0415
 
         if _BACKEND_DIR not in sys.path:
@@ -104,12 +99,10 @@ class PyroEngine:
         has_policy = any(k.startswith("policy_head.") for k in state_dict)
 
         net = ChessNet()
-        # strict=False when there is no policy head so legacy value-only
-        # weights load without raising a key-mismatch error.
+        # strict=False so value-only weights load without a key-mismatch error.
         net.load_state_dict(state_dict, strict=has_policy)
         net.eval()
         self._nn_model = net
-        return has_policy
 
     def _nn_eval(self, board: chess.Board) -> float:
         """Run ChessNet value head on one position. Returns centipawns (White-positive).
@@ -211,16 +204,15 @@ class PyroEngine:
         if not legal:
             return ""
 
-        # MCTS: policy + value guided tree search.
-        if self.mode == "mcts":
-            uci = self._mcts.search(fen)
-            self.last_eval = None  # tree value score is not a centipawn estimate
-            return uci
+        # Priority 1: opening book
+        book_move = _opening_book.get_move(board)
+        if book_move:
+            self.last_eval = 0.0
+            logger.debug("Book move: %s", book_move)
+            return book_move
 
-        # Classical or neural: minimax with PST or NN eval function.
         if self.mode in ("classical", "neural"):
-            eval_fn = self._nn_eval if self.mode == "neural" else evaluate
-            uci, score = _search.best_move(fen, depth=4, eval_fn=eval_fn)
+            uci, score = _search.best_move(fen, depth=_MINIMAX_DEPTH, eval_fn=tal_style_eval)
             self.last_eval = score
             return uci
 

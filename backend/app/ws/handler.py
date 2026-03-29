@@ -92,7 +92,12 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
 
     try:
         while True:
-            data: dict = await websocket.receive_json()  # type: ignore[type-arg]
+            logger.debug("Waiting for next message...")
+            try:
+                data: dict = await websocket.receive_json()  # type: ignore[type-arg]
+            except Exception:
+                logger.exception("Exception while receiving WebSocket message — closing connection")
+                raise
             msg_type: str = data.get("type", "")
 
             if msg_type == "new_game":
@@ -125,6 +130,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
 
             if msg_type == "move" and not board.is_game_over() and not resigned and not game_over:
                 uci: str = data.get("uci", "")
+                logger.debug("Human move received: %s", uci)
 
                 # Capture pre-move state for best_was analysis
                 pre_move_board = board.copy()
@@ -148,77 +154,99 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                     await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
                     continue
 
+                # Send state immediately so the frontend sees the human's move
                 await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
 
-                # Engine computes its move from post-human-move position (gives eval_after too)
-                engine_uci = await suggest_move(board.fen(), engine)
-                eval_after: float | None = engine.last_eval
+                # --- Engine reply + move classification ---
+                # Wrapped in its own try/except so an engine crash does not close
+                # the WebSocket — we log the error and keep the loop alive.
+                try:
+                    logger.debug("Engine thinking (fen=%s)", board.fen())
+                    engine_uci = await suggest_move(board.fen(), engine)
+                    eval_after: float | None = engine.last_eval
+                    logger.debug("Engine chose %s (eval=%s)", engine_uci, eval_after)
 
-                # --- Move classification ---
-                if is_book_move(pre_move_history, human_san):
-                    classification = "book"
-                    symbol = "\U0001f4d6"  # 📖
-                    best_san = human_san
-                    cp_loss = 0
-                    is_best = True
-                else:
-                    # Analyse pre-move position
-                    missed_mate = has_mate_in_one(pre_move_board)
-                    best_uci = await suggest_move(pre_move_fen, engine)
-                    eval_before: float | None = engine.last_eval
-                    best_san = uci_to_san(pre_move_board, best_uci)
-                    is_best = (uci == best_uci)
+                    if not engine_uci:
+                        logger.error("Engine returned empty move for fen=%s — skipping reply", board.fen())
+                        continue
 
-                    # cp_loss is always positive and from human's perspective
-                    if eval_before is not None and eval_after is not None:
-                        if human_color == "w":
-                            cp_loss = max(0, int(eval_before - eval_after))
-                        else:
-                            cp_loss = max(0, int(eval_after - eval_before))
-                    else:
+                    # --- Move classification ---
+                    if is_book_move(pre_move_history, human_san):
+                        classification = "book"
+                        symbol = "\U0001f4d6"  # 📖
+                        best_san = human_san
                         cp_loss = 0
-
-                    human_move_obj = _chess.Move.from_uci(uci)
-                    if missed_mate:
-                        classification = "miss"
-                        symbol = "missed #"
-                    elif is_best and is_sacrifice(pre_move_board, human_move_obj) and cp_loss < 10:
-                        classification = "brilliant"
-                        symbol = "!!"
-                    elif is_best:
-                        classification = "best"
-                        symbol = "!"
-                    elif cp_loss <= 20:
-                        classification = "good"
-                        symbol = ""
-                    elif cp_loss <= 50:
-                        classification = "inaccuracy"
-                        symbol = "?!"
-                    elif cp_loss <= 150:
-                        classification = "mistake"
-                        symbol = "?"
+                        is_best = True
                     else:
-                        classification = "blunder"
-                        symbol = "??"
+                        # Analyse pre-move position
+                        missed_mate = has_mate_in_one(pre_move_board)
+                        best_uci = await suggest_move(pre_move_fen, engine)
+                        eval_before: float | None = engine.last_eval
+                        best_san = uci_to_san(pre_move_board, best_uci)
+                        is_best = (uci == best_uci)
 
-                await manager.send(websocket, {
-                    "type": "best_was",
-                    "classification": classification,
-                    "human_move": human_san,
-                    "best_move": best_san,
-                    "cp_loss": cp_loss,
-                    "is_best": is_best,
-                    "symbol": symbol,
-                })
+                        # cp_loss is always positive and from human's perspective
+                        if eval_before is not None and eval_after is not None:
+                            if human_color == "w":
+                                cp_loss = max(0, int(eval_before - eval_after))
+                            else:
+                                cp_loss = max(0, int(eval_after - eval_before))
+                        else:
+                            cp_loss = 0
 
-                _, board = apply_move(board, engine_uci)
+                        human_move_obj = _chess.Move.from_uci(uci)
+                        if missed_mate:
+                            classification = "miss"
+                            symbol = "missed #"
+                        elif is_best and is_sacrifice(pre_move_board, human_move_obj) and cp_loss < 10:
+                            classification = "brilliant"
+                            symbol = "!!"
+                        elif is_best:
+                            classification = "best"
+                            symbol = "!"
+                        elif cp_loss <= 20:
+                            classification = "good"
+                            symbol = ""
+                        elif cp_loss <= 50:
+                            classification = "inaccuracy"
+                            symbol = "?!"
+                        elif cp_loss <= 150:
+                            classification = "mistake"
+                            symbol = "?"
+                        else:
+                            classification = "blunder"
+                            symbol = "??"
 
-                if board.is_game_over():
-                    game_over = True
-                    if tick_task and not tick_task.done():
-                        tick_task.cancel()
+                    await manager.send(websocket, {
+                        "type": "best_was",
+                        "classification": classification,
+                        "human_move": human_san,
+                        "best_move": best_san,
+                        "cp_loss": cp_loss,
+                        "is_best": is_best,
+                        "symbol": symbol,
+                    })
 
-                await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
+                    ok_engine, board = apply_move(board, engine_uci)
+                    if not ok_engine:
+                        logger.error(
+                            "Engine returned illegal move %r (fen=%s) — skipping engine reply",
+                            engine_uci, pre_move_fen,
+                        )
+                        continue
+
+                    if board.is_game_over():
+                        game_over = True
+                        if tick_task and not tick_task.done():
+                            tick_task.cancel()
+
+                    await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
+
+                except Exception:
+                    logger.exception(
+                        "Engine error after human move %s (fen=%s) — loop continues",
+                        uci, pre_move_fen,
+                    )
 
     except WebSocketDisconnect:
         game_over = True
