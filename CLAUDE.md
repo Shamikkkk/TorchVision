@@ -10,7 +10,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 
 **Phase 1 (UI polish) — complete.**
 **Phase 2 (classical engine) — complete and working.**
-**Phase 3 (neural network) — NNUE trained; disabled in search pending scaling fix.**
+**Phase 3 (neural network) — NNUE trained + scaled; disabled pending MCTS.**
 **Game Analyzer — complete.**
 
 ### Completed features
@@ -48,18 +48,35 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
   - Executes on `[fen, isHumanTurn]` effect — validates legality first, silently clears if illegal
   - Right-click anywhere clears the premove; new game / game over clears automatically
   - Auto-promotes to queen; smoothness issues to revisit
+- **Quiescence search** (`app/engine/search.py`): prevents horizon blunders, extends search through captures only, depth-capped at 4 plies
+- **Repetition detection** (`app/engine/search.py`): `board.is_repetition(2)` returns draw score before searching
+- **NNUE scaling fixed** (`app/engine/nnue.py`): `_CP_SCALE=1500`, sign flipped, now matches `tal_style_eval` range — disabled pending MCTS
+- **Stockfish eval bar** (`app/routes/engine.py` + `useGameSocket.ts`): fully wired, SF depth-15, centipawns White-positive
+- **Move ordering** (`app/engine/search.py`): captures searched before quiet moves
+- **Data pipeline** (`backend/scripts/`):
+  - `download_historical_pgns.py` — downloads GM PGN collections from pgnmentor.com
+  - `download_chesscom.py` — fetches Chess.com games, labels with SF depth-8, outputs CSV
+  - `build_training_data.py` — combines all PGNs in `data/` into `positions_combined.csv`; deduplicates against existing CSVs; resume support via `.processed_pgns.txt`
+  - 97,252 GM games downloaded: Tal, Kasparov, Fischer, Carlsen, Karpov, Petrosian, Spassky, Smyslov, Korchnoi, Capablanca, Morphy, Anderssen, Spielmann, Alekhine, Najdorf, Bronstein, Geller, Larsen, Ljubojevic, Shirov, Topalov, Morozevich, Grischuk, Aronian, Nakamura, VachierLagrave, Jobava, Rapport, Firouzja, Gukesh, Praggnanandhaa
+  - Target: ~1,000,000 combined positions in `data/positions_combined.csv`
 
-### NNUE status (trained; disabled)
+### NNUE status (trained; scaling fixed; disabled)
 - `models/nnue_deep_backup.pt` — 497,998 positions, Stockfish depth-12 labels, best val loss = 0.0305
 - **Currently disabled** in search: `eval_fn = tal_style_eval` hardcoded in `backend/app/engine/model.py`
-- **Root cause**: NNUE outputs small floats (~0–50 cp range); `tal_style_eval` returns large ints (±500 cp). The two scales are incompatible — search compares them incorrectly when mixed.
-- **Fix**: multiply `_nnue.evaluate()` output by 600 before passing to search (output is in normalized units, × 600 = centipawns), OR normalize `tal_style_eval` to the same range.
+- **Scaling FIXED**: `_CP_SCALE=1500`, sign corrected — output now matches `tal_style_eval` range
+- **Reason still disabled**: Python minimax too slow at depth 6; MCTS must replace minimax first
+- **Next**: enable after MCTS is implemented
 
 ### Next session TODO (in order)
-1. Fix NNUE scaling (× 600 in `nnue.py` or in `model.py` wrapper) and re-enable in search
-2. Replace `/api/suggest` eval bar with Stockfish eval + move suggestions
-3. Fix premove smoothness
-4. Phase 5: Download Alekhine/Shirov/Nezhmetdinov PGNs, retrain base model
+1. Check `build_training_data.py` output — how many positions generated?
+2. Retrain NNUE on `positions_combined.csv`:
+   ```bash
+   cd backend
+   python -m model_training.train --csv data/positions_combined.csv
+   ```
+3. Test new NNUE weights vs old weights
+4. Fix self-play → train policy head properly
+5. Enable MCTS (replaces minimax → real ELO jump)
 
 ### Engine move priority (runtime)
 `PyroEngine.best_move()` in `backend/app/engine/model.py`:
