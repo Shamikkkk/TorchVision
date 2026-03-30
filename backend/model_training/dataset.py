@@ -127,8 +127,10 @@ class ChessDataset(Dataset[tuple[tuple[Tensor, Tensor], float, int]]):
             reader = csv.reader(fh)
             next(reader, None)  # skip header
             for row in reader:
-                if len(row) >= 3:
-                    self._data.append((row[0], float(row[1]), row[2]))
+                if len(row) >= 2:
+                    # best_move column is optional — older CSVs only have fen,eval_cp
+                    uci = row[2] if len(row) >= 3 else ""
+                    self._data.append((row[0], float(row[1]), uci))
 
     def __len__(self) -> int:
         return len(self._data)
@@ -138,7 +140,15 @@ class ChessDataset(Dataset[tuple[tuple[Tensor, Tensor], float, int]]):
         try:
             board_t  = fen_to_tensor(fen)
             scalar_t = torch.tensor(fen_to_scalars(fen), dtype=torch.float32)
-            move_idx = encode_move(chess.Move.from_uci(uci))
         except Exception:
             return None
-        return (board_t, scalar_t), score, move_idx
+        if uci:
+            try:
+                move_idx = encode_move(chess.Move.from_uci(uci))
+            except Exception:
+                return None
+        else:
+            move_idx = -1  # no policy label; CrossEntropyLoss(ignore_index=-1) skips it
+        # Normalise centipawn eval to ~[-1, 1] so MSELoss trains on a sensible scale.
+        # Both positions_sf_deep.csv and positions_combined.csv store raw centipawns.
+        return (board_t, scalar_t), score / 600.0, move_idx

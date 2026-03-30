@@ -28,13 +28,14 @@ _WEIGHTS_PATH = Path(__file__).resolve().parent.parent / "models" / "torch_chess
 _LOSS_CSV     = Path("data/loss_curves.csv")
 
 # ── Hyperparameters ─────────────────────────────────────────────────────────
-BATCH_SIZE        = 256
-EPOCHS            = 10
-LR_INIT           = 1e-3
-LR_FACTOR         = 0.5       # ReduceLROnPlateau factor
-LR_PATIENCE       = 2         # epochs without improvement before LR drop
-VAL_FRACTION      = 0.05      # 5% held out for validation
-NUM_WORKERS       = 0         # set >0 on Linux for faster data loading
+BATCH_SIZE         = 256
+EPOCHS             = 50
+EARLY_STOP_PATIENCE = 5       # stop if val value loss doesn't improve for N epochs
+LR_INIT            = 1e-3
+LR_FACTOR          = 0.5      # ReduceLROnPlateau factor
+LR_PATIENCE        = 2        # epochs without improvement before LR drop
+VAL_FRACTION       = 0.05     # 5% held out for validation
+NUM_WORKERS        = 0        # set >0 on Linux for faster data loading
 POLICY_LOSS_WEIGHT = 0.5      # total_loss = value_loss + weight * policy_loss
 
 
@@ -89,14 +90,15 @@ def train(csv_path: Path) -> None:
     print(f"[train] ChessNet: {n_params:,} parameters")
 
     criterion_value  = nn.MSELoss()
-    criterion_policy = nn.CrossEntropyLoss()
+    criterion_policy = nn.CrossEntropyLoss(ignore_index=-1)  # -1 = no policy label
     optimiser = torch.optim.Adam(model.parameters(), lr=LR_INIT)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimiser, factor=LR_FACTOR, patience=LR_PATIENCE
     )
 
     # ── Training loop ────────────────────────────────────────────────────────
-    best_val_loss = float("inf")
+    best_val_value_loss = float("inf")
+    epochs_no_improve   = 0
     _WEIGHTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     loss_rows: list[tuple[int, float, float, float, float, float, float]] = []
 
@@ -120,7 +122,8 @@ def train(csv_path: Path) -> None:
 
             v_loss = criterion_value(value, value_targets)
             p_loss = criterion_policy(policy, policy_targets)
-            loss   = v_loss + POLICY_LOSS_WEIGHT * p_loss
+            # p_loss is nan when the entire batch has no policy labels (move_idx=-1)
+            loss   = v_loss if torch.isnan(p_loss) else v_loss + POLICY_LOSS_WEIGHT * p_loss
 
             loss.backward()
             optimiser.step()
@@ -154,9 +157,13 @@ def train(csv_path: Path) -> None:
 
         val_value_loss  /= n_val
         val_policy_loss /= n_val
-        val_total_loss   = val_value_loss + POLICY_LOSS_WEIGHT * val_policy_loss
+        # Total loss: omit policy term if it is nan (no UCI labels in dataset)
+        if not (val_policy_loss != val_policy_loss):  # nan check
+            val_total_loss = val_value_loss + POLICY_LOSS_WEIGHT * val_policy_loss
+        else:
+            val_total_loss = val_value_loss
 
-        scheduler.step(val_total_loss)
+        scheduler.step(val_value_loss)
         elapsed = time.monotonic() - t0
         loss_rows.append((
             epoch,
@@ -166,15 +173,21 @@ def train(csv_path: Path) -> None:
 
         print(
             f"[train] Epoch {epoch:2d}/{EPOCHS} | "
-            f"train={train_total_loss:.4f} (v={train_value_loss:.2f} p={train_policy_loss:.4f})  "
-            f"val={val_total_loss:.4f} (v={val_value_loss:.2f} p={val_policy_loss:.4f}) | "
+            f"train={train_total_loss:.4f} (v={train_value_loss:.4f} p={train_policy_loss:.4f})  "
+            f"val={val_total_loss:.4f} (v={val_value_loss:.4f} p={val_policy_loss:.4f}) | "
             f"{elapsed:.1f}s"
         )
 
-        if val_total_loss < best_val_loss:
-            best_val_loss = val_total_loss
+        if val_value_loss < best_val_value_loss:
+            best_val_value_loss = val_value_loss
+            epochs_no_improve   = 0
             torch.save(model.state_dict(), str(_WEIGHTS_PATH))
-            print(f"[train]   ✓ saved best model (val_loss={val_total_loss:.4f}) → {_WEIGHTS_PATH}")
+            print(f"[train]   ✓ saved best model (val_value_loss={val_value_loss:.4f}) → {_WEIGHTS_PATH}")
+        else:
+            epochs_no_improve += 1
+            if epochs_no_improve >= EARLY_STOP_PATIENCE:
+                print(f"[train] Early stopping: no val value loss improvement for {EARLY_STOP_PATIENCE} epochs.")
+                break
 
     # ── Save loss curves ─────────────────────────────────────────────────────
     _LOSS_CSV.parent.mkdir(parents=True, exist_ok=True)
@@ -187,7 +200,7 @@ def train(csv_path: Path) -> None:
         ])
         w.writerows(loss_rows)
 
-    print(f"[train] Training complete. Best val_loss={best_val_loss:.4f}")
+    print(f"[train] Training complete. Best val_value_loss={best_val_value_loss:.4f}")
     print(f"[train] Weights → {_WEIGHTS_PATH}")
     print(f"[train] Loss curves → {_LOSS_CSV}")
 
