@@ -68,39 +68,44 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 - **Next**: enable after MCTS is implemented
 
 ### Next session TODO (in order)
-1. Check `positions_combined.csv` line count:
-   ```powershell
-   (Get-Content data\positions_combined.csv | Measure-Object -Line).Lines
-   ```
-   Target: 500,000+ positions
 
-2. Retrain NNUE on `positions_combined.csv`:
-   ```bash
-   cd backend
-   venv\Scripts\activate
-   python -m model_training.train --csv data/positions_combined.csv
-   ```
-   (runs ~4–6 hours on RTX 3050, start before sleeping)
+#### Why Pyro blunders (research findings)
+- ChessNet `val_loss=0.0518` is **worse** than NNUE `val_loss=0.0305`
+- Only 132k/634k positions actually loaded during training (dataset bug)
+- Policy head untrained — all move_idx=-1, policy loss nan throughout
+- ChessNet as eval_fn in minimax causes queen blunders and wild evals — hasn't learned material values reliably
+- NNUE is shallow (768→256→32→32→1) = fast + better trained
+- ChessNet is deep but undertrained = slow + unreliable
 
-3. Re-enable NNUE in search once retrained:
-   - In `backend/app/engine/model.py`: change `eval_fn` back to `_nnue.evaluate` if `_nnue.available`
-   - Update startup log to `"Pyro ready — NNUE 🧠"`
+#### Step 1 — Revert to NNUE as eval_fn (immediate)
+In `backend/app/engine/model.py`:
+- Switch `eval_fn` back to `_nnue.evaluate` (not ChessNet `_nn_eval`)
+- NNUE scaling already fixed: `_CP_SCALE=1500`, sign corrected
+- Update startup log: `"Pyro ready — NNUE 🧠 (minimax depth 4)"`
+- This should immediately stop queen blunders
 
-4. Fix self-play (was collapsing to draws):
-   - Load existing weights as starting point
-   - Add Dirichlet noise for exploration
-   - Train policy head
+#### Step 2 — Fix dataset loading bug
+Only 132k of 634k positions load from `positions_final.csv` — find why 75% of rows are dropped in `dataset.py __getitem__`. Likely cause: FEN parsing errors or tensor conversion failures silently returning `None`. Fix so all 634k rows load, then retrain ChessNet.
 
-5. Enable MCTS (replaces minimax entirely):
-   - MCTS code exists in `app/engine/mcts.py`
-   - Wire into `model.py` `best_move()`
-   - Start with 200 simulations
+#### Step 3 — Add UCI moves to training data
+Modify `backend/scripts/build_training_data.py` to also save the Stockfish best move (UCI notation) for each position. Format: `fen,eval_cp,best_move`. Required to train the policy head.
 
-### Data pipeline status
-- 97,252 GM games downloaded to `backend/data/*.pgn`
-- `build_training_data.py` running overnight
-- Output: `backend/data/positions_combined.csv`
-- Target: ~500,000 new positions + 497,998 existing = ~1M total
+#### Step 4 — Retrain on full dataset with policy labels
+1. Run `build_training_data.py` with UCI moves → new CSV
+2. Run `merge_training_data.py` → `positions_final_v2.csv`
+3. Retrain ChessNet on full 634k positions WITH policy labels — policy head should now train (not nan)
+
+#### Step 5 — Enable MCTS
+Only after policy head is trained properly:
+- Wire MCTS into `model.py` `best_move()`
+- Start with 200 simulations
+- MCTS + trained policy head = real ELO jump (~1800+)
+
+### Current engine state
+- `eval_fn`: ChessNet (val_loss=0.0518) — blunders queens, revert needed
+- Should be: NNUE (val_loss=0.0305) — more reliable
+- `torch_chess.pt`: trained Mar 30, 634k positions, policy head untrained (nan)
+- `nnue_deep_backup.pt`: better weights, use this for now
 
 ### Engine move priority (runtime)
 `PyroEngine.best_move()` in `backend/app/engine/model.py`:

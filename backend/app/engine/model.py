@@ -71,7 +71,10 @@ class PyroEngine:
         if not hasattr(self, "mode"):
             self.mode = "classical"
 
-        logger.info("Pyro ready — Tal style 🔥 (minimax depth %d, book loaded)", _MINIMAX_DEPTH)
+        if self.mode == "neural":
+            logger.info("Pyro ready — ChessNet 🧠 (minimax depth %d, book loaded)", _MINIMAX_DEPTH)
+        else:
+            logger.info("Pyro ready — Tal style 🔥 (minimax depth %d, book loaded)", _MINIMAX_DEPTH)
 
         if _tablebase.available:
             logger.info("Tablebase: loaded ✅")
@@ -114,20 +117,23 @@ class PyroEngine:
     def _nn_eval(self, board: chess.Board) -> float:
         """Run ChessNet value head on one position. Returns centipawns (White-positive).
 
+        The model was trained with targets normalised by /600, so the raw output
+        is in ~[-1, 1].  Multiply by 600 to recover centipawns before returning.
+
         Used by the "neural" minimax mode as a drop-in replacement for the
         hand-crafted PST evaluator.
         """
         import torch  # noqa: PLC0415
         from model_training.dataset import fen_to_tensor, fen_to_scalars  # type: ignore[import]
 
-        fen          = board.fen()
-        board_tensor = fen_to_tensor(fen).unsqueeze(0)                        # (1, 21, 8, 8)
+        fen           = board.fen()
+        board_tensor  = fen_to_tensor(fen).unsqueeze(0)                       # (1, 21, 8, 8)
         scalar_tensor = torch.tensor(                                          # (1, 7)
             fen_to_scalars(fen), dtype=torch.float32
         ).unsqueeze(0)
         with torch.no_grad():
             value_t, _ = self._nn_model(board_tensor, scalar_tensor)
-        return float(value_t.item())
+        return float(value_t.item()) * 600.0   # normalised → centipawns, White-positive
 
     def _nn_evaluate(self, board: chess.Board) -> tuple[float, dict[chess.Move, float]]:
         """Run both heads of ChessNet on one position.
@@ -226,8 +232,12 @@ class PyroEngine:
             logger.debug("Book move: %s", book_move)
             return book_move
 
-        if self.mode in ("classical", "neural"):
+        if self.mode == "neural":
+            eval_fn = self._nn_eval
+        else:
             eval_fn = tal_style_eval
+
+        if self.mode in ("classical", "neural"):
             uci, score = _search.best_move(fen, depth=_MINIMAX_DEPTH, eval_fn=eval_fn)
             self.last_eval = score
             return uci
