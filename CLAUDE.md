@@ -68,15 +68,39 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 - **Next**: enable after MCTS is implemented
 
 ### Next session TODO (in order)
-1. Check `build_training_data.py` output — how many positions generated?
+1. Check `positions_combined.csv` line count:
+   ```powershell
+   (Get-Content data\positions_combined.csv | Measure-Object -Line).Lines
+   ```
+   Target: 500,000+ positions
+
 2. Retrain NNUE on `positions_combined.csv`:
    ```bash
    cd backend
+   venv\Scripts\activate
    python -m model_training.train --csv data/positions_combined.csv
    ```
-3. Test new NNUE weights vs old weights
-4. Fix self-play → train policy head properly
-5. Enable MCTS (replaces minimax → real ELO jump)
+   (runs ~4–6 hours on RTX 3050, start before sleeping)
+
+3. Re-enable NNUE in search once retrained:
+   - In `backend/app/engine/model.py`: change `eval_fn` back to `_nnue.evaluate` if `_nnue.available`
+   - Update startup log to `"Pyro ready — NNUE 🧠"`
+
+4. Fix self-play (was collapsing to draws):
+   - Load existing weights as starting point
+   - Add Dirichlet noise for exploration
+   - Train policy head
+
+5. Enable MCTS (replaces minimax entirely):
+   - MCTS code exists in `app/engine/mcts.py`
+   - Wire into `model.py` `best_move()`
+   - Start with 200 simulations
+
+### Data pipeline status
+- 97,252 GM games downloaded to `backend/data/*.pgn`
+- `build_training_data.py` running overnight
+- Output: `backend/data/positions_combined.csv`
+- Target: ~500,000 new positions + 497,998 existing = ~1M total
 
 ### Engine move priority (runtime)
 `PyroEngine.best_move()` in `backend/app/engine/model.py`:
