@@ -199,9 +199,11 @@ class NNUEEvaluator:
             # Side-to-move (Black) goes first; flip perspectives
             stm, opp = bf, wf
         score = self._numpy_forward(stm, opp)
-        # Model output is STM-perspective; convert to White-positive centipawns
+        # Model output is STM-perspective; convert to White-positive centipawns.
+        # White-to-move: STM=White, so +cp is already White-positive.
+        # Black-to-move: STM=Black, so negate to flip to White-positive.
         cp = score * _CP_SCALE
-        return -cp if board.turn == chess.WHITE else cp
+        return cp if board.turn == chess.WHITE else -cp
 
 
 # ---------------------------------------------------------------------------

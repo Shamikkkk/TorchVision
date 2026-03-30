@@ -29,6 +29,7 @@ from . import search as _search
 
 logger = logging.getLogger(__name__)
 
+
 # Absolute path to the saved weights file.
 _WEIGHTS_PATH = Path(__file__).resolve().parent.parent.parent / "models" / "torch_chess.pt"
 
@@ -71,10 +72,7 @@ class PyroEngine:
         if not hasattr(self, "mode"):
             self.mode = "classical"
 
-        if self.mode == "neural":
-            logger.info("Pyro ready — ChessNet 🧠 (minimax depth %d, book loaded)", _MINIMAX_DEPTH)
-        else:
-            logger.info("Pyro ready — Tal style 🔥 (minimax depth %d, book loaded)", _MINIMAX_DEPTH)
+        logger.info("Pyro ready — Tal style 🔥 (minimax depth %d, book loaded)", _MINIMAX_DEPTH)
 
         if _tablebase.available:
             logger.info("Tablebase: loaded ✅")
@@ -232,15 +230,11 @@ class PyroEngine:
             logger.debug("Book move: %s", book_move)
             return book_move
 
-        if self.mode == "neural":
-            eval_fn = self._nn_eval
-        else:
-            eval_fn = tal_style_eval
+        eval_fn = tal_style_eval
 
-        if self.mode in ("classical", "neural"):
-            uci, score = _search.best_move(fen, depth=_MINIMAX_DEPTH, eval_fn=eval_fn)
-            self.last_eval = score
-            return uci
+        uci, score = _search.best_move(fen, depth=_MINIMAX_DEPTH, eval_fn=eval_fn)
+        self.last_eval = score
+        return uci
 
         # Stockfish last resort.
         if self._sf_available:
