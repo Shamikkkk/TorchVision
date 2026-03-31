@@ -101,12 +101,58 @@ All improvements implemented:
 
 Estimated ELO: ~1200–1400
 
-#### Phase B — Proper NNUE (longer term)
-1. Generate 10M+ positions via self-play (not Stockfish labels)
-2. Use simple HalfKA features (piece+square, no king buckets)
-3. Train small network (256→32→32→1)
-4. Validate with SPRT tests (actual game matches), not val_loss
-5. Only enable when it beats `tal_style_eval` in 100 test games
+#### Phase B — Proper NNUE (planned, not started)
+
+**Why self-play instead of Stockfish labels:**
+- Stockfish labels teach "what SF thinks", not "what wins"
+- Self-play labels teach "what actually leads to winning"
+- Research confirmed: need 10M+ positions, simple features
+- Our 634k SF-labeled positions were 1,580× too little
+
+**Step 1 — Self-play data generator:**
+Create `backend/scripts/generate_selfplay.py`
+- Pyro plays itself using current `tal_style_eval` engine
+- Time control: 0.1s per move (fast games)
+- Save every position as FEN + game result (1=W, 0=D, −1=L)
+- Target: 500 games per run ≈ 30,000 positions per run; run 20+ times overnight = 600,000+ positions
+- Format: `fen,result` (not `fen,eval_cp`)
+- Resume support: append to existing file
+- Progress: `"Game X/500: W/D/L, positions so far: Y"`
+
+**Step 2 — NNUE architecture (already exists):**
+- Keep existing `nnue.py` (768→256→32→32→1)
+- Change training target from `eval_cp` to game result
+- Use BCE loss (binary cross-entropy), not MSE
+- Normalize: W=1.0, D=0.5, L=0.0
+
+**Step 3 — Training script:**
+Create `backend/scripts/train_nnue_selfplay.py`
+- Load `fen,result` CSV
+- Train NNUE on game outcomes; save to `backend/models/nnue_selfplay.pt`
+- Validate on held-out positions
+
+**Step 4 — SPRT validation (critical):**
+Create `backend/scripts/validate_nnue.py`
+- Play 100 games: NNUE Pyro vs classical Pyro
+- NNUE must win 55+ games to be enabled
+- If fails: analyse losses, retrain with more data
+- Never enable NNUE without passing this test
+
+**Step 5 — Enable if validated:**
+- Wire `nnue_selfplay.pt` into `model.py`
+- Use blended eval: 0.5 × NNUE + 0.5 × `tal_style_eval`
+- Increase blend ratio as NNUE improves
+
+**Timeline estimate:**
+- Session 1: build `generate_selfplay.py`, run overnight
+- Session 2: check data, build `train_nnue_selfplay.py`, train
+- Session 3: SPRT validation, enable if passes
+- Session 4+: iterate with more data
+
+**Success criteria:**
+- NNUE wins 55%+ against classical in 100 games
+- No queen blunders in test games
+- Startup log: `"Pyro ready — NNUE v2 🧠 (self-play trained)"`
 
 #### Phase C — MCTS (after Phase B)
 1. Train policy head with UCI moves
