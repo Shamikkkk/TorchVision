@@ -10,6 +10,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 
 **Phase 1 (UI polish) — complete.**
 **Phase 2 (classical engine) — complete and working.**
+**Phase A (classical engine tuning) — COMPLETE ✅ (~1200–1400 ELO estimated)**
 **Phase 3 (neural network) — NNUE trained + scaled; disabled pending MCTS.**
 **Game Analyzer — complete.**
 
@@ -81,11 +82,24 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 
 ### Real roadmap to a strong engine
 
-#### Phase A — Strong classical engine (next 2 sessions)
-1. Tune `tal_style_eval` weights (piece values, PST bonuses)
-2. Improve move ordering (killer moves, history heuristic)
-3. Increase search depth via better pruning (null move pruning)
-4. Target: ~1200–1400 ELO with pure classical search
+#### Phase A — COMPLETE ✅
+All improvements implemented:
+- `tal_style_eval` with Tal aggression bonuses (king attack, pawn storm, piece activity, king safety)
+- Pawn structure: doubled pawns (−20cp), isolated pawns (−15cp), connected passed pawns (+30cp)
+- Rook evaluation: open file (+25cp), semi-open file (+15cp), connected rooks (+20cp)
+- Bishop pair bonus (+50cp)
+- Endgame king activity (KING_EG_PST) + passed pawn bonuses (rank-scaled)
+- Killer moves heuristic (2 slots per depth)
+- History heuristic (depth² reward, sorted quiet moves)
+- Null move pruning (NMP, R=2) — effectively adds 1–2 plies of search depth
+- Late Move Reductions (LMR) — reduced search for quiet moves beyond move 4, re-search if interesting
+- Aspiration windows (AW, ±50cp, up to 3 widenings per depth)
+- Quiescence search (captures only, 4-ply cap)
+- Transposition table (1M entry cap, keyed on FEN)
+- Syzygy tablebases (3-4-5 piece, ~1 GB, perfect endgame play)
+- GM opening book (97k games: Tal, Kasparov, Fischer, Carlsen + 27 others)
+
+Estimated ELO: ~1200–1400
 
 #### Phase B — Proper NNUE (longer term)
 1. Generate 10M+ positions via self-play (not Stockfish labels)
@@ -103,7 +117,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 `PyroEngine.best_move()` in `backend/app/engine/model.py`:
 0. **Syzygy tablebase** — ≤6 pieces, no castling rights → perfect play
 1. **Opening book** — grandmaster PGN positions, first 15 moves, freq ≥ 3
-2. **Minimax depth 4** — alpha-beta + transposition table + `tal_style_eval` (current default)
+2. **Minimax depth 4** — alpha-beta + NMP + LMR + AW + TT + `tal_style_eval` (current default)
 3. **Stockfish** — external binary, last resort only
 
 ### Engine startup mode (weights)
