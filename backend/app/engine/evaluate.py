@@ -97,6 +97,18 @@ KING_MGS_PST: list[int] = [
     -30,-40,-40,-50,-50,-40,-40,-30,   # rank 7
     -30,-40,-40,-50,-50,-40,-40,-30,   # rank 8
 ]
+
+# Endgame king PST: centralise, avoid edges and corners.
+KING_EG_PST: list[int] = [
+    -50,-30,-30,-30,-30,-30,-30,-50,   # rank 1
+    -30,-20,  0,  0,  0,  0,-20,-30,   # rank 2
+    -30,-10, 20, 30, 30, 20,-10,-30,   # rank 3
+    -30,-10, 30, 40, 40, 30,-10,-30,   # rank 4
+    -30,-10, 30, 40, 40, 30,-10,-30,   # rank 5
+    -30,-10, 20, 30, 30, 20,-10,-30,   # rank 6
+    -30,-20,-10,  0,  0,-10,-20,-30,   # rank 7
+    -50,-40,-30,-20,-20,-30,-40,-50,   # rank 8
+]
 # fmt: on
 
 _PST: dict[int, list[int]] = {
@@ -121,9 +133,15 @@ def evaluate(board: chess.Board) -> int:
     if board.is_stalemate() or board.is_insufficient_material():
         return 0
 
+    piece_map = board.piece_map()
+    is_endgame = len(piece_map) < 10
+
     score: int = 0
-    for sq, piece in board.piece_map().items():
-        pst = _PST[piece.piece_type]
+    for sq, piece in piece_map.items():
+        if piece.piece_type == chess.KING and is_endgame:
+            pst = KING_EG_PST
+        else:
+            pst = _PST[piece.piece_type]
         # Mirror rank for Black so both sides share the same PST layout.
         pst_sq = sq if piece.color == chess.WHITE else (sq ^ 56)
         val = PIECE_VALUES[piece.piece_type] + pst[pst_sq]
@@ -326,6 +344,35 @@ def _queen_early_penalty(board: chess.Board) -> float:
     return penalty
 
 
+# Bonus by rank-from-own-side (0=own back rank … 7=promotion rank).
+_PASSED_PAWN_BONUS: dict[int, int] = {3: 10, 4: 20, 5: 40, 6: 70}
+
+
+def _passed_pawn_bonus(board: chess.Board) -> int:
+    """White-positive bonus for passed pawns. Called only in endgame."""
+    score = 0
+    for color in (chess.WHITE, chess.BLACK):
+        enemy_pawns = board.pieces(chess.PAWN, not color)
+        for sq in board.pieces(chess.PAWN, color):
+            f = chess.square_file(sq)
+            r = chess.square_rank(sq)
+            passed = True
+            for esq in enemy_pawns:
+                if abs(chess.square_file(esq) - f) <= 1:
+                    er = chess.square_rank(esq)
+                    if color == chess.WHITE and er > r:
+                        passed = False
+                        break
+                    if color == chess.BLACK and er < r:
+                        passed = False
+                        break
+            if passed:
+                rank_from_own = r if color == chess.WHITE else (7 - r)
+                bonus = _PASSED_PAWN_BONUS.get(rank_from_own, 0)
+                score += bonus if color == chess.WHITE else -bonus
+    return score
+
+
 def tal_style_eval(board: chess.Board) -> int:
     """
     Tal-style evaluation: PST base + aggression bonuses × TAL_AGGRESSION
@@ -335,7 +382,8 @@ def tal_style_eval(board: chess.Board) -> int:
     if base in (INF, -INF):
         return base  # don't dilute mate scores
     opening = _castling_bonus(board) + _queen_early_penalty(board)
-    return int(base + _tal_bonuses(board) * TAL_AGGRESSION + opening)
+    endgame = _passed_pawn_bonus(board) if len(board.piece_map()) < 10 else 0
+    return int(base + _tal_bonuses(board) * TAL_AGGRESSION + opening + endgame)
 
 
 def hand_crafted_eval(board: chess.Board) -> int:

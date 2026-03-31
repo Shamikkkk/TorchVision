@@ -31,23 +31,50 @@ _TIME_LIMIT    = 5.0   # seconds; iterative deepening stops if this is exceeded
 _tt: dict[str, tuple[float, int, chess.Move | None]] = {}
 _TT_MAX_SIZE = 1_000_000
 
+_MAX_KILLER_DEPTH = 20
+# Two killer slots per depth — quiet moves that recently caused a beta cutoff.
+_killers: list[list[chess.Move | None]] = [[None, None] for _ in range(_MAX_KILLER_DEPTH)]
+
+
+def _store_killer(depth: int, move: chess.Move) -> None:
+    if depth >= _MAX_KILLER_DEPTH:
+        return
+    slot = _killers[depth]
+    if slot[0] != move:          # don't duplicate
+        slot[1] = slot[0]
+        slot[0] = move
+
 
 class _TimeUp(Exception):
     """Raised internally to unwind the search tree when the deadline is hit."""
 
 
-def _order_moves(board: chess.Board) -> list[chess.Move]:
-    """Captures first (rough MVV-LVA proxy), quiet moves after.
+def _order_moves(board: chess.Board, depth: int) -> list[chess.Move]:
+    """Captures first, then killer moves, then remaining quiet moves.
 
     Good move ordering is the single biggest driver of alpha-beta efficiency.
     Captures are statistically more likely to be good moves, so examining them
     first raises alpha / lowers beta quickly and prunes more branches.
+    Killers are quiet moves that recently caused a beta cutoff at this depth —
+    trying them early avoids searching many inferior quiet moves.
     """
+    killer_set: set[chess.Move] = set()
+    if depth < _MAX_KILLER_DEPTH:
+        for k in _killers[depth]:
+            if k is not None and board.is_legal(k):
+                killer_set.add(k)
+
     captures: list[chess.Move] = []
+    killers:  list[chess.Move] = []
     quiets:   list[chess.Move] = []
     for move in board.legal_moves:
-        (captures if board.is_capture(move) else quiets).append(move)
-    return captures + quiets
+        if board.is_capture(move):
+            captures.append(move)
+        elif move in killer_set:
+            killers.append(move)
+        else:
+            quiets.append(move)
+    return captures + killers + quiets
 
 
 _QS_DEPTH_LIMIT = 4   # max capture-chain depth to prevent explosion
@@ -151,7 +178,7 @@ def _minimax(
 
     if maximizing:  # White's turn — maximise score
         best: float = float("-inf")
-        for move in _order_moves(board):
+        for move in _order_moves(board, depth):
             board.push(move)
             score, _ = _minimax(board, depth - 1, alpha, beta, False, eval_fn, deadline)
             board.pop()
@@ -159,10 +186,12 @@ def _minimax(
                 best, best_move = score, move
             alpha = max(alpha, score)
             if alpha >= beta:
+                if not board.is_capture(move):
+                    _store_killer(depth, move)
                 break  # β cut-off
     else:  # Black's turn — minimise score
         best = float("inf")
-        for move in _order_moves(board):
+        for move in _order_moves(board, depth):
             board.push(move)
             score, _ = _minimax(board, depth - 1, alpha, beta, True, eval_fn, deadline)
             board.pop()
@@ -170,6 +199,8 @@ def _minimax(
                 best, best_move = score, move
             beta = min(beta, score)
             if alpha >= beta:
+                if not board.is_capture(move):
+                    _store_killer(depth, move)
                 break  # α cut-off
 
     if len(_tt) >= _TT_MAX_SIZE:
@@ -202,6 +233,9 @@ def best_move(
         return "", 0.0
 
     _tt.clear()
+    for slot in _killers:
+        slot[0] = None
+        slot[1] = None
 
     logger.debug("Search starting depth=%d fen=%s", depth, fen[:40])
     start    = time.monotonic()
