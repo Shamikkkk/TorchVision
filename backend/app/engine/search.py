@@ -61,8 +61,13 @@ class _TimeUp(Exception):
     """Raised internally to unwind the search tree when the deadline is hit."""
 
 
-def _order_moves(board: chess.Board, depth: int) -> list[chess.Move]:
+def _order_moves(
+    board: chess.Board, depth: int
+) -> tuple[list[chess.Move], set[chess.Move]]:
     """Captures first, then killer moves, then remaining quiet moves.
+
+    Returns ``(ordered_moves, killer_set)`` so callers can check killer
+    membership in O(1) without recomputing it (needed for LMR guards).
 
     Good move ordering is the single biggest driver of alpha-beta efficiency.
     Captures are statistically more likely to be good moves, so examining them
@@ -98,7 +103,7 @@ def _order_moves(board: chess.Board, depth: int) -> list[chess.Move]:
             )
         )
 
-    return captures + killers + quiets
+    return captures + killers + quiets, killer_set
 
 
 _QS_DEPTH_LIMIT = 4   # max capture-chain depth to prevent explosion
@@ -227,31 +232,63 @@ def _minimax(
             return alpha, None
 
     best_move: chess.Move | None = None
+    ordered_moves, killer_set = _order_moves(board, depth)
 
     if maximizing:  # White's turn — maximise score
         best: float = float("-inf")
-        for move in _order_moves(board, depth):
+        for move_idx, move in enumerate(ordered_moves):
+            is_capture = board.is_capture(move)
+            # Late Move Reduction: quiet, non-killer, non-checking moves beyond
+            # the first 4 are searched at depth-2 first.  Only depth >= 3 and
+            # move index >= 4.  gives_check() must be called before push().
+            use_lmr = (
+                depth >= 3
+                and move_idx >= 4
+                and not is_capture
+                and move not in killer_set
+                and not board.gives_check(move)
+            )
             board.push(move)
-            score, _ = _minimax(board, depth - 1, alpha, beta, False, eval_fn, deadline)
+            if use_lmr:
+                score, _ = _minimax(board, depth - 2, alpha, beta, False, eval_fn, deadline)
+                # If the reduced search looks interesting, verify at full depth.
+                if score > alpha:
+                    score, _ = _minimax(board, depth - 1, alpha, beta, False, eval_fn, deadline)
+            else:
+                score, _ = _minimax(board, depth - 1, alpha, beta, False, eval_fn, deadline)
             board.pop()
             if score > best:
                 best, best_move = score, move
             alpha = max(alpha, score)
             if alpha >= beta:
-                if not board.is_capture(move):
+                if not is_capture:
                     _store_killer(depth, move, board)
                 break  # β cut-off
     else:  # Black's turn — minimise score
         best = float("inf")
-        for move in _order_moves(board, depth):
+        for move_idx, move in enumerate(ordered_moves):
+            is_capture = board.is_capture(move)
+            use_lmr = (
+                depth >= 3
+                and move_idx >= 4
+                and not is_capture
+                and move not in killer_set
+                and not board.gives_check(move)
+            )
             board.push(move)
-            score, _ = _minimax(board, depth - 1, alpha, beta, True, eval_fn, deadline)
+            if use_lmr:
+                score, _ = _minimax(board, depth - 2, alpha, beta, True, eval_fn, deadline)
+                # If the reduced search looks interesting, verify at full depth.
+                if score < beta:
+                    score, _ = _minimax(board, depth - 1, alpha, beta, True, eval_fn, deadline)
+            else:
+                score, _ = _minimax(board, depth - 1, alpha, beta, True, eval_fn, deadline)
             board.pop()
             if score < best:
                 best, best_move = score, move
             beta = min(beta, score)
             if alpha >= beta:
-                if not board.is_capture(move):
+                if not is_capture:
                     _store_killer(depth, move, board)
                 break  # α cut-off
 

@@ -470,6 +470,21 @@ def _rook_structure(board: chess.Board) -> int:
     return score
 
 
+def _bishop_pair_bonus(board: chess.Board) -> int:
+    """
+    +50cp for each side that retains both bishops.
+
+    The bishop pair is a well-known positional advantage: two bishops cover
+    all squares and become especially powerful in open positions.  Net score
+    is White-positive.
+    """
+    score = 0
+    for color in (chess.WHITE, chess.BLACK):
+        if len(board.pieces(chess.BISHOP, color)) >= 2:
+            score += 50 if color == chess.WHITE else -50
+    return score
+
+
 def tal_style_eval(board: chess.Board) -> int:
     """
     Tal-style evaluation: PST base + aggression bonuses × TAL_AGGRESSION
@@ -480,7 +495,7 @@ def tal_style_eval(board: chess.Board) -> int:
         return base  # don't dilute mate scores
     opening = _castling_bonus(board) + _queen_early_penalty(board)
     endgame = _passed_pawn_bonus(board) if len(board.piece_map()) < 10 else 0
-    structure = _pawn_structure(board) + _rook_structure(board)
+    structure = _pawn_structure(board) + _rook_structure(board) + _bishop_pair_bonus(board)
     return int(base + _tal_bonuses(board) * TAL_AGGRESSION + opening + endgame + structure)
 
 
