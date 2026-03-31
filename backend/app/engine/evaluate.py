@@ -373,6 +373,103 @@ def _passed_pawn_bonus(board: chess.Board) -> int:
     return score
 
 
+def _pawn_structure(board: chess.Board) -> int:
+    """
+    White-positive score for pawn structure.
+
+    - Doubled pawns:  -20cp per extra pawn beyond the first on a file.
+    - Isolated pawns: -15cp per pawn with no friendly pawn on an adjacent file.
+    - Connected passed pawns: +30cp per passed pawn that has a friendly pawn
+      on an adjacent file (the two support each other).
+    """
+    score = 0
+    for color in (chess.WHITE, chess.BLACK):
+        own_pawns   = board.pieces(chess.PAWN, color)
+        enemy_pawns = board.pieces(chess.PAWN, not color)
+        sign = 1 if color == chess.WHITE else -1
+
+        # Count pawns per file for doubling / isolation checks
+        file_counts: list[int] = [0] * 8
+        for sq in own_pawns:
+            file_counts[chess.square_file(sq)] += 1
+
+        for sq in own_pawns:
+            f = chess.square_file(sq)
+            r = chess.square_rank(sq)
+
+            # Doubled: penalise the extra copies (count−1 penalties per file)
+            if file_counts[f] > 1:
+                score -= sign * 20
+
+            # Isolated: no friendly pawn on either adjacent file
+            left  = file_counts[f - 1] if f > 0 else 0
+            right = file_counts[f + 1] if f < 7 else 0
+            if left == 0 and right == 0:
+                score -= sign * 15
+
+            # Connected passed pawn: passed AND has a friendly pawn next to it
+            else:
+                # Check whether this pawn is passed
+                passed = True
+                for esq in enemy_pawns:
+                    ef = chess.square_file(esq)
+                    er = chess.square_rank(esq)
+                    if abs(ef - f) <= 1:
+                        if color == chess.WHITE and er > r:
+                            passed = False
+                            break
+                        if color == chess.BLACK and er < r:
+                            passed = False
+                            break
+                if passed:
+                    score += sign * 30
+
+    return score
+
+
+def _rook_structure(board: chess.Board) -> int:
+    """
+    White-positive score for rook placement.
+
+    - Open file   (+25cp): no pawns of either color on the rook's file.
+    - Semi-open   (+15cp): no own pawns, but enemy pawns present.
+    - Connected   (+20cp): two same-color rooks on the same rank or file
+      with no pieces between them.
+    """
+    score = 0
+    for color in (chess.WHITE, chess.BLACK):
+        sign = 1 if color == chess.WHITE else -1
+        own_rooks = board.pieces(chess.ROOK, color)
+        if not own_rooks:
+            continue
+
+        own_pawns   = board.pieces(chess.PAWN, color)
+        enemy_pawns = board.pieces(chess.PAWN, not color)
+
+        for sq in own_rooks:
+            f = chess.square_file(sq)
+            file_mask = chess.BB_FILES[f]
+            has_own   = bool(own_pawns   & file_mask)
+            has_enemy = bool(enemy_pawns & file_mask)
+
+            if not has_own and not has_enemy:
+                score += sign * 25   # open file
+            elif not has_own:
+                score += sign * 15   # semi-open file
+
+        # Connected rooks: same rank or file, nothing between them
+        rook_list = list(own_rooks)
+        if len(rook_list) >= 2:
+            r1, r2 = rook_list[0], rook_list[1]
+            between = chess.SquareSet(chess.between(r1, r2))
+            if (chess.square_file(r1) == chess.square_file(r2) or
+                    chess.square_rank(r1) == chess.square_rank(r2)):
+                if not (between & board.occupied):
+                    score += sign * 20
+
+    return score
+
+
 def tal_style_eval(board: chess.Board) -> int:
     """
     Tal-style evaluation: PST base + aggression bonuses × TAL_AGGRESSION
@@ -383,7 +480,8 @@ def tal_style_eval(board: chess.Board) -> int:
         return base  # don't dilute mate scores
     opening = _castling_bonus(board) + _queen_early_penalty(board)
     endgame = _passed_pawn_bonus(board) if len(board.piece_map()) < 10 else 0
-    return int(base + _tal_bonuses(board) * TAL_AGGRESSION + opening + endgame)
+    structure = _pawn_structure(board) + _rook_structure(board)
+    return int(base + _tal_bonuses(board) * TAL_AGGRESSION + opening + endgame + structure)
 
 
 def hand_crafted_eval(board: chess.Board) -> int:

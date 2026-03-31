@@ -35,14 +35,26 @@ _MAX_KILLER_DEPTH = 20
 # Two killer slots per depth — quiet moves that recently caused a beta cutoff.
 _killers: list[list[chess.Move | None]] = [[None, None] for _ in range(_MAX_KILLER_DEPTH)]
 
+# History heuristic: quiet moves that caused beta cutoffs get a score boost.
+# Key: (piece_type, to_square).  Value: accumulated depth² reward.
+_history: dict[tuple[int, int], int] = {}
 
-def _store_killer(depth: int, move: chess.Move) -> None:
+_NULL_MOVE_R = 2   # null-move reduction
+
+
+def _store_killer(depth: int, move: chess.Move, board: chess.Board) -> None:
     if depth >= _MAX_KILLER_DEPTH:
         return
     slot = _killers[depth]
     if slot[0] != move:          # don't duplicate
         slot[1] = slot[0]
         slot[0] = move
+    # History: reward this quiet move proportional to depth² so deep cutoffs
+    # count more than shallow ones.
+    piece = board.piece_at(move.from_square)
+    if piece:
+        key = (piece.piece_type, move.to_square)
+        _history[key] = _history.get(key, 0) + depth * depth
 
 
 class _TimeUp(Exception):
@@ -74,6 +86,18 @@ def _order_moves(board: chess.Board, depth: int) -> list[chess.Move]:
             killers.append(move)
         else:
             quiets.append(move)
+
+    # Sort quiet moves by history score descending — moves that caused beta
+    # cutoffs in previous iterations bubble to the top.
+    if quiets:
+        quiets.sort(
+            key=lambda m: -_history.get(
+                (board.piece_at(m.from_square).piece_type, m.to_square)
+                if board.piece_at(m.from_square) else (0, 0),
+                0,
+            )
+        )
+
     return captures + killers + quiets
 
 
@@ -152,6 +176,7 @@ def _minimax(
     maximizing: bool,
     eval_fn: EvalFn,
     deadline: float,
+    allow_null: bool = True,
 ) -> tuple[float, chess.Move | None]:
     """
     Returns (score, best_move).
@@ -159,6 +184,8 @@ def _minimax(
     score is from White's perspective throughout the tree.
     best_move is None at leaf nodes (no move was made).
     Raises _TimeUp when the wall-clock deadline is exceeded.
+
+    allow_null: False after a null move to prevent consecutive null moves.
     """
     if time.monotonic() >= deadline:
         raise _TimeUp
@@ -174,6 +201,31 @@ def _minimax(
     if depth == 0:
         return _quiescence(board, alpha, beta, maximizing, eval_fn, deadline), None
 
+    # ------------------------------------------------------------------
+    # Null move pruning
+    # If we skip our turn and the opponent still can't beat beta, this
+    # node is already too good — prune it.
+    # Conditions: depth >= 3, not in check, not in endgame (>= 10 pieces).
+    # R=2 so the verification search runs at depth-1-R = depth-3.
+    # ------------------------------------------------------------------
+    if (allow_null
+            and depth >= 3
+            and not board.is_check()
+            and len(board.piece_map()) >= 10):
+        board.push(chess.Move.null())
+        null_score, _ = _minimax(
+            board, depth - 1 - _NULL_MOVE_R,
+            alpha, beta,
+            not maximizing,
+            eval_fn, deadline,
+            allow_null=False,
+        )
+        board.pop()
+        if maximizing and null_score >= beta:
+            return beta, None
+        if not maximizing and null_score <= alpha:
+            return alpha, None
+
     best_move: chess.Move | None = None
 
     if maximizing:  # White's turn — maximise score
@@ -187,7 +239,7 @@ def _minimax(
             alpha = max(alpha, score)
             if alpha >= beta:
                 if not board.is_capture(move):
-                    _store_killer(depth, move)
+                    _store_killer(depth, move, board)
                 break  # β cut-off
     else:  # Black's turn — minimise score
         best = float("inf")
@@ -200,7 +252,7 @@ def _minimax(
             beta = min(beta, score)
             if alpha >= beta:
                 if not board.is_capture(move):
-                    _store_killer(depth, move)
+                    _store_killer(depth, move, board)
                 break  # α cut-off
 
     if len(_tt) >= _TT_MAX_SIZE:
@@ -233,6 +285,7 @@ def best_move(
         return "", 0.0
 
     _tt.clear()
+    _history.clear()
     for slot in _killers:
         slot[0] = None
         slot[1] = None
