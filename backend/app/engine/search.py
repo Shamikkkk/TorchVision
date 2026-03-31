@@ -336,18 +336,44 @@ def best_move(
     best_uci   = legal[0].uci()
     best_score = 0.0
 
+    _AW_DELTA   = 50       # initial half-width of the aspiration window (cp)
+    _AW_RETRIES = 3        # max widening attempts before falling back to full window
+    maximizing  = board.turn == chess.WHITE
+    prev_score  = 0.0      # updated after each completed depth
+
     for d in range(1, depth + 1):
+        # Depth 1 always uses a full window to establish a reliable prev_score.
+        if d == 1:
+            a, b = float("-inf"), float("inf")
+        else:
+            a = prev_score - _AW_DELTA
+            b = prev_score + _AW_DELTA
+
         try:
-            score, move = _minimax(
-                board, d,
-                float("-inf"), float("inf"),
-                board.turn == chess.WHITE,
-                eval_fn, deadline,
-            )
+            for attempt in range(_AW_RETRIES + 1):
+                score, move = _minimax(board, d, a, b, maximizing, eval_fn, deadline)
+
+                if score <= a:
+                    # Fail low — widen the lower bound and retry.
+                    if attempt == _AW_RETRIES:
+                        a = float("-inf")
+                    else:
+                        a -= _AW_DELTA * (2 ** attempt)
+                elif score >= b:
+                    # Fail high — widen the upper bound and retry.
+                    if attempt == _AW_RETRIES:
+                        b = float("inf")
+                    else:
+                        b += _AW_DELTA * (2 ** attempt)
+                else:
+                    break  # score inside window — search complete for this depth
+
             # Only commit results from fully-completed searches.
             if move is not None:
                 best_uci   = move.uci()
                 best_score = float(score)
+                prev_score = best_score
+
         except _TimeUp:
             logger.debug("Time limit hit at depth %d — returning best so far", d)
             break
