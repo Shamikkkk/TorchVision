@@ -145,21 +145,49 @@ Estimated ELO: ~1200–1400
 - Root causes: 49% draws (weak gradient) + 0.1s/move (noisy positions)
 
 **Phase B next steps:**
-1. Download 5M Lichess positions with built-in Stockfish evals:
-   ```bash
-   python -m model_training.stream_parse \
-       --year 2023 --month 6 \
-       --out data/lichess_positions.csv \
-       --limit 5000000 \
-       --min-elo 1500
-   ```
-2. Retrain NNUE on `lichess_positions.csv` (modify `train_nnue_selfplay.py` to accept `eval_cp` labels normalised to [0,1] via sigmoid, or train a regression head directly)
-3. Validate: `python scripts/validate_nnue.py` — must win ≥ 52% of 200 games vs classical
 
-**Success criteria:**
-- NNUE scores 52%+ against classical in 200-game match
-- No queen blunders in test games
-- Startup log: `"Pyro ready — NNUE 🧠 (Lichess trained)"`
+**Step 1 — Lichess data download (running now):**
+```bash
+python -m model_training.stream_parse \
+    --year 2023 --month 6 \
+    --out data/lichess_positions.csv \
+    --limit 5000000 \
+    --min-elo 1500 \
+    --append
+```
+Target: 5,000,000 positions with built-in SF evals. ETA: ~4–5 hours overnight.
+
+**Step 2 — Merge with existing data:**
+```bash
+python scripts/merge_training_data.py
+```
+Combine `lichess_positions.csv` + `positions_sf_deep.csv` → `positions_final_v2.csv`. Target: ~5.5M positions total.
+
+**Step 3 — Retrain NNUE on Lichess data:**
+Modify `train_nnue_selfplay.py` to accept `eval_cp` labels (not W/D/L — Lichess data has centipawn evals).
+```bash
+python scripts/train_nnue_selfplay.py --csv data/lichess_positions.csv
+```
+Target: val_loss < 0.02.
+
+**Step 4 — SPRT validation (200 games first):**
+```bash
+python scripts/validate_nnue.py --games 200
+```
+NNUE must win 52%+ to proceed. If passes → run full 2000-game match. If fails → analyze, collect more data.
+
+**Step 5 — Enable if validated:**
+Wire `nnue_selfplay.pt` into `model.py`. Use blended eval: `0.6 × NNUE + 0.4 × tal_style_eval`.
+Update startup log: `"Pyro ready — NNUE v2 🧠 (Lichess trained, depth 4)"`.
+
+**Why this will work vs self-play:**
+- 5M positions vs 864k self-play
+- Centipawn evals vs W/D/L labels (much stronger gradient signal)
+- Real GM games vs engine-vs-engine blitz (higher positional quality)
+- Matches approach confirmed to work (high-quality labels matter more than quantity at smaller scale)
+
+**Contempt factor (just added):**
+`CONTEMPT = 30cp` in `search.py` — engine treats draws as −30cp, preferring any fighting line over a forced draw. Directly addresses the passive-play bias seen in v1 self-play data.
 
 #### Phase C — MCTS (after Phase B)
 1. Train policy head with UCI moves
