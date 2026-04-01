@@ -41,6 +41,11 @@ _history: dict[tuple[int, int], int] = {}
 
 _NULL_MOVE_R = 2   # null-move reduction
 
+# Contempt factor (centipawns): the engine treats a draw as slightly worse
+# than zero.  From the side-to-move's perspective a draw scores -CONTEMPT,
+# making Pyro prefer any fighting line over a forced draw.
+CONTEMPT = 30
+
 
 def _store_killer(depth: int, move: chess.Move, board: chess.Board) -> None:
     if depth >= _MAX_KILLER_DEPTH:
@@ -202,6 +207,11 @@ def _minimax(
             return cached_score, cached_move
 
     if board.is_game_over():
+        outcome = board.outcome()
+        if outcome is not None and outcome.winner is None:
+            # Draw (stalemate, 50-move, insufficient material, repetition).
+            # Apply contempt: side-to-move slightly prefers losing over drawing.
+            return -CONTEMPT if maximizing else CONTEMPT, None
         return eval_fn(board), None
     if depth == 0:
         return _quiescence(board, alpha, beta, maximizing, eval_fn, deadline), None
@@ -319,7 +329,10 @@ def best_move(
         return "", 0.0
 
     if board.is_repetition(2):
-        return "", 0.0
+        # Already a draw by repetition at the root — apply contempt so the
+        # caller knows Pyro is unhappy about this result.
+        contempt_score = -CONTEMPT if board.turn == chess.WHITE else CONTEMPT
+        return "", float(contempt_score)
 
     _tt.clear()
     _history.clear()
