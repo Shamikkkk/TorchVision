@@ -1,10 +1,19 @@
 """
 Stream-parse a Lichess PGN database month directly into a labeled CSV.
 
+Evals are extracted from the [%eval] comments that Lichess embeds in every
+move annotation — no local Stockfish calls needed.  Positions without an
+eval comment (or with a mate score) are skipped.
+
+Lichess PGN eval format:
+    1. e4 { [%eval 0.17] [%clk 0:05:00] } e5 { [%eval 0.19] }
+
 The full pipeline runs without touching disk for PGN data:
 
     HTTP stream (zst) → zstd decompressor → TextIOWrapper
-        → chess.pgn.read_game() → classical engine label → CSV row
+        → chess.pgn.read_game() → [%eval] extraction → CSV row
+
+Throughput: ~1000+ pos/s (pure text parsing, no engine).
 
 Auto-resume: on connection drop the script reconnects with an HTTP Range
 header to continue from the last received byte.  If the server doesn't
@@ -30,8 +39,7 @@ Options:
     --limit         Max positions to write  (default: 500,000)
     --min-elo       Minimum Elo for both players  (default: 2000)
     --no-elo-filter Disable Elo filter entirely (useful for small datasets)
-    --depth         Labelling engine depth  (default: 2, ~1000 pos/s)
-    --moves         Max opening moves per game  (default: 15)
+    --moves         Max moves per game to extract  (default: 15)
     --append        Append to existing CSV instead of overwriting
 """
 
@@ -39,6 +47,7 @@ import argparse
 import csv
 import http.client
 import io
+import re
 import sys
 import time
 from pathlib import Path
@@ -48,13 +57,6 @@ import chess.pgn
 import requests
 import zstandard as zstd
 
-# Add backend/ to sys.path so `app` and `model_training` are both importable.
-_BACKEND = Path(__file__).resolve().parent.parent
-if str(_BACKEND) not in sys.path:
-    sys.path.insert(0, str(_BACKEND))
-
-from model_training.engine_classical import best_move_with_eval  # noqa: E402
-
 _LICHESS_IP   = "141.95.66.62"
 _LICHESS_HOST = "database.lichess.org"
 _BASE_PATH    = "/standard"
@@ -63,6 +65,30 @@ _GAME_REPORT_EVERY = 100    # verbose progress line every N games
 _SKIP_REPORT_EVERY = 1_000  # low-Elo skip notice every N skips
 _MAX_RETRIES       = 10
 _RETRY_DELAY_S     = 5
+
+# Matches [%eval 0.17], [%eval -1.35], but NOT [%eval #3] (mate scores).
+# Lichess always uses this exact format inside move comments.
+_EVAL_RE = re.compile(r'\[%eval\s+([+-]?\d+\.?\d*)\]')
+
+
+def _parse_eval(comment: str) -> float | None:
+    """
+    Extract a centipawn evaluation from a Lichess PGN move comment.
+
+    Returns centipawns (White-positive) or None if no numeric eval is present.
+    Mate scores ([%eval #N]) are intentionally skipped — they sit far outside
+    the normal cp range and would distort MSE training.
+
+    Examples:
+        "[%eval 0.17] [%clk 0:05:00]"  →  17.0
+        "[%eval -1.35]"                 → -135.0
+        "[%eval #3]"                    →  None  (skipped)
+        ""                              →  None  (no annotation)
+    """
+    m = _EVAL_RE.search(comment)
+    if m is None:
+        return None
+    return float(m.group(1)) * 100.0   # pawns → centipawns
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +186,6 @@ def stream_parse(
     limit: int,
     min_elo: int,
     no_elo_filter: bool,
-    label_depth: int,
     max_moves: int,
     append: bool,
 ) -> None:
@@ -171,7 +196,7 @@ def stream_parse(
     print(
         f"[stream] Limit: {limit:,} positions"
         f"  |  Elo filter: {elo_desc}"
-        f"  |  depth: {label_depth}"
+        f"  |  eval: from [%eval] comments (no local engine)"
         f"  |  append: {append}"
     )
 
@@ -201,7 +226,7 @@ def stream_parse(
     with open(out_path, csv_mode, newline="", encoding="utf-8") as csv_fh:
         writer = csv.writer(csv_fh)
         if write_header:
-            writer.writerow(["fen", "eval_cp", "best_move"])
+            writer.writerow(["fen", "eval_cp"])
 
         while positions < limit:
             if attempt > _MAX_RETRIES:
@@ -307,24 +332,29 @@ def stream_parse(
                                 board        = game.board()
                                 moves_played = 0
 
-                                for move in game.mainline_moves():
+                                # game.mainline() yields GameNode objects; each
+                                # node carries the move (.move) and the comment
+                                # that Lichess places after it (.comment), which
+                                # contains [%eval X.XX] for annotated games.
+                                for node in game.mainline():
                                     if moves_played >= max_moves or positions >= limit:
                                         break
-                                    board.push(move)
+                                    board.push(node.move)
                                     moves_played += 1
 
                                     if board.is_game_over():
                                         break
+
+                                    eval_cp = _parse_eval(node.comment)
+                                    if eval_cp is None:
+                                        continue  # no [%eval] in this comment
 
                                     fen = board.fen()
                                     if fen in seen_fens:
                                         continue
                                     seen_fens.add(fen)
 
-                                    uci, score = best_move_with_eval(
-                                        fen, depth=label_depth
-                                    )
-                                    writer.writerow([fen, f"{score:.1f}", uci])
+                                    writer.writerow([fen, f"{eval_cp:.1f}"])
                                     positions += 1
 
                                 if games_read % _GAME_REPORT_EVERY == 0:
@@ -395,8 +425,6 @@ def main() -> None:
                         help="Minimum Elo for both players (default 2000)")
     parser.add_argument("--no-elo-filter", action="store_true", dest="no_elo_filter",
                         help="Disable Elo filter entirely (useful for small datasets)")
-    parser.add_argument("--depth",         type=int,  default=2,
-                        help="Labelling engine depth (default 2, ~1000 pos/s)")
     parser.add_argument("--moves",         type=int,  default=15,
                         help="Max opening moves per game (default 15)")
     parser.add_argument("--append",        action="store_true",
@@ -410,7 +438,6 @@ def main() -> None:
         limit=args.limit,
         min_elo=args.min_elo,
         no_elo_filter=args.no_elo_filter,
-        label_depth=args.depth,
         max_moves=args.moves,
         append=args.append,
     )

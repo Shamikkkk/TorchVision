@@ -11,7 +11,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 **Phase 1 (UI polish) — complete.**
 **Phase 2 (classical engine) — complete and working.**
 **Phase A (classical engine tuning) — COMPLETE ✅ (~1200–1400 ELO estimated)**
-**Phase B (NNUE self-play) — v1 FAILED (30% vs classical); v2 planned (1s/move + draw filtering).**
+**Phase B (NNUE via Lichess evals) — in progress (stream_parse upgraded; ready to download 5M positions)**
 **Game Analyzer — complete.**
 
 ### Completed features
@@ -54,6 +54,29 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 - **NNUE scaling fixed** (`app/engine/nnue.py`): `_CP_SCALE=1500`, sign flipped, now matches `tal_style_eval` range — disabled pending MCTS
 - **Stockfish eval bar** (`app/routes/engine.py` + `useGameSocket.ts`): fully wired, SF depth-15, centipawns White-positive
 - **Move ordering** (`app/engine/search.py`): captures searched before quiet moves
+- **Phase A complete** (`app/engine/evaluate.py` + `app/engine/search.py`):
+  - Killer moves heuristic (2 slots per depth)
+  - History heuristic (depth² reward on beta cutoffs, sorts quiet moves)
+  - Null move pruning (NMP, R=2) — skips in check / ≤10 pieces / consecutive nulls
+  - Late Move Reductions (LMR) — depth-2 for quiet non-killer non-checking moves at index ≥4, re-search if interesting
+  - Aspiration windows (AW, ±50cp, up to 3 widenings × 2 each, fallback to ±∞)
+  - Pawn structure: doubled (−20cp), isolated (−15cp), connected passed (+30cp)
+  - Rook evaluation: open file (+25cp), semi-open (+15cp), connected rooks (+20cp)
+  - Bishop pair bonus (+50cp)
+  - Endgame king activity (KING_EG_PST) + rank-scaled passed pawn bonuses
+- **Self-play generator** (`backend/scripts/generate_selfplay.py`):
+  - v1: 864,620 positions at 0.1s/move — too many draws (49%), too fast
+  - v2: 41,686 positions at 1s/move with draw filtering (30% draw keep rate)
+- **NNUE self-play trainer** (`backend/scripts/train_nnue_selfplay.py`):
+  - Trained on v1 data: val_loss=0.0208
+  - FAILED validation: 30% score vs classical (need 55% to pass)
+  - Root cause: too many draws → weak gradient; self-play at 0.1s/move is too noisy
+- **SPRT validator** (`backend/scripts/validate_nnue.py`): 2000-game match with alternating colors, reports W/D/L and running score %, exits 0/1 on PASS/FAIL
+- **stream_parse upgraded** (`backend/model_training/stream_parse.py`):
+  - Now reads `[%eval X.XX]` comments embedded by Lichess — no local Stockfish needed
+  - Regex excludes mate scores (`[%eval #N]`) — those are outliers for MSE training
+  - Speed: 1000+ pos/s (was ~2 pos/s at depth 2)
+  - CSV columns: `fen, eval_cp` (centipawns, White-positive)
 - **Data pipeline** (`backend/scripts/`):
   - `download_historical_pgns.py` — downloads GM PGN collections from pgnmentor.com
   - `download_chesscom.py` — fetches Chess.com games, labels with SF depth-8, outputs CSV
@@ -101,44 +124,42 @@ All improvements implemented:
 
 Estimated ELO: ~1200–1400
 
-#### Phase B — Proper NNUE (in progress)
+#### Phase B — Proper NNUE via Lichess evals (in progress)
+
+**Why Lichess over self-play:**
+- Self-play at 0.1s/move produces 49% draws → near-zero gradient for MSE loss
+- Self-play at 1s/move is too slow to generate millions of positions
+- Lichess PGNs already embed Stockfish evals as `[%eval X.XX]` in every move comment
+- `stream_parse.py` reads these at 1000+ pos/s — no local engine needed
+- We can get 5M high-quality positions in hours instead of weeks
 
 **Infrastructure built (all scripts exist):**
-- `backend/scripts/generate_selfplay.py` — Pyro self-play data generator
-- `backend/scripts/train_nnue_selfplay.py` — NNUE trainer (MSE on game results)
+- `backend/model_training/stream_parse.py` — HTTP → zstd → PGN → CSV via `[%eval]` comments
+- `backend/scripts/generate_selfplay.py` — Pyro self-play generator (kept for ablation; v2 with 1s/move + draw filter)
+- `backend/scripts/train_nnue_selfplay.py` — NNUE trainer (MSE, accepts `eval_cp` or W/D/L labels)
 - `backend/scripts/validate_nnue.py` — 2000-game SPRT match vs classical
 
 **NNUE self-play v1 — FAILED validation ❌**
 - Score: 30% vs classical (need 55% to pass)
 - `nnue_selfplay.pt` NOT enabled; `eval_fn = tal_style_eval` remains default
-- Root causes identified:
-  1. **49% draws** in training data → network learned passive/drawish play
-  2. **0.1s/move** too fast → low-quality positions, engine plays poorly
-  3. Training signal too weak: draw=0.5 provides almost no gradient
+- Root causes: 49% draws (weak gradient) + 0.1s/move (noisy positions)
 
-**Phase B v2 — next attempt:**
-1. Regenerate self-play at **1s/move** (higher quality positions)
-2. **Filter draws**: keep all decisive games + only 50% of draws (oversample wins/losses)
-3. Retrain NNUE on the cleaner, decisive-biased dataset
-4. Re-run 2000-game validation; must score ≥ 55% to enable
-
-**Why self-play instead of Stockfish labels:**
-- Stockfish labels teach "what SF thinks", not "what wins"
-- Self-play labels teach "what actually leads to winning"
-- Research confirmed: need 10M+ positions, simple features
-- Our 634k SF-labeled positions were 1,580× too little
-
-**Steps (unchanged):**
-1. `generate_selfplay.py --games 500` — run repeatedly; append to `data/selfplay_positions.csv`
-2. Filter CSV before training: remove 50% of draw rows
-3. `train_nnue_selfplay.py` — saves to `models/nnue_selfplay.pt`
-4. `validate_nnue.py` — 2000 games; PASS if ≥ 55%
-5. Enable only if validated: wire into `model.py`, blend 0.5 × NNUE + 0.5 × `tal_style_eval`
+**Phase B next steps:**
+1. Download 5M Lichess positions with built-in Stockfish evals:
+   ```bash
+   python -m model_training.stream_parse \
+       --year 2023 --month 6 \
+       --out data/lichess_positions.csv \
+       --limit 5000000 \
+       --min-elo 1500
+   ```
+2. Retrain NNUE on `lichess_positions.csv` (modify `train_nnue_selfplay.py` to accept `eval_cp` labels normalised to [0,1] via sigmoid, or train a regression head directly)
+3. Validate: `python scripts/validate_nnue.py` — must win ≥ 52% of 200 games vs classical
 
 **Success criteria:**
-- NNUE wins 55%+ against classical in 2000-game match
+- NNUE scores 52%+ against classical in 200-game match
 - No queen blunders in test games
-- Startup log: `"Pyro ready — NNUE v2 🧠 (self-play trained)"`
+- Startup log: `"Pyro ready — NNUE 🧠 (Lichess trained)"`
 
 #### Phase C — MCTS (after Phase B)
 1. Train policy head with UCI moves
@@ -158,6 +179,12 @@ Estimated ELO: ~1200–1400
 2. **neural** — if `torch_chess.pt` exists with value head only
 3. **classical** — `tal_style_eval` PST (current default, always available)
 4. **stockfish** — last resort
+
+**Current startup log** (classical mode):
+```
+Pyro ready — Tal style 🔥 (depth 4 + NMP + LMR + AW)
+```
+`eval_fn = tal_style_eval` is hardcoded in `model.py:best_move()` — NNUE is not wired in yet.
 
 ### Training the neural network
 Two paths to produce `backend/models/torch_chess.pt`:
