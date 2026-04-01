@@ -1,23 +1,28 @@
 """
 Self-play data generator for Phase B NNUE training.
 
-Pyro plays itself (both sides use the same engine) at 0.1 s/move.
+Pyro plays itself (both sides use the same engine).
 Every position after the first 5 full moves (10 half-moves) is saved
 with the final game result as the training label.
+
+Draw filtering: all positions from decisive games are kept; positions
+from drawn games are kept with 30% probability to reduce the passive-play
+bias that caused v1 to score only 30% against the classical engine.
 
 Output CSV format:
     fen,result
     result: 1.0 = White won, 0.5 = draw, 0.0 = Black won
 
 Run from backend/:
-    python scripts/generate_selfplay.py --games 500
-    python scripts/generate_selfplay.py --games 500 --output data/selfplay_positions.csv
+    python scripts/generate_selfplay.py --games 1500
+    python scripts/generate_selfplay.py --games 1500 --time 1.0 --output data/selfplay_v2_positions.csv
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import random
 import sys
 import time
 from pathlib import Path
@@ -31,16 +36,14 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-# Patch _TIME_LIMIT *before* any engine code runs.
-# search.best_move() computes `deadline = start + _TIME_LIMIT` on every call,
-# so patching the module attribute here takes effect for all subsequent calls.
+# _TIME_LIMIT is patched in main() after args are parsed, so --time takes effect.
 from app.engine import search as _search_module  # noqa: E402
-_search_module._TIME_LIMIT = 0.1
 
 from app.engine.model import PyroEngine  # noqa: E402
 
 _MAX_HALF_MOVES  = 150   # 75 full moves; declare draw if exceeded
 _SKIP_HALF_MOVES = 10    # skip first 5 full moves — pure opening, less informative
+_DRAW_KEEP_PROB  = 0.3   # probability of keeping any single position from a drawn game
 
 
 # ---------------------------------------------------------------------------
@@ -131,14 +134,21 @@ def main() -> None:
         description="Generate Pyro self-play positions for NNUE training."
     )
     parser.add_argument(
-        "--games", type=int, default=500,
-        help="Number of games to play (default: 500)",
+        "--games", type=int, default=1500,
+        help="Number of games to play (default: 1500)",
     )
     parser.add_argument(
-        "--output", default="data/selfplay_positions.csv",
-        help="Output CSV path relative to backend/ (default: data/selfplay_positions.csv)",
+        "--output", default="data/selfplay_v2_positions.csv",
+        help="Output CSV path relative to backend/ (default: data/selfplay_v2_positions.csv)",
+    )
+    parser.add_argument(
+        "--time", type=float, default=1.0, dest="time_limit",
+        help="Time limit per move in seconds (default: 1.0)",
     )
     args = parser.parse_args()
+
+    # Patch time limit now that args are available.
+    _search_module._TIME_LIMIT = args.time_limit
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,9 +169,13 @@ def main() -> None:
         writer.writerow(["fen", "result"])
 
     # Initialise engine (Stockfish path is irrelevant for self-play)
+    print(f"Draw filtering: keeping {int(_DRAW_KEEP_PROB * 100)}% of draw positions")
     print("Initialising Pyro engine…")
     engine = PyroEngine(stockfish_path="")
-    print(f"Engine ready.  Playing {args.games} games at 0.1 s/move.\n")
+    print(
+        f"Engine ready.  Playing {args.games} games at {args.time_limit}s/move"
+        f" (draw filter: {int(_DRAW_KEEP_PROB * 100)}%)\n"
+    )
 
     total_positions = existing_positions
     game_times: list[float] = []
@@ -173,11 +187,16 @@ def main() -> None:
         elapsed = time.monotonic() - t0
         game_times.append(elapsed)
 
+        is_draw = (result == 0.5)
+        saved = 0
         for fen in fens:
-            writer.writerow([fen, result])
+            # Always save positions from decisive games; filter draws stochastically.
+            if not is_draw or random.random() < _DRAW_KEEP_PROB:
+                writer.writerow([fen, result])
+                saved += 1
         csv_file.flush()
 
-        total_positions += len(fens)
+        total_positions += saved
         label = _result_label(result)
         results[label] += 1
 
@@ -186,7 +205,7 @@ def main() -> None:
 
         print(
             f"Game {game_num}/{args.games}: {label}"
-            f" — positions this game: {len(fens)}, total: {total_positions:,}"
+            f" — saved: {saved}/{len(fens)}, total: {total_positions:,}"
             f" | avg {avg_time:.1f}s/game, ETA {eta}"
         )
 
