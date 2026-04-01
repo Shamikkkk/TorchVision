@@ -11,7 +11,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 **Phase 1 (UI polish) — complete.**
 **Phase 2 (classical engine) — complete and working.**
 **Phase A (classical engine tuning) — COMPLETE ✅ (~1200–1400 ELO estimated)**
-**Phase 3 (neural network) — NNUE trained + scaled; disabled pending MCTS.**
+**Phase B (NNUE self-play) — v1 FAILED (30% vs classical); v2 planned (1s/move + draw filtering).**
 **Game Analyzer — complete.**
 
 ### Completed features
@@ -101,7 +101,26 @@ All improvements implemented:
 
 Estimated ELO: ~1200–1400
 
-#### Phase B — Proper NNUE (planned, not started)
+#### Phase B — Proper NNUE (in progress)
+
+**Infrastructure built (all scripts exist):**
+- `backend/scripts/generate_selfplay.py` — Pyro self-play data generator
+- `backend/scripts/train_nnue_selfplay.py` — NNUE trainer (MSE on game results)
+- `backend/scripts/validate_nnue.py` — 2000-game SPRT match vs classical
+
+**NNUE self-play v1 — FAILED validation ❌**
+- Score: 30% vs classical (need 55% to pass)
+- `nnue_selfplay.pt` NOT enabled; `eval_fn = tal_style_eval` remains default
+- Root causes identified:
+  1. **49% draws** in training data → network learned passive/drawish play
+  2. **0.1s/move** too fast → low-quality positions, engine plays poorly
+  3. Training signal too weak: draw=0.5 provides almost no gradient
+
+**Phase B v2 — next attempt:**
+1. Regenerate self-play at **1s/move** (higher quality positions)
+2. **Filter draws**: keep all decisive games + only 50% of draws (oversample wins/losses)
+3. Retrain NNUE on the cleaner, decisive-biased dataset
+4. Re-run 2000-game validation; must score ≥ 55% to enable
 
 **Why self-play instead of Stockfish labels:**
 - Stockfish labels teach "what SF thinks", not "what wins"
@@ -109,48 +128,15 @@ Estimated ELO: ~1200–1400
 - Research confirmed: need 10M+ positions, simple features
 - Our 634k SF-labeled positions were 1,580× too little
 
-**Step 1 — Self-play data generator:**
-Create `backend/scripts/generate_selfplay.py`
-- Pyro plays itself using current `tal_style_eval` engine
-- Time control: 0.1s per move (fast games)
-- Save every position as FEN + game result (1=W, 0=D, −1=L)
-- Target: 500 games per run ≈ 30,000 positions per run; run 20+ times overnight = 600,000+ positions
-- Format: `fen,result` (not `fen,eval_cp`)
-- Resume support: append to existing file
-- Progress: `"Game X/500: W/D/L, positions so far: Y"`
-
-**Step 2 — NNUE architecture (already exists):**
-- Keep existing `nnue.py` (768→256→32→32→1)
-- Change training target from `eval_cp` to game result
-- Use BCE loss (binary cross-entropy), not MSE
-- Normalize: W=1.0, D=0.5, L=0.0
-
-**Step 3 — Training script:**
-Create `backend/scripts/train_nnue_selfplay.py`
-- Load `fen,result` CSV
-- Train NNUE on game outcomes; save to `backend/models/nnue_selfplay.pt`
-- Validate on held-out positions
-
-**Step 4 — SPRT validation (critical):**
-Create `backend/scripts/validate_nnue.py`
-- Play 100 games: NNUE Pyro vs classical Pyro
-- NNUE must win 55+ games to be enabled
-- If fails: analyse losses, retrain with more data
-- Never enable NNUE without passing this test
-
-**Step 5 — Enable if validated:**
-- Wire `nnue_selfplay.pt` into `model.py`
-- Use blended eval: 0.5 × NNUE + 0.5 × `tal_style_eval`
-- Increase blend ratio as NNUE improves
-
-**Timeline estimate:**
-- Session 1: build `generate_selfplay.py`, run overnight
-- Session 2: check data, build `train_nnue_selfplay.py`, train
-- Session 3: SPRT validation, enable if passes
-- Session 4+: iterate with more data
+**Steps (unchanged):**
+1. `generate_selfplay.py --games 500` — run repeatedly; append to `data/selfplay_positions.csv`
+2. Filter CSV before training: remove 50% of draw rows
+3. `train_nnue_selfplay.py` — saves to `models/nnue_selfplay.pt`
+4. `validate_nnue.py` — 2000 games; PASS if ≥ 55%
+5. Enable only if validated: wire into `model.py`, blend 0.5 × NNUE + 0.5 × `tal_style_eval`
 
 **Success criteria:**
-- NNUE wins 55%+ against classical in 100 games
+- NNUE wins 55%+ against classical in 2000-game match
 - No queen blunders in test games
 - Startup log: `"Pyro ready — NNUE v2 🧠 (self-play trained)"`
 
