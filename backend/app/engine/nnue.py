@@ -114,7 +114,7 @@ class NNUEModel(nn.Module):
 # Evaluator
 # ---------------------------------------------------------------------------
 
-_CP_SCALE = 1500.0
+_CP_SCALE = 600.0
 
 
 class NNUEEvaluator:

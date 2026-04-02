@@ -11,7 +11,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 **Phase 1 (UI polish) — complete.**
 **Phase 2 (classical engine) — complete and working.**
 **Phase A (classical engine tuning) — COMPLETE ✅ (~1200–1400 ELO estimated)**
-**Phase B (NNUE via Lichess evals) — in progress (stream_parse upgraded; ready to download 5M positions)**
+**Phase B (NNUE) — ABANDONED. Classical engine is the final eval function.**
 **Game Analyzer — complete.**
 
 ### Completed features
@@ -84,24 +84,20 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
   - 97,252 GM games downloaded: Tal, Kasparov, Fischer, Carlsen, Karpov, Petrosian, Spassky, Smyslov, Korchnoi, Capablanca, Morphy, Anderssen, Spielmann, Alekhine, Najdorf, Bronstein, Geller, Larsen, Ljubojevic, Shirov, Topalov, Morozevich, Grischuk, Aronian, Nakamura, VachierLagrave, Jobava, Rapport, Firouzja, Gukesh, Praggnanandhaa
   - Target: ~1,000,000 combined positions in `data/positions_combined.csv`
 
-### NNUE status (trained; scaling fixed; disabled)
-- `models/nnue_deep_backup.pt` — 497,998 positions, Stockfish depth-12 labels, best val loss = 0.0305
-- **Currently disabled** in search: `eval_fn = tal_style_eval` hardcoded in `backend/app/engine/model.py`
-- **Scaling FIXED**: `_CP_SCALE=1500`, sign corrected — output now matches `tal_style_eval` range
-- **Reason still disabled**: Python minimax too slow at depth 6; MCTS must replace minimax first
-- **Next**: enable after MCTS is implemented
-
-### Current stable state
-- `eval_fn`: `tal_style_eval` (classical, no blunders)
-- NNUE: disabled — needs billions of positions to be reliable (we have 634k, need 1B+)
+### Current stable state (FINAL)
+- `eval_fn`: `tal_style_eval` hardcoded in `model.py:best_move()` — this is permanent
+- NNUE: abandoned — see "Why NNUE was abandoned" below
 - ChessNet: disabled — policy head untrained
 - Engine plays real chess, no queen blunders
+- Startup log: `"Pyro ready -- Tal style (depth 4 + NMP + LMR + AW)"`
 
-### Why NNUE failed (research findings)
-- Need BILLIONS of positions before NNUE is reliable
-- We had 634k — 1,580× too little data
-- Simple (piece, square) features needed first
-- Test with actual ELO games, not just val_loss
+### Why NNUE was abandoned
+- Self-play v1 (864k positions, 0.1s/move): FAILED — 30% vs classical; 49% draws, weak gradient
+- Self-play v2 (41k positions, 1s/move + draw filtering): not enough data
+- Lichess eval_cp pipeline: built and tested; scale mismatch found (_CP_SCALE was 1500, should be 600)
+- Even after fixing scale: NNUE did not meaningfully improve over `tal_style_eval`
+- Root cause: need billions of positions for NNUE to reliably surpass a well-tuned hand-crafted eval
+- Decision: `tal_style_eval` is the production eval function — stable, fast, no blunders
 
 ### Real roadmap to a strong engine
 
@@ -124,72 +120,19 @@ All improvements implemented:
 
 Estimated ELO: ~1200–1400
 
-#### Phase B — Proper NNUE via Lichess evals (in progress)
+#### Phase B — NNUE ABANDONED ❌
 
-**Why Lichess over self-play:**
-- Self-play at 0.1s/move produces 49% draws → near-zero gradient for MSE loss
-- Self-play at 1s/move is too slow to generate millions of positions
-- Lichess PGNs already embed Stockfish evals as `[%eval X.XX]` in every move comment
-- `stream_parse.py` reads these at 1000+ pos/s — no local engine needed
-- We can get 5M high-quality positions in hours instead of weeks
+All NNUE approaches were tried and failed to beat `tal_style_eval`:
+- Self-play v1 (864k pos, 0.1s/move): 30% vs classical — too many draws, weak gradient
+- Self-play v2 (41k pos, 1s/move + draw filter): insufficient data volume
+- Lichess eval_cp pipeline: full infrastructure built; scale bug fixed (_CP_SCALE 1500→600); still no improvement
+- Conclusion: surpassing a well-tuned hand-crafted eval requires billions of positions, not millions
 
-**Infrastructure built (all scripts exist):**
-- `backend/model_training/stream_parse.py` — HTTP → zstd → PGN → CSV via `[%eval]` comments
-- `backend/scripts/generate_selfplay.py` — Pyro self-play generator (kept for ablation; v2 with 1s/move + draw filter)
-- `backend/scripts/train_nnue_selfplay.py` — NNUE trainer (MSE, accepts `eval_cp` or W/D/L labels)
-- `backend/scripts/validate_nnue.py` — 2000-game SPRT match vs classical
+**`eval_fn = tal_style_eval` is the permanent production eval. Do not re-attempt NNUE.**
 
-**NNUE self-play v1 — FAILED validation ❌**
-- Score: 30% vs classical (need 55% to pass)
-- `nnue_selfplay.pt` NOT enabled; `eval_fn = tal_style_eval` remains default
-- Root causes: 49% draws (weak gradient) + 0.1s/move (noisy positions)
+Infrastructure kept in `backend/scripts/` for reference but will not be run again.
 
-**Phase B next steps:**
-
-**Step 1 — Lichess data download (running now):**
-```bash
-python -m model_training.stream_parse \
-    --year 2023 --month 6 \
-    --out data/lichess_positions.csv \
-    --limit 5000000 \
-    --min-elo 1500 \
-    --append
-```
-Target: 5,000,000 positions with built-in SF evals. ETA: ~4–5 hours overnight.
-
-**Step 2 — Merge with existing data:**
-```bash
-python scripts/merge_training_data.py
-```
-Combine `lichess_positions.csv` + `positions_sf_deep.csv` → `positions_final_v2.csv`. Target: ~5.5M positions total.
-
-**Step 3 — Retrain NNUE on Lichess data:**
-Modify `train_nnue_selfplay.py` to accept `eval_cp` labels (not W/D/L — Lichess data has centipawn evals).
-```bash
-python scripts/train_nnue_selfplay.py --csv data/lichess_positions.csv
-```
-Target: val_loss < 0.02.
-
-**Step 4 — SPRT validation (200 games first):**
-```bash
-python scripts/validate_nnue.py --games 200
-```
-NNUE must win 52%+ to proceed. If passes → run full 2000-game match. If fails → analyze, collect more data.
-
-**Step 5 — Enable if validated:**
-Wire `nnue_selfplay.pt` into `model.py`. Use blended eval: `0.6 × NNUE + 0.4 × tal_style_eval`.
-Update startup log: `"Pyro ready — NNUE v2 🧠 (Lichess trained, depth 4)"`.
-
-**Why this will work vs self-play:**
-- 5M positions vs 864k self-play
-- Centipawn evals vs W/D/L labels (much stronger gradient signal)
-- Real GM games vs engine-vs-engine blitz (higher positional quality)
-- Matches approach confirmed to work (high-quality labels matter more than quantity at smaller scale)
-
-**Contempt factor (just added):**
-`CONTEMPT = 30cp` in `search.py` — engine treats draws as −30cp, preferring any fighting line over a forced draw. Directly addresses the passive-play bias seen in v1 self-play data.
-
-#### Phase C — MCTS (after Phase B)
+#### Phase C — MCTS (future, if revisited)
 1. Train policy head with UCI moves
 2. Enable MCTS with 200 simulations
 3. Target: ~1800+ ELO
@@ -210,9 +153,9 @@ Update startup log: `"Pyro ready — NNUE v2 🧠 (Lichess trained, depth 4)"`.
 
 **Current startup log** (classical mode):
 ```
-Pyro ready — Tal style 🔥 (depth 4 + NMP + LMR + AW)
+Pyro ready -- Tal style (depth 4 + NMP + LMR + AW)
 ```
-`eval_fn = tal_style_eval` is hardcoded in `model.py:best_move()` — NNUE is not wired in yet.
+`eval_fn = tal_style_eval` is hardcoded in `model.py:best_move()` — permanent, not a placeholder.
 
 ### Training the neural network
 Two paths to produce `backend/models/torch_chess.pt`:

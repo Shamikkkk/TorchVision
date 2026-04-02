@@ -72,7 +72,7 @@ class PyroEngine:
         if not hasattr(self, "mode"):
             self.mode = "classical"
 
-        logger.info("Pyro ready — Tal style 🔥 (depth %d + NMP + LMR + AW)", _MINIMAX_DEPTH)
+        logger.info("Pyro ready -- Tal style (depth %d + NMP + LMR + AW)", _MINIMAX_DEPTH)
 
         if _tablebase.available:
             logger.info("Tablebase: loaded ✅")
