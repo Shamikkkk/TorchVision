@@ -120,17 +120,116 @@ All improvements implemented:
 
 Estimated ELO: ~1200–1400
 
-#### Phase B — NNUE ABANDONED ❌
+#### Phase B v3 — Proper NNUE (Rust implementation)
 
-All NNUE approaches were tried and failed to beat `tal_style_eval`:
-- Self-play v1 (864k pos, 0.1s/move): 30% vs classical — too many draws, weak gradient
-- Self-play v2 (41k pos, 1s/move + draw filter): insufficient data volume
-- Lichess eval_cp pipeline: full infrastructure built; scale bug fixed (_CP_SCALE 1500→600); still no improvement
-- Conclusion: surpassing a well-tuned hand-crafted eval requires billions of positions, not millions
+##### Why Rust:
+- Python NNUE inference: ~1000 pos/s (too slow)
+- Rust NNUE inference: ~1,000,000 pos/s (1000x faster)
+- SIMD (AVX2) support for vectorized accumulator updates
+- Integer quantization (i16/i32) — no floating point drift
+- Bullet trainer is written in Rust — native integration
+- This is how ALL serious NNUE engines are built
 
-**`eval_fn = tal_style_eval` is the permanent production eval. Do not re-attempt NNUE.**
+##### Architecture decision (based on chess-inator research):
+- Input: 768 features (piece × square × color)
+- Hidden: 256 neurons (L1_SIZE=256, not 1024 yet)
+- Output: 1 neuron (centipawn score)
+- Activation: CReLU (clamp 0 to QA=255)
+- Quantization: QA=255, QB=64
+- Scale: K=400 (CP-space output)
+- NO king buckets yet — need billions of positions first
 
-Infrastructure kept in `backend/scripts/` for reference but will not be run again.
+##### Why NOT king buckets yet:
+- Research confirmed: HalfKP/HalfKA needs billions of positions
+- Simple (piece, square) features work fine at our scale
+- Add king buckets only after basic NNUE beats classical
+
+##### Step 1 — Rust engine rewrite (Phase C prerequisite):
+Create `torch/engine/` (Rust workspace)
+- Implement chess board representation (bitboards)
+- Implement move generation
+- Implement alpha-beta search (same as current Python)
+- Implement `tal_style_eval` as baseline
+- UCI protocol support
+- Target: match Python Pyro strength first
+
+##### Step 2 — NNUE accumulator in Rust:
+- Implement 768→256→1 NNUE architecture
+- Incremental updates (efficient add/sub on accumulator)
+- SIMD via `std::arch` (AVX2) for accumulator updates
+- Integer quantization (i16 weights, i32 accumulator)
+- Load weights from binary file
+
+##### Step 3 — Hardcode material into initial weights:
+Key insight from chess-inator research:
+Before training, write piece material values directly
+into the first layer weights. This gives NNUE a
+strong starting point so it never blunders pieces.
+Pawn=100, Knight=320, Bishop=330, Rook=500, Queen=900
+
+##### Step 4 — Self-play data generation (Rust):
+- Use NODE LIMIT not time limit (5000 nodes/move)
+- Save positions in binary packed format:
+  18.7 bytes/position (Stockfish format)
+  NOT CSV text format
+- Target: 100M positions (feasible in Rust overnight)
+- WDL interpolation:
+  `target = 0.5 * sigmoid(eval/400) + 0.5 * game_result`
+
+##### Step 5 — Training with Bullet:
+- Install Bullet trainer (Rust, by Jamie Whiting)
+- Feed binary position data to Bullet
+- Train 768→256→1 network
+- Validate: must beat classical in 55%+ of 200 games
+- Expected: similar to chess-inator result (667W/32D/7L vs classical)
+
+##### Step 6 — Enable in Rust engine:
+- Load quantized weights at startup
+- Wire NNUE eval into alpha-beta search
+- Keep `tal_style_eval` as fallback
+- Blend: 0.7 NNUE + 0.3 tal initially
+
+##### Timeline estimate:
+- Session 1: Rust workspace setup, board representation
+- Session 2-3: Move generation + search
+- Session 4: NNUE accumulator + quantization
+- Session 5: Self-play data generation
+- Session 6: Bullet training + validation
+- Session 7+: Iterate and improve
+
+##### Why this will succeed vs previous attempts:
+- v1 NNUE (Python): 864k positions, W/D/L labels → 30%
+- v2 NNUE (Python): 41k positions, filtered → too few
+- v3 NNUE (Python): 5M Lichess positions → 37% (broken scale)
+
+v4 NNUE (Rust):
+- 100M+ positions (1000x more data)
+- Hardcoded material knowledge (no blundering pieces)
+- Node limit self-play (higher quality positions)
+- Binary format (100x memory efficient)
+- Bullet trainer (production grade)
+- SIMD inference (1000x faster)
+- Integer quantization (no float drift)
+
+##### Frontend/Backend plan:
+- Keep existing Python/FastAPI backend
+- Add Rust engine as subprocess (UCI protocol)
+- Python calls Rust engine via stdin/stdout
+- No React changes needed
+- Gradual migration: Rust engine replaces `PyroEngine`
+
+##### Success criteria:
+- Rust engine matches Python Pyro strength (baseline)
+- NNUE beats classical Rust engine 55%+ in 200 games
+- No queen blunders in 20 test games
+- Startup: `"Pyro ready -- NNUE v4 (Rust, depth 4)"`
+
+##### Resources:
+- chess-inator blog series (DogeyStamp) — our main guide
+- Bullet trainer: github.com/jw1912/bullet
+- Chess Programming Wiki NNUE page
+- nnue-pytorch docs for architecture reference
+- Stockfish NNUE format for binary position encoding
 
 #### Phase C — MCTS (future, if revisited)
 1. Train policy head with UCI moves
