@@ -271,31 +271,176 @@ fn eval_king(
 }
 
 // ---------------------------------------------------------------------------
+// Search constants and killer table
+// ---------------------------------------------------------------------------
+
+const MAX_DEPTH: usize = 64;
+
+// Simple piece values for MVV-LVA ordering (not PeSTO — just for sorting)
+const MVV_LVA_VAL: [i32; 6] = [100, 320, 330, 500, 900, 20_000];
+
+type Killers = [[Option<(u8, u8)>; 2]; MAX_DEPTH];
+
+// ---------------------------------------------------------------------------
+// Move ordering
+// ---------------------------------------------------------------------------
+
+/// Return the simple piece value of whatever is on `sq` for `is_white`.
+fn piece_val_on(board: &Board, sq: u8, is_white: bool) -> i32 {
+    let bit = 1u64 << sq;
+    let (p, n, b, r, q) = if is_white {
+        (board.white_pawns, board.white_knights, board.white_bishops,
+         board.white_rooks, board.white_queens)
+    } else {
+        (board.black_pawns, board.black_knights, board.black_bishops,
+         board.black_rooks, board.black_queens)
+    };
+    if p & bit != 0 { MVV_LVA_VAL[0] }
+    else if n & bit != 0 { MVV_LVA_VAL[1] }
+    else if b & bit != 0 { MVV_LVA_VAL[2] }
+    else if r & bit != 0 { MVV_LVA_VAL[3] }
+    else if q & bit != 0 { MVV_LVA_VAL[4] }
+    else { MVV_LVA_VAL[5] }
+}
+
+/// Score a move for ordering. Higher = searched first.
+fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize) -> i32 {
+    if mv.flags & movegen::FLAG_CAPTURE != 0 {
+        let victim = if mv.flags & movegen::FLAG_EN_PASSANT != 0 {
+            MVV_LVA_VAL[0] // en passant always captures a pawn
+        } else {
+            piece_val_on(board, mv.to_sq, !board.side_to_move)
+        };
+        let attacker = piece_val_on(board, mv.from_sq, board.side_to_move);
+        return 10_000 + victim - attacker / 10;
+    }
+    // Killer moves: searched after captures, before quiet
+    if ply < MAX_DEPTH {
+        for slot in &killers[ply] {
+            if let Some((from, to)) = slot {
+                if *from == mv.from_sq && *to == mv.to_sq {
+                    return 5_000;
+                }
+            }
+        }
+    }
+    0
+}
+
+/// Sort moves in-place: captures (MVV-LVA) → killers → quiet.
+fn order_moves(board: &Board, moves: &mut [Move], killers: &Killers, ply: usize) {
+    moves.sort_unstable_by(|a, b| {
+        score_move(board, b, killers, ply)
+            .cmp(&score_move(board, a, killers, ply))
+    });
+}
+
+/// Store a killer move (non-capture that caused beta cutoff).
+fn store_killer(killers: &mut Killers, ply: usize, mv: &Move) {
+    if ply >= MAX_DEPTH {
+        return;
+    }
+    let entry = (mv.from_sq, mv.to_sq);
+    // Don't store duplicates; shift slot 0 → slot 1
+    if killers[ply][0] == Some(entry) {
+        return;
+    }
+    killers[ply][1] = killers[ply][0];
+    killers[ply][0] = Some(entry);
+}
+
+// ---------------------------------------------------------------------------
+// Quiescence search
+// ---------------------------------------------------------------------------
+
+/// Search captures only until the position is quiet.
+fn quiescence(board: &Board, mut alpha: i32, beta: i32) -> i32 {
+    let stand_pat = evaluate(board);
+    if stand_pat >= beta {
+        return beta;
+    }
+    if stand_pat > alpha {
+        alpha = stand_pat;
+    }
+
+    let all_moves = generate_moves(board);
+    // Collect and order captures by MVV-LVA
+    let mut captures: Vec<Move> = all_moves
+        .into_iter()
+        .filter(|m| m.flags & movegen::FLAG_CAPTURE != 0)
+        .collect();
+    captures.sort_unstable_by(|a, b| {
+        let sa = {
+            let victim = if a.flags & movegen::FLAG_EN_PASSANT != 0 {
+                MVV_LVA_VAL[0]
+            } else {
+                piece_val_on(board, a.to_sq, !board.side_to_move)
+            };
+            victim - piece_val_on(board, a.from_sq, board.side_to_move) / 10
+        };
+        let sb = {
+            let victim = if b.flags & movegen::FLAG_EN_PASSANT != 0 {
+                MVV_LVA_VAL[0]
+            } else {
+                piece_val_on(board, b.to_sq, !board.side_to_move)
+            };
+            victim - piece_val_on(board, b.from_sq, board.side_to_move) / 10
+        };
+        sb.cmp(&sa)
+    });
+
+    for mv in &captures {
+        let new_board = make_move(board, mv);
+        let score = -quiescence(&new_board, -beta, -alpha);
+        if score >= beta {
+            return beta;
+        }
+        if score > alpha {
+            alpha = score;
+        }
+    }
+
+    alpha
+}
+
+// ---------------------------------------------------------------------------
 // Alpha-beta search
 // ---------------------------------------------------------------------------
 
-/// Alpha-beta search returning the score from the side-to-move's perspective.
-pub fn alpha_beta(board: &Board, depth: u32, mut alpha: i32, beta: i32) -> i32 {
+/// Public entry point: alpha-beta with quiescence, move ordering, and killers.
+pub fn alpha_beta(board: &Board, depth: u32, alpha: i32, beta: i32) -> i32 {
+    let mut killers: Killers = [[None; 2]; MAX_DEPTH];
+    ab_search(board, depth, alpha, beta, 0, &mut killers)
+}
+
+/// Recursive alpha-beta with move ordering and killer heuristic.
+fn ab_search(
+    board: &Board, depth: u32, mut alpha: i32, beta: i32,
+    ply: usize, killers: &mut Killers,
+) -> i32 {
     if depth == 0 {
-        return evaluate(board);
+        return quiescence(board, alpha, beta);
     }
 
-    let moves = generate_moves(board);
+    let mut moves = generate_moves(board);
 
     if moves.is_empty() {
         if is_in_check(board) {
-            // Checkmate — return a large negative score (we are mated)
-            // Offset by depth so shallower mates are preferred
-            return -(CHECKMATE - depth as i32);
+            return -(CHECKMATE - ply as i32);
         }
-        // Stalemate
         return 0;
     }
 
+    order_moves(board, &mut moves, killers, ply);
+
     for mv in &moves {
         let new_board = make_move(board, mv);
-        let score = -alpha_beta(&new_board, depth - 1, -beta, -alpha);
+        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers);
         if score >= beta {
+            // Store killer if quiet move
+            if mv.flags & movegen::FLAG_CAPTURE == 0 {
+                store_killer(killers, ply, mv);
+            }
             return beta;
         }
         if score > alpha {
@@ -309,10 +454,14 @@ pub fn alpha_beta(board: &Board, depth: u32, mut alpha: i32, beta: i32) -> i32 {
 /// Search for the best move at the given depth.
 /// Returns None if no legal moves exist (checkmate or stalemate).
 pub fn best_move(board: &Board, depth: u32) -> Option<(Move, i32)> {
-    let moves = generate_moves(board);
+    let mut moves = generate_moves(board);
     if moves.is_empty() {
         return None;
     }
+
+    let mut killers: Killers = [[None; 2]; MAX_DEPTH];
+    // Order root moves (ply 0)
+    order_moves(board, &mut moves, &killers, 0);
 
     let mut best: Option<(Move, i32)> = None;
     let mut alpha = -INF;
@@ -320,7 +469,7 @@ pub fn best_move(board: &Board, depth: u32) -> Option<(Move, i32)> {
 
     for mv in moves {
         let new_board = make_move(board, &mv);
-        let score = -alpha_beta(&new_board, depth - 1, -beta, -alpha);
+        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers);
         if score > alpha {
             alpha = score;
             best = Some((mv, score));
@@ -436,8 +585,9 @@ mod tests {
     }
 
     #[test]
-    fn depth_0_returns_eval() {
+    fn depth_0_returns_quiescence() {
         let board = Board::startpos();
+        // No captures available at startpos, so quiescence = evaluate = 0
         let score = alpha_beta(&board, 0, -INF, INF);
         assert_eq!(score, 0);
     }

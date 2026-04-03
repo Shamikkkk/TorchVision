@@ -19,7 +19,9 @@
       "Bash(echo \"exit: $?\")",
       "Bash(cargo build:*)",
       "Bash(cargo test:*)",
-      "Bash(cargo run:*)"
+      "Bash(cargo run:*)",
+      "Bash(time echo:*)",
+      "Bash(./target/release/pyro.exe)"
     ]
   }
 }
