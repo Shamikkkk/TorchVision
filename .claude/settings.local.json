@@ -16,7 +16,10 @@
       "Bash(npx tsc:*)",
       "Bash(npm run:*)",
       "Bash(source venv/Scripts/activate)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Bash(cargo build:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo run:*)"
     ]
   }
 }
