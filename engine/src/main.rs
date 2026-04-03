@@ -1,3 +1,6 @@
+mod board;
+mod movegen;
+
 use std::io::{self, BufRead};
 
 fn main() {
