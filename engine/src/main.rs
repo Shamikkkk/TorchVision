@@ -5,7 +5,7 @@ mod search;
 
 use board::Board;
 use nnue::Network;
-use search::{best_move, parse_uci_move};
+use search::{best_move, best_move_nodes, parse_uci_move};
 use std::io::{self, BufRead, Write};
 
 struct Engine {
@@ -75,12 +75,21 @@ fn main() {
                 engine.position = handle_position(&tokens);
             }
             "go" => {
-                let depth = parse_go_depth(&tokens);
-                if let Some((mv, score)) = best_move(&engine.position, depth, engine.network.as_ref()) {
-                    println!("info depth {} score cp {}", depth, score);
-                    println!("bestmove {}", mv.to_uci());
+                if let Some(node_limit) = parse_go_nodes(&tokens) {
+                    if let Some((mv, score, depth)) = best_move_nodes(&engine.position, node_limit, engine.network.as_ref()) {
+                        println!("info depth {} score cp {}", depth, score);
+                        println!("bestmove {}", mv.to_uci());
+                    } else {
+                        println!("bestmove (none)");
+                    }
                 } else {
-                    println!("bestmove (none)");
+                    let depth = parse_go_depth(&tokens);
+                    if let Some((mv, score)) = best_move(&engine.position, depth, engine.network.as_ref()) {
+                        println!("info depth {} score cp {}", depth, score);
+                        println!("bestmove {}", mv.to_uci());
+                    } else {
+                        println!("bestmove (none)");
+                    }
                 }
                 io::stdout().flush().ok();
             }
@@ -141,4 +150,16 @@ fn parse_go_depth(tokens: &[&str]) -> u32 {
         }
     }
     4
+}
+
+/// Parse node limit from "go nodes N". Returns None if not specified.
+fn parse_go_nodes(tokens: &[&str]) -> Option<u64> {
+    for i in 0..tokens.len().saturating_sub(1) {
+        if tokens[i] == "nodes" {
+            if let Ok(n) = tokens[i + 1].parse::<u64>() {
+                return Some(n);
+            }
+        }
+    }
+    None
 }

@@ -2,6 +2,8 @@ use crate::board::Board;
 use crate::movegen::{self, Move, generate_moves, is_in_check, make_move};
 use crate::nnue;
 
+use std::cell::Cell;
+
 const INF: i32 = 100_000;
 const CHECKMATE: i32 = 50_000;
 
@@ -355,7 +357,9 @@ fn store_killer(killers: &mut Killers, ply: usize, mv: &Move) {
 // ---------------------------------------------------------------------------
 
 /// Search captures only until the position is quiet.
-fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::Network>) -> i32 {
+fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::Network>, nodes: &Cell<u64>, node_limit: u64) -> i32 {
+    nodes.set(nodes.get() + 1);
+
     let stand_pat = if let Some(net) = network {
         let acc = nnue::Accumulator::from_board(net, board);
         net.evaluate(&acc, board.side_to_move)
@@ -396,8 +400,11 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::N
     });
 
     for mv in &captures {
+        if nodes.get() >= node_limit {
+            break;
+        }
         let new_board = make_move(board, mv);
-        let score = -quiescence(&new_board, -beta, -alpha, network);
+        let score = -quiescence(&new_board, -beta, -alpha, network, nodes, node_limit);
         if score >= beta {
             return beta;
         }
@@ -416,17 +423,30 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::N
 /// Public entry point: alpha-beta with quiescence, move ordering, and killers.
 pub fn alpha_beta(board: &Board, depth: u32, alpha: i32, beta: i32) -> i32 {
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
-    ab_search(board, depth, alpha, beta, 0, &mut killers, None, true)
+    let nodes = Cell::new(0u64);
+    ab_search(board, depth, alpha, beta, 0, &mut killers, None, true, &nodes, u64::MAX)
 }
 
 /// Recursive alpha-beta with move ordering, killer heuristic, NMP, and LMR.
 fn ab_search(
     board: &Board, depth: u32, mut alpha: i32, beta: i32,
     ply: usize, killers: &mut Killers, network: Option<&nnue::Network>,
-    allow_null: bool,
+    allow_null: bool, nodes: &Cell<u64>, node_limit: u64,
 ) -> i32 {
+    nodes.set(nodes.get() + 1);
+
+    if nodes.get() >= node_limit {
+        // Over node budget — return static eval
+        return if let Some(net) = network {
+            let acc = nnue::Accumulator::from_board(net, board);
+            net.evaluate(&acc, board.side_to_move)
+        } else {
+            evaluate(board)
+        };
+    }
+
     if depth == 0 {
-        return quiescence(board, alpha, beta, network);
+        return quiescence(board, alpha, beta, network, nodes, node_limit);
     }
 
     let in_check = is_in_check(board);
@@ -436,7 +456,7 @@ fn ab_search(
     if allow_null && !in_check && depth >= 3 && board.occupied().count_ones() >= 10 {
         let null_board = board.make_null_move();
         let r = 2; // reduction
-        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, network, false);
+        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, network, false, nodes, node_limit);
         if score >= beta {
             return beta;
         }
@@ -454,6 +474,10 @@ fn ab_search(
     order_moves(board, &mut moves, killers, ply);
 
     for (move_index, mv) in moves.iter().enumerate() {
+        if nodes.get() >= node_limit {
+            break;
+        }
+
         let new_board = make_move(board, mv);
         let is_capture = mv.flags & movegen::FLAG_CAPTURE != 0;
         let is_killer = ply < MAX_DEPTH && killers[ply].iter().any(|k| {
@@ -466,15 +490,15 @@ fn ab_search(
         // Reduce quiet non-killer moves beyond move 3 at depth >= 3
         if depth >= 3 && move_index > 3 && !is_capture && !is_killer && !in_check {
             // Reduced search (depth - 2 instead of depth - 1)
-            let reduced = -ab_search(&new_board, depth - 2, -beta, -alpha, ply + 1, killers, network, true);
+            let reduced = -ab_search(&new_board, depth - 2, -beta, -alpha, ply + 1, killers, network, true, nodes, node_limit);
             if reduced > alpha {
                 // Re-search at full depth if reduced search looks interesting
-                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network, true);
+                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network, true, nodes, node_limit);
             } else {
                 score = reduced;
             }
         } else {
-            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network, true);
+            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network, true, nodes, node_limit);
         }
 
         if score >= beta {
@@ -500,7 +524,7 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
     }
 
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
-    // Order root moves (ply 0)
+    let nodes = Cell::new(0u64);
     order_moves(board, &mut moves, &killers, 0);
 
     let mut best: Option<(Move, i32)> = None;
@@ -509,7 +533,7 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 
     for mv in moves {
         let new_board = make_move(board, &mv);
-        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, network, true);
+        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, network, true, &nodes, u64::MAX);
         if score > alpha {
             alpha = score;
             best = Some((mv, score));
@@ -517,6 +541,58 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
     }
 
     best
+}
+
+/// Iterative deepening search with a node limit.
+/// Increases depth until the node budget is exhausted.
+/// Returns the best move + score from the last completed depth.
+pub fn best_move_nodes(board: &Board, node_limit: u64, network: Option<&nnue::Network>) -> Option<(Move, i32, u32)> {
+    let moves = generate_moves(board);
+    if moves.is_empty() {
+        return None;
+    }
+
+    let mut best_overall: Option<(Move, i32, u32)> = None;
+
+    for depth in 1..=MAX_DEPTH as u32 {
+        let mut killers: Killers = [[None; 2]; MAX_DEPTH];
+        let nodes = Cell::new(0u64);
+        let mut ordered_moves = moves.clone();
+        order_moves(board, &mut ordered_moves, &killers, 0);
+
+        let mut best: Option<(Move, i32)> = None;
+        let mut alpha = -INF;
+        let beta = INF;
+        let mut completed = true;
+
+        for mv in &ordered_moves {
+            let new_board = make_move(board, mv);
+            let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, network, true, &nodes, node_limit);
+            if nodes.get() >= node_limit && best.is_none() {
+                // First move wasn't even completed — use previous depth result
+                completed = false;
+                break;
+            }
+            if score > alpha {
+                alpha = score;
+                best = Some((mv.clone(), score));
+            }
+            if nodes.get() >= node_limit {
+                // Got at least one move scored — use it but stop deepening
+                break;
+            }
+        }
+
+        if let Some((mv, score)) = best {
+            best_overall = Some((mv, score, depth));
+        }
+
+        if !completed || nodes.get() >= node_limit {
+            break;
+        }
+    }
+
+    best_overall
 }
 
 // ---------------------------------------------------------------------------
