@@ -416,22 +416,36 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::N
 /// Public entry point: alpha-beta with quiescence, move ordering, and killers.
 pub fn alpha_beta(board: &Board, depth: u32, alpha: i32, beta: i32) -> i32 {
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
-    ab_search(board, depth, alpha, beta, 0, &mut killers, None)
+    ab_search(board, depth, alpha, beta, 0, &mut killers, None, true)
 }
 
-/// Recursive alpha-beta with move ordering and killer heuristic.
+/// Recursive alpha-beta with move ordering, killer heuristic, NMP, and LMR.
 fn ab_search(
     board: &Board, depth: u32, mut alpha: i32, beta: i32,
     ply: usize, killers: &mut Killers, network: Option<&nnue::Network>,
+    allow_null: bool,
 ) -> i32 {
     if depth == 0 {
         return quiescence(board, alpha, beta, network);
     }
 
+    let in_check = is_in_check(board);
+
+    // --- Null Move Pruning ---
+    // Skip when: in check, not enough pieces, or after a previous null move
+    if allow_null && !in_check && depth >= 3 && board.occupied().count_ones() >= 10 {
+        let null_board = board.make_null_move();
+        let r = 2; // reduction
+        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, network, false);
+        if score >= beta {
+            return beta;
+        }
+    }
+
     let mut moves = generate_moves(board);
 
     if moves.is_empty() {
-        if is_in_check(board) {
+        if in_check {
             return -(CHECKMATE - ply as i32);
         }
         return 0;
@@ -439,12 +453,32 @@ fn ab_search(
 
     order_moves(board, &mut moves, killers, ply);
 
-    for mv in &moves {
+    for (move_index, mv) in moves.iter().enumerate() {
         let new_board = make_move(board, mv);
-        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network);
+        let is_capture = mv.flags & movegen::FLAG_CAPTURE != 0;
+        let is_killer = ply < MAX_DEPTH && killers[ply].iter().any(|k| {
+            k.map_or(false, |(f, t)| f == mv.from_sq && t == mv.to_sq)
+        });
+
+        let score;
+
+        // --- Late Move Reductions ---
+        // Reduce quiet non-killer moves beyond move 3 at depth >= 3
+        if depth >= 3 && move_index > 3 && !is_capture && !is_killer && !in_check {
+            // Reduced search (depth - 2 instead of depth - 1)
+            let reduced = -ab_search(&new_board, depth - 2, -beta, -alpha, ply + 1, killers, network, true);
+            if reduced > alpha {
+                // Re-search at full depth if reduced search looks interesting
+                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network, true);
+            } else {
+                score = reduced;
+            }
+        } else {
+            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network, true);
+        }
+
         if score >= beta {
-            // Store killer if quiet move
-            if mv.flags & movegen::FLAG_CAPTURE == 0 {
+            if !is_capture {
                 store_killer(killers, ply, mv);
             }
             return beta;
@@ -475,7 +509,7 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 
     for mv in moves {
         let new_board = make_move(board, &mv);
-        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, network);
+        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, network, true);
         if score > alpha {
             alpha = score;
             best = Some((mv, score));

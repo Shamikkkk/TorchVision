@@ -196,6 +196,16 @@ impl Board {
     pub fn occupied(&self) -> u64 {
         self.white_pieces() | self.black_pieces()
     }
+
+    /// Create a null-move board: flip side to move, clear en passant,
+    /// increment halfmove clock.  Everything else stays the same.
+    pub fn make_null_move(&self) -> Board {
+        let mut b = self.clone();
+        b.side_to_move = !b.side_to_move;
+        b.en_passant = None;
+        b.halfmove_clock += 1;
+        b
+    }
 }
 
 #[cfg(test)]
