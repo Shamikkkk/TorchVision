@@ -1,11 +1,12 @@
 # ♟ TorchVision
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-1.70+-000000?logo=rust&logoColor=white)
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)
 
-A chess UI with a hand-built minimax engine and neural network training pipeline. Play against a classical alpha-beta engine today; swap in a trained neural network tomorrow — no code changes required.
+A chess application with a hand-built Tal-style engine, Rust NNUE training pipeline, and game analysis. Play against a classical alpha-beta engine with grandmaster opening knowledge and perfect endgame tablebases.
 
 ![Screenshot](docs/screenshot.png)
 
@@ -14,26 +15,30 @@ A chess UI with a hand-built minimax engine and neural network training pipeline
 ## Features
 
 - **Chess.com-style dark UI** — familiar board colours, smooth animations, and sound effects
-- **Classical minimax engine** — depth-4 search with alpha-beta pruning, runs entirely in-process
-- **Piece-square table evaluation** — hand-crafted PST tables for all six piece types
+- **Classical Tal-style engine** — depth-4 search with alpha-beta, NMP, LMR, aspiration windows, killer moves, history heuristic, quiescence search
+- **Tal-style evaluation** — aggression bonuses, king attack, pawn storm, rook files, bishop pair, pawn structure
+- **GM opening book** — 97k grandmaster games (Tal, Kasparov, Fischer, Carlsen + 28 others)
+- **Syzygy tablebases** — perfect endgame play for ≤6 pieces
 - **5-minute chess clock** — live countdown with WebSocket ticks
 - **Evaluation bar** — real centipawn scores from the engine, updated after every move
 - **Move list in SAN notation** — scrollable, formatted like an OTB scoresheet
 - **Sound effects** — distinct sounds for moves, captures, checks, and game-end events
-- **Neural network training pipeline** — label positions with the classical engine, train on Lichess data, drop in the weights file to upgrade automatically
+- **Game analyzer** — post-game Stockfish analysis with move classification (brilliant, best, good, book, inaccuracy, mistake, blunder)
+- **NNUE training pipeline** — Rust engine generates self-play data, Bullet trainer, 768→256→1 architecture with CReLU
 
 ---
 
 ## Tech Stack
 
-| Layer      | Technology                                    |
-|------------|-----------------------------------------------|
-| Frontend   | React 18 · TypeScript · Vite · Tailwind CSS   |
-| Board UI   | react-chessboard · chess.js                   |
-| Backend    | FastAPI · Uvicorn · python-chess              |
-| Engine     | Custom minimax (search.py + evaluate.py)      |
-| Training   | PyTorch · ChessNet (~1.3 M params)            |
-| Fallback   | Stockfish 18 (optional, last-resort only)     |
+| Layer       | Technology                                              |
+|-------------|---------------------------------------------------------|
+| Frontend    | React 18 · TypeScript · Vite · Tailwind CSS             |
+| Board UI    | react-chessboard · chess.js                             |
+| Backend     | FastAPI · Uvicorn · python-chess                        |
+| Engine      | Tal-style minimax (Python) + Rust engine (Phase B)      |
+| Rust Engine | Bitboards · Alpha-beta · NMP · LMR · NNUE accumulator  |
+| Training    | PyTorch · Bullet (Rust) · 10M self-play positions       |
+| Fallback    | Stockfish 18 (optional, last-resort only)               |
 
 ---
 
@@ -43,6 +48,7 @@ A chess UI with a hand-built minimax engine and neural network training pipeline
 
 - **Node.js 18+** — `winget install OpenJS.NodeJS.LTS`
 - **Python 3.11+** — `winget install Python.Python.3.11`
+- **Rust 1.70+** (optional, for NNUE) — `winget install Rustlang.Rust.MSVC`
 - **Stockfish** (optional) — only used if the classical engine fails
 
 ### Backend setup
@@ -76,86 +82,105 @@ npm run dev
 
 Frontend is now running at `http://localhost:5173`.
 
----
-
-## Training the Neural Network
-
-Run these steps from `backend/` with the virtualenv active.
+### Rust engine (optional, for NNUE)
 
 ```bash
-# 1. Download a Lichess games database (~15 GB, streams and decompresses on the fly)
-python -m model_training.download --year 2024 --month 1 --out data/
-
-# 2. Label 500k opening positions with the classical engine (depth 2, ~30 min)
-python -m model_training.parse \
-  --pgn data/lichess_db_standard_rated_2024-01.pgn \
-  --out data/positions.csv
-
-# 3. Train ChessNet (~1–2 hrs on CPU; saves to backend/models/torch_chess.pt)
-python -m model_training.train --csv data/positions.csv
-
-# Quick smoke test with only 1000 positions:
-python -m model_training.parse --pgn data/lichess.pgn \
-  --out data/positions.csv --limit 1000
+cd engine
+cargo build --release
+# Binary: engine/target/release/pyro.exe
+# Weights: engine/pyro.nnue (auto-loaded at startup)
 ```
 
-Once `backend/models/torch_chess.pt` exists, **restarting uvicorn automatically switches to neural mode** — no code changes needed.
+---
+
+## Training
+
+### Option A — Lichess supervised (PyTorch)
+
+Run from `backend/` with the virtualenv active.
+
+```bash
+# 1. Stream Lichess games directly to CSV (no PGN on disk)
+python -m model_training.stream_parse \
+  --year 2024 --month 1 \
+  --out data/positions.csv \
+  --limit 500000
+
+# 2. Train ChessNet (~1–2 hrs on CPU; saves to backend/models/torch_chess.pt)
+python -m model_training.train --csv data/positions.csv
+```
+
+### Option B — NNUE self-play (Rust engine)
+
+```bash
+# 1. Build the Rust engine
+cd engine && cargo build --release && cd ..
+
+# 2. Initialize NNUE weights with material knowledge
+cd backend && source venv/Scripts/activate
+python -m scripts.init_nnue_weights
+
+# 3. Generate self-play data (5000 nodes/move, binary format)
+python -m scripts.generate_selfplay_rust --games 100000
+
+# 4. Train with Bullet trainer (coming soon)
+```
 
 ---
 
 ## Architecture
 
+### Python engine (current, stable)
+
+```
+Eval:   tal_style_eval (material + PST + Tal aggression bonuses)
+Search: minimax depth 4 + NMP + LMR + AW + killers + history + qsearch
+Book:   97k GM games (Tal, Kasparov, Fischer, Carlsen + 28 others)
+Endgame: Syzygy tablebases (≤6 pieces, perfect play)
+```
+
+Estimated ELO: ~1200-1400
+
+### Rust engine (Phase B, in development)
+
+```
+Eval:   768→256→1 NNUE · CReLU · incremental accumulator
+Search: alpha-beta + NMP + LMR + PeSTO + killers + qsearch
+Data:   self-play 100k games · 10M positions · binary format
+Train:  Bullet trainer (Rust)
+```
+
+Target ELO: 1800+
+
 ### Engine mode priority
 
-`TorchEngine` in `backend/app/engine/model.py` selects mode at startup:
+`PyroEngine` in `backend/app/engine/model.py` selects mode at startup:
 
-1. **neural** — if `backend/models/torch_chess.pt` exists
-2. **classical** — minimax depth 4 with PST evaluation *(current default)*
-3. **stockfish** — external binary, last resort only
-
-### Minimax + alpha-beta pruning
-
-```
-search.best_move(fen, depth, eval_fn)
-  └─ minimax(board, depth, α, β, maximising)
-       └─ eval_fn(board) → centipawns
-```
-
-`eval_fn` is a first-class parameter: Phase 2 passes the hand-crafted PST evaluator; Phase 3 will pass the loaded neural network. The search code never changes between phases.
-
-### Evaluation function (Phase 2)
-
-```
-score = Σ material_value(piece) + pst_bonus(piece, square)
-```
-
-Each piece type has a 64-entry table that rewards good squares (centre control for pawns/knights, open files for rooks, etc.) and penalises bad ones.
+1. **Syzygy tablebase** — ≤6 pieces, no castling rights → perfect play
+2. **Opening book** — grandmaster PGN positions, first 15 moves
+3. **Minimax depth 4** — alpha-beta + NMP + LMR + AW + `tal_style_eval`
+4. **Stockfish** — external binary, last resort only
 
 ### WebSocket game loop
 
 The WebSocket connection is the single source of truth for live game state — FEN, turn, clocks, game-over signals. REST is used only for stateless one-shot engine suggestions (`POST /api/suggest → {move, eval}`).
 
-### Neural network (Phase 3)
-
-`ChessNet` is a ~1.3 M parameter model:
-
-```
-input  : 768-dim bit-board tensor (12 piece planes × 64 squares)
-stem   : Conv2d 3×3, BatchNorm, ReLU
-body   : 4 × ResBlock (Conv → BN → ReLU → Conv → BN + skip)
-head   : GlobalAvgPool → Linear 256 → ReLU → Linear 1
-output : centipawn evaluation (scalar)
-```
-
 ---
 
 ## Roadmap
 
-- [x] Classical minimax engine (depth 4, alpha-beta, PST eval)
-- [x] Chess.com-style UI (dark theme, eval bar, move list, clocks, sound)
-- [ ] Neural network evaluation (ChessNet trained on Lichess data)
-- [ ] Game analyzer (post-game move-by-move engine evaluation)
-- [ ] Opening explorer (ECO codes, transposition detection)
+- [x] Classical minimax engine (depth 4 + NMP + LMR + AW)
+- [x] Chess.com-style UI (dark theme, eval bar, clocks, sound)
+- [x] Tal-style evaluation (aggression, PST, pawn structure)
+- [x] GM opening book (97k games, 31 grandmasters)
+- [x] Syzygy tablebases (perfect endgame, ≤6 pieces)
+- [x] Game analyzer (Stockfish analysis, move classification)
+- [x] Rust engine (bitboards, legal movegen, perft verified)
+- [x] NNUE accumulator (768→256→1, CReLU, incremental)
+- [ ] Bullet NNUE training (self-play data generating now)
+- [ ] Rust engine UCI integration with Python backend
+- [ ] Tal bonuses in Rust engine
+- [ ] Opening explorer (ECO codes)
 
 ---
 
