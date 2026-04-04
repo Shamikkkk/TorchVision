@@ -11,7 +11,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 **Phase 1 (UI polish) — complete.**
 **Phase 2 (classical engine) — complete and working.**
 **Phase A (classical engine tuning) — COMPLETE ✅ (~1200–1400 ELO estimated)**
-**Phase B (NNUE) — ABANDONED. Classical engine is the final eval function.**
+**Phase B v3 (Rust NNUE) — IN PROGRESS (Steps 1–10 of 17 complete)**
 **Game Analyzer — complete.**
 
 ### Completed features
@@ -130,72 +130,49 @@ Estimated ELO: ~1200–1400
 - Bullet trainer is written in Rust — native integration
 - This is how ALL serious NNUE engines are built
 
-##### Architecture decision (based on chess-inator research):
+##### Architecture:
 - Input: 768 features (piece × square × color)
-- Hidden: 256 neurons (L1_SIZE=256, not 1024 yet)
+- Hidden: 256 neurons (L1_SIZE=256)
 - Output: 1 neuron (centipawn score)
 - Activation: CReLU (clamp 0 to QA=255)
 - Quantization: QA=255, QB=64
 - Scale: K=400 (CP-space output)
 - NO king buckets yet — need billions of positions first
 
-##### Why NOT king buckets yet:
-- Research confirmed: HalfKP/HalfKA needs billions of positions
-- Simple (piece, square) features work fine at our scale
-- Add king buckets only after basic NNUE beats classical
+##### Progress:
+- ✅ Step 1: Rust workspace (`engine/Cargo.toml`, UCI protocol in `src/main.rs`)
+- ✅ Step 2: Board representation (`src/board.rs` — bitboards, FEN parsing, `make_null_move`)
+- ✅ Step 3: Move generation (`src/movegen.rs` — all piece types, castling, en passant, promotions; perft verified: 20/400/8902)
+- ✅ Step 4: Alpha-beta search (`src/search.rs` — negamax with alpha-beta pruning)
+- ✅ Step 5: PeSTO evaluation (tapered midgame/endgame PST, 12 tables reindexed to a1=0)
+- ✅ Step 6: Search improvements (MVV-LVA move ordering, killer moves 2/ply, quiescence search with stand-pat)
+- ✅ Step 7: NNUE accumulator (`src/nnue.rs` — 768→256→1, CReLU, i16 weights, i32 accumulator, binary file I/O)
+- ✅ Step 8: Material-initialized weights (`backend/scripts/init_nnue_weights.py` → `engine/pyro.nnue`; DIVISOR=5000 scaling, verified: startpos=0cp, +queen=+868cp, -rook=-482cp)
+- ✅ Step 9: NMP + LMR (null move pruning R=2, late move reductions depth-1 for quiet moves; depth 12 completes instantly)
+- ✅ Step 10: Self-play generator (`backend/scripts/generate_selfplay_rust.py` — binary 18 bytes/pos, `go nodes 5000`, WDL labels, skip first 8 plies, clip |eval|>3000)
+- ⬜ Step 11: Run 100k self-play games overnight
+- ⬜ Step 12: Write Bullet training config
+- ⬜ Step 13: Train NNUE with Bullet
+- ⬜ Step 14: Convert Bullet weights → pyro.nnue format
+- ⬜ Step 15: Validate NNUE beats PST in 200 games
+- ⬜ Step 16: Add Tal bonuses on top of NNUE
+- ⬜ Step 17: Wire Rust engine into Python backend via UCI
 
-##### Step 1 — Rust engine rewrite (Phase C prerequisite):
-Create `torch/engine/` (Rust workspace)
-- Implement chess board representation (bitboards)
-- Implement move generation
-- Implement alpha-beta search (same as current Python)
-- Implement `tal_style_eval` as baseline
-- UCI protocol support
-- Target: match Python Pyro strength first
+##### Rust engine files:
+- `engine/Cargo.toml` — Rust project config
+- `engine/src/main.rs` — UCI loop, Engine struct, NNUE loading, `go depth N` + `go nodes N`
+- `engine/src/board.rs` — Bitboard Board struct, FEN parsing, `make_null_move()`
+- `engine/src/movegen.rs` — Legal move generation, precomputed attack tables, `make_move()`, `perft()`
+- `engine/src/search.rs` — PeSTO eval, alpha-beta + NMP + LMR + killers + qsearch, `best_move()`, `best_move_nodes()`
+- `engine/src/nnue.rs` — Network/Accumulator structs, feature indexing, CReLU eval, binary file I/O
+- `engine/pyro.nnue` — Material-initialized NNUE weights (394KB)
 
-##### Step 2 — NNUE accumulator in Rust:
-- Implement 768→256→1 NNUE architecture
-- Incremental updates (efficient add/sub on accumulator)
-- SIMD via `std::arch` (AVX2) for accumulator updates
-- Integer quantization (i16 weights, i32 accumulator)
-- Load weights from binary file
-
-##### Step 3 — Hardcode material into initial weights:
-Key insight from chess-inator research:
-Before training, write piece material values directly
-into the first layer weights. This gives NNUE a
-strong starting point so it never blunders pieces.
-Pawn=100, Knight=320, Bishop=330, Rook=500, Queen=900
-
-##### Step 4 — Self-play data generation (Rust):
-- Use NODE LIMIT not time limit (5000 nodes/move)
-- Save positions in binary packed format:
-  18.7 bytes/position (Stockfish format)
-  NOT CSV text format
-- Target: 100M positions (feasible in Rust overnight)
-- WDL interpolation:
-  `target = 0.5 * sigmoid(eval/400) + 0.5 * game_result`
-
-##### Step 5 — Training with Bullet:
-- Install Bullet trainer (Rust, by Jamie Whiting)
-- Feed binary position data to Bullet
-- Train 768→256→1 network
-- Validate: must beat classical in 55%+ of 200 games
-- Expected: similar to chess-inator result (667W/32D/7L vs classical)
-
-##### Step 6 — Enable in Rust engine:
-- Load quantized weights at startup
-- Wire NNUE eval into alpha-beta search
-- Keep `tal_style_eval` as fallback
-- Blend: 0.7 NNUE + 0.3 tal initially
-
-##### Timeline estimate:
-- Session 1: Rust workspace setup, board representation
-- Session 2-3: Move generation + search
-- Session 4: NNUE accumulator + quantization
-- Session 5: Self-play data generation
-- Session 6: Bullet training + validation
-- Session 7+: Iterate and improve
+##### Key technical details:
+- Square mapping: index = rank*8 + file, a1=0, h8=63
+- Feature index: `color_idx * 384 + piece_type * 64 + sq` (black perspective mirrors sq via sq^56)
+- NNUE binary format: magic "NNUE" (4 bytes) + version u32 + i16 weights LE (ft_weights 768×256, ft_bias 256, out_weights 512, out_bias 1)
+- Node counting via `Cell<u64>` threaded through search; iterative deepening in `best_move_nodes()`
+- Self-play binary format: board_hash u64 + eval_cp i16 + result u8 + ply u8 + 6 bytes padding = 18 bytes/pos
 
 ##### Why this will succeed vs previous attempts:
 - v1 NNUE (Python): 864k positions, W/D/L labels → 30%
@@ -404,6 +381,16 @@ torch/
 │   │   └── positions_sf_deep.csv   # 497,998 positions labeled by Stockfish depth=12
 │   ├── requirements.txt
 │   └── pyproject.toml
+├── engine/                # Rust chess engine (Pyro)
+│   ├── Cargo.toml
+│   ├── pyro.nnue          # Material-initialized NNUE weights (394KB)
+│   ├── src/
+│   │   ├── main.rs        # UCI protocol loop, Engine struct, NNUE loading
+│   │   ├── board.rs       # Bitboard board representation, FEN parsing
+│   │   ├── movegen.rs     # Legal move generation, make_move, perft
+│   │   ├── search.rs      # PeSTO eval, alpha-beta + NMP + LMR + killers + qsearch
+│   │   └── nnue.rs        # NNUE 768→256→1, accumulator, binary I/O
+│   └── target/release/pyro.exe  # Built binary
 └── CLAUDE.md
 ```
 
