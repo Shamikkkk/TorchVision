@@ -1,5 +1,6 @@
 mod board;
 mod movegen;
+mod nnue;
 mod search;
 
 use board::Board;
