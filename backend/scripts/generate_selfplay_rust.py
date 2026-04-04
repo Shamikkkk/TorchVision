@@ -3,31 +3,30 @@
 Drives the Rust engine via UCI protocol with randomized openings
 so each game explores different positions.
 
-Binary output format (18 bytes per position):
-  board_hash: u64 (8 bytes) — FNV-1a hash of move sequence
-  eval_cp:    i16 (2 bytes) — engine eval in centipawns (white-relative)
-  result:     u8  (1 byte)  — 0=black wins, 1=draw, 2=white wins
-  ply:        u8  (1 byte)  — half-move count from game start
-  padding:    6 bytes        — reserved for future use
-
-WDL interpolation is done at training time:
-  target = 0.5 * sigmoid(eval_cp / 400) + 0.5 * game_result
+Plain text output format (nnue-pytorch compatible, 6 lines per position):
+  fen <FEN string>
+  move <UCI move played>
+  score <centipawns, white-relative>
+  ply <half-move count from game start>
+  result <1=white wins, 0=draw, -1=black wins>
+  e
 """
 
 import argparse
 import os
 import random
-import struct
 import subprocess
 import sys
 import time
+
+import chess
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ENGINE_PATH = os.path.normpath(
     os.path.join(SCRIPT_DIR, "..", "..", "engine", "target", "release", "pyro.exe")
 )
-DEFAULT_OUTPUT = os.path.join(SCRIPT_DIR, "..", "data", "selfplay_rust.bin")
+DEFAULT_OUTPUT = os.path.join(SCRIPT_DIR, "..", "data", "selfplay_rust.plain")
 
 NODE_LIMIT = 5000
 MAX_GAME_PLIES = 400   # max half-moves per game (200 full moves)
@@ -35,7 +34,6 @@ SKIP_PLIES = 8         # skip first 8 half-moves (opening theory)
 EVAL_CLIP = 3000       # skip positions with |eval| > this
 
 # --- Opening randomization ---
-# Common openings: (white_move, [black_responses])
 OPENING_PAIRS = [
     ("e2e4", ["e7e5", "c7c5", "e7e6", "c7c6", "d7d5", "g8f6", "d7d6", "g7g6"]),
     ("d2d4", ["d7d5", "g8f6", "e7e6", "c7c5", "f7f5", "g7g6", "d7d6"]),
@@ -46,15 +44,6 @@ OPENING_PAIRS = [
     ("f2f4", ["d7d5", "e7e5", "g8f6"]),
     ("b2b3", ["e7e5", "d7d5", "g8f6"]),
 ]
-
-
-def fnv1a_hash(data: bytes) -> int:
-    """FNV-1a 64-bit hash."""
-    h = 0xCBF29CE484222325
-    for b in data:
-        h ^= b
-        h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-    return h
 
 
 class UCIEngine:
@@ -79,7 +68,6 @@ class UCIEngine:
         self.proc.stdin.flush()
 
     def _wait_for(self, token: str) -> list[str]:
-        """Read lines until one starts with token. Return all lines read."""
         lines = []
         while True:
             line = self.proc.stdout.readline().strip()
@@ -140,38 +128,45 @@ def random_opening() -> list[str]:
     return [white_move, black_move]
 
 
-def play_game(engine: UCIEngine, node_limit: int) -> list[tuple[int, int, int, int]]:
+def play_game(engine: UCIEngine, node_limit: int) -> list[tuple[str, str, int, int, int]]:
     """Play one self-play game.
 
-    Returns list of (board_hash, eval_cp_white, ply, result) tuples.
+    Returns list of (fen, uci_move, eval_cp_white, ply, result) tuples.
+    Result is filled in later by finalize().
     """
     engine.new_game()
 
     # Start with a random opening (2 plies)
-    moves: list[str] = random_opening()
+    opening_moves = random_opening()
+
+    # Track position with python-chess
+    board = chess.Board()
+    moves: list[str] = []
+    for uci_str in opening_moves:
+        move = chess.Move.from_uci(uci_str)
+        if move not in board.legal_moves:
+            break
+        board.push(move)
+        moves.append(uci_str)
+
     ply = len(moves)
 
-    positions: list[tuple[int, int, int]] = []  # (hash, eval_cp_white, ply)
+    # (fen, uci_move, eval_cp_white, ply) — result added later
+    positions: list[tuple[str, str, int, int]] = []
     consecutive_low_eval = 0
-    prev_eval_stm = 0  # last eval from side-to-move perspective
+    prev_eval_stm = 0
 
     while ply < MAX_GAME_PLIES:
         bestmove, eval_cp = engine.go_nodes(moves, node_limit)
 
-        white_to_move = (ply % 2 == 0)
+        white_to_move = board.turn == chess.WHITE
 
         if bestmove == "(none)":
-            # No legal moves: checkmate or stalemate.
-            # Use previous eval to distinguish: if the side that just moved
-            # had a large advantage (prev_eval_stm was high), they delivered
-            # checkmate. Otherwise it's stalemate.
             if abs(prev_eval_stm) > 500:
-                # Previous side was winning — they delivered checkmate.
-                # prev side was white if current ply is odd (black to move now)
                 prev_was_white = not white_to_move
-                result = 2 if prev_was_white else 0
+                result = 1 if prev_was_white else -1
             else:
-                result = 1  # stalemate
+                result = 0  # stalemate
             return finalize(positions, result)
 
         # eval_cp is from STM perspective — convert to white-relative
@@ -180,9 +175,18 @@ def play_game(engine: UCIEngine, node_limit: int) -> list[tuple[int, int, int, i
 
         # Record position (skip opening plies and extreme evals)
         if ply >= SKIP_PLIES and abs(eval_cp) <= EVAL_CLIP:
-            pos_key = " ".join(moves).encode("ascii")
-            board_hash = fnv1a_hash(pos_key)
-            positions.append((board_hash, eval_white, ply))
+            fen = board.fen()
+            positions.append((fen, bestmove, eval_white, ply))
+
+        # Apply move on python-chess board
+        try:
+            move = chess.Move.from_uci(bestmove)
+            if move not in board.legal_moves:
+                # Engine returned illegal move — abort game as draw
+                return finalize(positions, 0)
+            board.push(move)
+        except ValueError:
+            return finalize(positions, 0)
 
         moves.append(bestmove)
         ply += 1
@@ -194,41 +198,37 @@ def play_game(engine: UCIEngine, node_limit: int) -> list[tuple[int, int, int, i
             consecutive_low_eval = 0
 
         if consecutive_low_eval >= 80:
-            return finalize(positions, 1)
+            return finalize(positions, 0)
 
-        # Mate found by engine — the side to move found a forced mate.
-        # eval_cp > 40000 means STM is winning (will deliver mate).
+        # Mate found by engine
         if abs(eval_cp) > 40000:
             if eval_cp > 0:
-                # STM found mate — STM wins
-                result = 2 if white_to_move else 0
+                result = 1 if white_to_move else -1
             else:
-                # STM is getting mated — other side wins
-                result = 0 if white_to_move else 2
+                result = -1 if white_to_move else 1
             return finalize(positions, result)
 
     # Max plies reached — draw
-    return finalize(positions, 1)
+    return finalize(positions, 0)
 
 
 def finalize(
-    positions: list[tuple[int, int, int]], result: int
-) -> list[tuple[int, int, int, int]]:
+    positions: list[tuple[str, str, int, int]], result: int
+) -> list[tuple[str, str, int, int, int]]:
     """Attach game result to all positions."""
-    return [(h, ev, ply, result) for h, ev, ply in positions]
+    return [(fen, mv, ev, ply, result) for fen, mv, ev, ply in positions]
 
 
-def write_positions(f, positions: list[tuple[int, int, int, int]]):
-    """Write positions in binary format."""
-    padding = b"\x00" * 6
-    for board_hash, eval_cp, ply, result in positions:
+def write_positions(f, positions: list[tuple[str, str, int, int, int]]):
+    """Write positions in nnue-pytorch plain text format."""
+    for fen, move, eval_cp, ply, result in positions:
         eval_cp = max(-32768, min(32767, eval_cp))
-        ply = min(255, ply)
-        f.write(struct.pack("<Q", board_hash))
-        f.write(struct.pack("<h", eval_cp))
-        f.write(struct.pack("<B", result))
-        f.write(struct.pack("<B", ply))
-        f.write(padding)
+        f.write(f"fen {fen}\n")
+        f.write(f"move {move}\n")
+        f.write(f"score {eval_cp}\n")
+        f.write(f"ply {ply}\n")
+        f.write(f"result {result}\n")
+        f.write("e\n")
 
 
 def main():
@@ -253,16 +253,19 @@ def main():
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
 
-    mode = "ab" if args.resume else "wb"
+    mode = "a" if args.resume else "w"
     existing_positions = 0
     if args.resume and os.path.isfile(args.output):
-        existing_positions = os.path.getsize(args.output) // 18
+        # Count existing positions (each position = 6 lines)
+        with open(args.output, "r") as ef:
+            existing_positions = sum(1 for line in ef if line.startswith("e\n") or line.strip() == "e")
         print(f"Resuming: {existing_positions:,} existing positions")
 
     print(f"Engine: {args.engine}")
     print(f"Output: {os.path.abspath(args.output)}")
     print(f"Games:  {args.games}")
     print(f"Nodes:  {args.nodes}/move")
+    print(f"Format: nnue-pytorch plain text")
     print(f"Openings: {len(OPENING_PAIRS)} first moves x varied responses")
     print()
 
@@ -285,15 +288,15 @@ def main():
 
                 # Count result
                 if positions:
-                    result = positions[0][3]
-                    if result == 2:
+                    result = positions[0][4]
+                    if result == 1:
                         wins += 1
-                    elif result == 1:
+                    elif result == 0:
                         draws += 1
                     else:
                         losses += 1
                 else:
-                    draws += 1  # no positions = very short draw
+                    draws += 1
 
                 total_positions += len(positions)
                 elapsed = time.time() - start_time
@@ -321,7 +324,7 @@ def main():
           f"D{draws} ({100*draws//max(total_games,1)}%) / "
           f"L{losses} ({100*losses//max(total_games,1)}%)")
     print(f"Total positions: {total_positions:,}")
-    print(f"File size: {os.path.getsize(args.output):,} bytes")
+    print(f"File: {os.path.abspath(args.output)}")
 
 
 if __name__ == "__main__":
