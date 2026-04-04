@@ -1,11 +1,11 @@
 """Generate self-play training data using the Rust Pyro engine.
 
-Drives two copies of the Rust engine (one per side) via UCI protocol.
-Each move uses "go nodes 5000" for consistent quality.
+Drives the Rust engine via UCI protocol with randomized openings
+so each game explores different positions.
 
 Binary output format (18 bytes per position):
-  board_hash: u64 (8 bytes) — FNV-1a hash of FEN position part
-  eval_cp:    i16 (2 bytes) — engine eval in centipawns (STM-relative)
+  board_hash: u64 (8 bytes) — FNV-1a hash of move sequence
+  eval_cp:    i16 (2 bytes) — engine eval in centipawns (white-relative)
   result:     u8  (1 byte)  — 0=black wins, 1=draw, 2=white wins
   ply:        u8  (1 byte)  — half-move count from game start
   padding:    6 bytes        — reserved for future use
@@ -15,8 +15,8 @@ WDL interpolation is done at training time:
 """
 
 import argparse
-import hashlib
 import os
+import random
 import struct
 import subprocess
 import sys
@@ -34,6 +34,19 @@ MAX_GAME_PLIES = 400   # max half-moves per game (200 full moves)
 SKIP_PLIES = 8         # skip first 8 half-moves (opening theory)
 EVAL_CLIP = 3000       # skip positions with |eval| > this
 
+# --- Opening randomization ---
+# Common openings: (white_move, [black_responses])
+OPENING_PAIRS = [
+    ("e2e4", ["e7e5", "c7c5", "e7e6", "c7c6", "d7d5", "g8f6", "d7d6", "g7g6"]),
+    ("d2d4", ["d7d5", "g8f6", "e7e6", "c7c5", "f7f5", "g7g6", "d7d6"]),
+    ("c2c4", ["e7e5", "g8f6", "c7c5", "e7e6", "g7g6"]),
+    ("g1f3", ["d7d5", "g8f6", "c7c5", "g7g6"]),
+    ("b1c3", ["d7d5", "g8f6", "e7e5"]),
+    ("g2g3", ["d7d5", "g8f6", "e7e5", "g7g6"]),
+    ("f2f4", ["d7d5", "e7e5", "g8f6"]),
+    ("b2b3", ["e7e5", "d7d5", "g8f6"]),
+]
+
 
 def fnv1a_hash(data: bytes) -> int:
     """FNV-1a 64-bit hash."""
@@ -42,14 +55,6 @@ def fnv1a_hash(data: bytes) -> int:
         h ^= b
         h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
     return h
-
-
-def fen_board_hash(fen: str) -> int:
-    """Hash only the board position + side to move from a FEN string."""
-    # Use first two FEN fields: piece placement + side to move
-    parts = fen.split()
-    key = f"{parts[0]} {parts[1]}".encode("ascii")
-    return fnv1a_hash(key)
 
 
 class UCIEngine:
@@ -89,12 +94,12 @@ class UCIEngine:
         self._send("isready")
         self._wait_for("readyok")
 
-    def go_nodes(self, fen: str, moves: list[str], nodes: int) -> tuple[str, int]:
+    def go_nodes(self, moves: list[str], nodes: int) -> tuple[str, int]:
         """Search position and return (bestmove, eval_cp)."""
         if moves:
-            self._send(f"position fen {fen} moves {' '.join(moves)}")
+            self._send(f"position startpos moves {' '.join(moves)}")
         else:
-            self._send(f"position fen {fen}")
+            self._send("position startpos")
 
         self._send(f"go nodes {nodes}")
         lines = self._wait_for("bestmove")
@@ -128,86 +133,77 @@ class UCIEngine:
             self.proc.kill()
 
 
-STARTPOS_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+def random_opening() -> list[str]:
+    """Pick a random opening (2 plies: one white move + one black response)."""
+    white_move, black_responses = random.choice(OPENING_PAIRS)
+    black_move = random.choice(black_responses)
+    return [white_move, black_move]
 
 
-def is_game_over(fen: str, moves: list[str], engine: UCIEngine) -> tuple[bool, int | None]:
-    """Check if the game is over by trying to get a move.
+def play_game(engine: UCIEngine, node_limit: int) -> list[tuple[int, int, int, int]]:
+    """Play one self-play game.
 
-    Returns (is_over, result) where result: 0=black, 1=draw, 2=white, None=not over.
-    """
-    # 50-move rule
-    parts = fen.split()
-    halfmove = int(parts[4]) if len(parts) > 4 else 0
-
-    # We can't easily detect checkmate/stalemate without the engine's move gen.
-    # Instead, we send "go nodes 1" and if bestmove is "(none)", it's game over.
-    # But we already get bestmove from the main search, so we handle it in the game loop.
-    return False, None
-
-
-def play_game(engine: UCIEngine, node_limit: int) -> list[tuple[int, int, int]]:
-    """Play one self-play game. Returns list of (board_hash, eval_cp, ply) tuples.
-
-    Result (0/1/2) is filled in after the game ends.
+    Returns list of (board_hash, eval_cp_white, ply, result) tuples.
     """
     engine.new_game()
-    moves: list[str] = []
-    positions: list[tuple[int, int, int]] = []  # (hash, eval_cp, ply)
-    fen = STARTPOS_FEN
-    ply = 0
-    consecutive_no_progress = 0
-    last_halfmove = 0
+
+    # Start with a random opening (2 plies)
+    moves: list[str] = random_opening()
+    ply = len(moves)
+
+    positions: list[tuple[int, int, int]] = []  # (hash, eval_cp_white, ply)
+    consecutive_low_eval = 0
+    prev_eval_stm = 0  # last eval from side-to-move perspective
 
     while ply < MAX_GAME_PLIES:
-        bestmove, eval_cp = engine.go_nodes(fen, moves, node_limit)
+        bestmove, eval_cp = engine.go_nodes(moves, node_limit)
+
+        white_to_move = (ply % 2 == 0)
 
         if bestmove == "(none)":
-            # Game over — checkmate or stalemate
-            # If eval is very negative, side to move is mated
-            if abs(eval_cp) > 40000:
-                # Checkmate — the side to move lost
-                white_to_move = (ply % 2 == 0)
-                result = 0 if white_to_move else 2  # loser's perspective
+            # No legal moves: checkmate or stalemate.
+            # Use previous eval to distinguish: if the side that just moved
+            # had a large advantage (prev_eval_stm was high), they delivered
+            # checkmate. Otherwise it's stalemate.
+            if abs(prev_eval_stm) > 500:
+                # Previous side was winning — they delivered checkmate.
+                # prev side was white if current ply is odd (black to move now)
+                prev_was_white = not white_to_move
+                result = 2 if prev_was_white else 0
             else:
-                result = 1  # stalemate = draw
+                result = 1  # stalemate
             return finalize(positions, result)
 
-        # Eval from STM perspective — convert to white-relative for storage
-        white_to_move = (ply % 2 == 0)
+        # eval_cp is from STM perspective — convert to white-relative
         eval_white = eval_cp if white_to_move else -eval_cp
+        prev_eval_stm = eval_cp
 
-        # Record position (skip early plies and extreme evals)
+        # Record position (skip opening plies and extreme evals)
         if ply >= SKIP_PLIES and abs(eval_cp) <= EVAL_CLIP:
-            parts = fen.split()
-            # Build the actual FEN after moves by using position string
-            # For hashing, we use the move list representation
-            pos_key = f"{fen} {' '.join(moves)}".encode("ascii")
+            pos_key = " ".join(moves).encode("ascii")
             board_hash = fnv1a_hash(pos_key)
             positions.append((board_hash, eval_white, ply))
 
         moves.append(bestmove)
         ply += 1
 
-        # Update FEN for tracking (we don't actually need the full FEN since
-        # we send "position fen startpos moves ..." to the engine)
-        # But we need to track side to move and halfmove clock for draw detection
-
-        # Simple draw detection: if eval stays near 0 for too long
+        # Draw: eval stays near 0 for 80 consecutive plies
         if abs(eval_cp) < 10:
-            consecutive_no_progress += 1
+            consecutive_low_eval += 1
         else:
-            consecutive_no_progress = 0
+            consecutive_low_eval = 0
 
-        if consecutive_no_progress >= 80:
-            return finalize(positions, 1)  # draw by no progress
+        if consecutive_low_eval >= 80:
+            return finalize(positions, 1)
 
-        # Detect if eval suggests decisive advantage held for a while
+        # Mate found by engine — the side to move found a forced mate.
+        # eval_cp > 40000 means STM is winning (will deliver mate).
         if abs(eval_cp) > 40000:
-            # Mate score — game is effectively over
             if eval_cp > 0:
+                # STM found mate — STM wins
                 result = 2 if white_to_move else 0
             else:
+                # STM is getting mated — other side wins
                 result = 0 if white_to_move else 2
             return finalize(positions, result)
 
@@ -215,7 +211,9 @@ def play_game(engine: UCIEngine, node_limit: int) -> list[tuple[int, int, int]]:
     return finalize(positions, 1)
 
 
-def finalize(positions: list[tuple[int, int, int]], result: int) -> list[tuple[int, int, int, int]]:
+def finalize(
+    positions: list[tuple[int, int, int]], result: int
+) -> list[tuple[int, int, int, int]]:
     """Attach game result to all positions."""
     return [(h, ev, ply, result) for h, ev, ply in positions]
 
@@ -224,24 +222,29 @@ def write_positions(f, positions: list[tuple[int, int, int, int]]):
     """Write positions in binary format."""
     padding = b"\x00" * 6
     for board_hash, eval_cp, ply, result in positions:
-        # Clamp eval to i16 range
         eval_cp = max(-32768, min(32767, eval_cp))
         ply = min(255, ply)
-        f.write(struct.pack("<Q", board_hash))      # u64
-        f.write(struct.pack("<h", eval_cp))          # i16
-        f.write(struct.pack("<B", result))            # u8
-        f.write(struct.pack("<B", ply))               # u8
-        f.write(padding)                              # 6 bytes
+        f.write(struct.pack("<Q", board_hash))
+        f.write(struct.pack("<h", eval_cp))
+        f.write(struct.pack("<B", result))
+        f.write(struct.pack("<B", ply))
+        f.write(padding)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate self-play data with Rust Pyro engine")
-    parser.add_argument("--games", type=int, default=10000, help="Number of games to play")
-    parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT, help="Output binary file")
+    parser = argparse.ArgumentParser(
+        description="Generate self-play data with Rust Pyro engine"
+    )
+    parser.add_argument("--games", type=int, default=10000, help="Number of games")
+    parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT, help="Output file")
     parser.add_argument("--resume", action="store_true", help="Append to existing file")
-    parser.add_argument("--nodes", type=int, default=NODE_LIMIT, help="Node limit per move")
-    parser.add_argument("--engine", type=str, default=ENGINE_PATH, help="Path to engine binary")
+    parser.add_argument("--nodes", type=int, default=NODE_LIMIT, help="Nodes per move")
+    parser.add_argument("--engine", type=str, default=ENGINE_PATH, help="Engine binary")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed")
     args = parser.parse_args()
+
+    if args.seed is not None:
+        random.seed(args.seed)
 
     if not os.path.isfile(args.engine):
         print(f"Engine not found: {args.engine}")
@@ -260,13 +263,14 @@ def main():
     print(f"Output: {os.path.abspath(args.output)}")
     print(f"Games:  {args.games}")
     print(f"Nodes:  {args.nodes}/move")
+    print(f"Openings: {len(OPENING_PAIRS)} first moves x varied responses")
     print()
 
     engine = UCIEngine(args.engine)
 
-    wins = 0
+    wins = 0    # white wins
     draws = 0
-    losses = 0
+    losses = 0  # black wins
     total_positions = existing_positions
     start_time = time.time()
 
@@ -288,12 +292,14 @@ def main():
                         draws += 1
                     else:
                         losses += 1
+                else:
+                    draws += 1  # no positions = very short draw
 
                 total_positions += len(positions)
                 elapsed = time.time() - start_time
                 gps = game_num / elapsed if elapsed > 0 else 0
 
-                if game_num % 10 == 0 or game_num == 1:
+                if game_num % 10 == 0 or game_num <= 3:
                     print(
                         f"Game {game_num}/{args.games}: "
                         f"W{wins}/D{draws}/L{losses}  "
@@ -308,9 +314,12 @@ def main():
         engine.quit()
 
     elapsed = time.time() - start_time
+    total_games = wins + draws + losses
     print()
-    print(f"Done: {wins + draws + losses} games in {elapsed:.1f}s")
-    print(f"Results: W{wins} / D{draws} / L{losses}")
+    print(f"Done: {total_games} games in {elapsed:.1f}s")
+    print(f"Results: W{wins} ({100*wins//max(total_games,1)}%) / "
+          f"D{draws} ({100*draws//max(total_games,1)}%) / "
+          f"L{losses} ({100*losses//max(total_games,1)}%)")
     print(f"Total positions: {total_positions:,}")
     print(f"File size: {os.path.getsize(args.output):,} bytes")
 
