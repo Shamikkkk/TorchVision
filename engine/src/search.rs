@@ -1,5 +1,6 @@
 use crate::board::Board;
 use crate::movegen::{self, Move, generate_moves, is_in_check, make_move};
+use crate::nnue;
 
 const INF: i32 = 100_000;
 const CHECKMATE: i32 = 50_000;
@@ -354,8 +355,13 @@ fn store_killer(killers: &mut Killers, ply: usize, mv: &Move) {
 // ---------------------------------------------------------------------------
 
 /// Search captures only until the position is quiet.
-fn quiescence(board: &Board, mut alpha: i32, beta: i32) -> i32 {
-    let stand_pat = evaluate(board);
+fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::Network>) -> i32 {
+    let stand_pat = if let Some(net) = network {
+        let acc = nnue::Accumulator::from_board(net, board);
+        net.evaluate(&acc, board.side_to_move)
+    } else {
+        evaluate(board)
+    };
     if stand_pat >= beta {
         return beta;
     }
@@ -391,7 +397,7 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32) -> i32 {
 
     for mv in &captures {
         let new_board = make_move(board, mv);
-        let score = -quiescence(&new_board, -beta, -alpha);
+        let score = -quiescence(&new_board, -beta, -alpha, network);
         if score >= beta {
             return beta;
         }
@@ -410,16 +416,16 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32) -> i32 {
 /// Public entry point: alpha-beta with quiescence, move ordering, and killers.
 pub fn alpha_beta(board: &Board, depth: u32, alpha: i32, beta: i32) -> i32 {
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
-    ab_search(board, depth, alpha, beta, 0, &mut killers)
+    ab_search(board, depth, alpha, beta, 0, &mut killers, None)
 }
 
 /// Recursive alpha-beta with move ordering and killer heuristic.
 fn ab_search(
     board: &Board, depth: u32, mut alpha: i32, beta: i32,
-    ply: usize, killers: &mut Killers,
+    ply: usize, killers: &mut Killers, network: Option<&nnue::Network>,
 ) -> i32 {
     if depth == 0 {
-        return quiescence(board, alpha, beta);
+        return quiescence(board, alpha, beta, network);
     }
 
     let mut moves = generate_moves(board);
@@ -435,7 +441,7 @@ fn ab_search(
 
     for mv in &moves {
         let new_board = make_move(board, mv);
-        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers);
+        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network);
         if score >= beta {
             // Store killer if quiet move
             if mv.flags & movegen::FLAG_CAPTURE == 0 {
@@ -453,7 +459,7 @@ fn ab_search(
 
 /// Search for the best move at the given depth.
 /// Returns None if no legal moves exist (checkmate or stalemate).
-pub fn best_move(board: &Board, depth: u32) -> Option<(Move, i32)> {
+pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> Option<(Move, i32)> {
     let mut moves = generate_moves(board);
     if moves.is_empty() {
         return None;
@@ -469,7 +475,7 @@ pub fn best_move(board: &Board, depth: u32) -> Option<(Move, i32)> {
 
     for mv in moves {
         let new_board = make_move(board, &mv);
-        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers);
+        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, network);
         if score > alpha {
             alpha = score;
             best = Some((mv, score));
@@ -543,7 +549,7 @@ mod tests {
     fn best_move_finds_capture() {
         // White queen can capture undefended black queen
         let board = Board::from_fen("4k3/8/8/3q4/8/8/8/3QK3 w - - 0 1").unwrap();
-        let result = best_move(&board, 2);
+        let result = best_move(&board, 2, None);
         assert!(result.is_some());
         let (mv, score) = result.unwrap();
         assert_eq!(mv.to_uci(), "d1d5", "Should capture the queen");
@@ -554,7 +560,7 @@ mod tests {
     fn finds_checkmate_in_one() {
         // White to move, Qh5# is mate (back rank)
         let board = Board::from_fen("6k1/5ppp/8/8/8/8/8/4K2Q w - - 0 1").unwrap();
-        let result = best_move(&board, 2);
+        let result = best_move(&board, 2, None);
         assert!(result.is_some());
         let (_, score) = result.unwrap();
         assert!(score > 40_000, "Should find checkmate, score={}", score);
@@ -563,7 +569,7 @@ mod tests {
     #[test]
     fn no_moves_in_checkmate() {
         let board = Board::from_fen("r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4").unwrap();
-        assert!(best_move(&board, 1).is_none());
+        assert!(best_move(&board, 1, None).is_none());
     }
 
     #[test]
@@ -596,7 +602,7 @@ mod tests {
     fn search_doesnt_blunder_queen() {
         // White queen under attack by black pawn — shouldn't leave it there
         let board = Board::from_fen("4k3/8/8/8/3p4/4Q3/8/4K3 w - - 0 1").unwrap();
-        let result = best_move(&board, 3);
+        let result = best_move(&board, 3, None);
         assert!(result.is_some());
         let (mv, _) = result.unwrap();
         // Queen should not stay on e3 where it gets captured

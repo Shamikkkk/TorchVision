@@ -1,4 +1,6 @@
 use crate::board::Board;
+use std::fs::File;
+use std::io::{Read as IoRead, Write as IoWrite};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -207,6 +209,98 @@ impl Network {
 
         Network { ft_weights, ft_bias, out_weights, out_bias }
     }
+
+    // -----------------------------------------------------------------------
+    // Binary file I/O
+    //
+    // Format:
+    //   Magic:   [0x4E, 0x4E, 0x55, 0x45]  ("NNUE")
+    //   Version: u32 little-endian = 1
+    //   Data:    all i16 values in little-endian order:
+    //            ft_weights (768*256), ft_bias (256),
+    //            out_weights (512), out_bias (1)
+    // -----------------------------------------------------------------------
+
+    const MAGIC: [u8; 4] = [0x4E, 0x4E, 0x55, 0x45];
+    const VERSION: u32 = 1;
+
+    /// Write network weights to a binary file.
+    pub fn to_file(&self, path: &str) -> Result<(), String> {
+        let mut f = File::create(path).map_err(|e| format!("create {}: {}", path, e))?;
+
+        f.write_all(&Self::MAGIC).map_err(|e| e.to_string())?;
+        f.write_all(&Self::VERSION.to_le_bytes()).map_err(|e| e.to_string())?;
+
+        // ft_weights: INPUT_SIZE * HIDDEN_SIZE i16 values
+        for row in self.ft_weights.iter() {
+            for &val in row.iter() {
+                f.write_all(&val.to_le_bytes()).map_err(|e| e.to_string())?;
+            }
+        }
+        // ft_bias
+        for &val in &self.ft_bias {
+            f.write_all(&val.to_le_bytes()).map_err(|e| e.to_string())?;
+        }
+        // out_weights
+        for &val in &self.out_weights {
+            f.write_all(&val.to_le_bytes()).map_err(|e| e.to_string())?;
+        }
+        // out_bias
+        f.write_all(&self.out_bias.to_le_bytes()).map_err(|e| e.to_string())?;
+
+        Ok(())
+    }
+
+    /// Load network weights from a binary file.
+    pub fn from_file(path: &str) -> Result<Self, String> {
+        let mut f = File::open(path).map_err(|e| format!("open {}: {}", path, e))?;
+
+        // Magic
+        let mut magic = [0u8; 4];
+        f.read_exact(&mut magic).map_err(|e| format!("read magic: {}", e))?;
+        if magic != Self::MAGIC {
+            return Err(format!("bad magic: {:?}", magic));
+        }
+
+        // Version
+        let mut ver_bytes = [0u8; 4];
+        f.read_exact(&mut ver_bytes).map_err(|e| format!("read version: {}", e))?;
+        let version = u32::from_le_bytes(ver_bytes);
+        if version != Self::VERSION {
+            return Err(format!("unsupported version {}", version));
+        }
+
+        let read_i16 = |file: &mut File| -> Result<i16, String> {
+            let mut buf = [0u8; 2];
+            file.read_exact(&mut buf).map_err(|e| format!("read i16: {}", e))?;
+            Ok(i16::from_le_bytes(buf))
+        };
+
+        // ft_weights
+        let mut ft_weights = Box::new([[0i16; HIDDEN_SIZE]; INPUT_SIZE]);
+        for row in ft_weights.iter_mut() {
+            for val in row.iter_mut() {
+                *val = read_i16(&mut f)?;
+            }
+        }
+
+        // ft_bias
+        let mut ft_bias = [0i16; HIDDEN_SIZE];
+        for val in ft_bias.iter_mut() {
+            *val = read_i16(&mut f)?;
+        }
+
+        // out_weights
+        let mut out_weights = [0i16; HIDDEN_SIZE * 2];
+        for val in out_weights.iter_mut() {
+            *val = read_i16(&mut f)?;
+        }
+
+        // out_bias
+        let out_bias = read_i16(&mut f)?;
+
+        Ok(Network { ft_weights, ft_bias, out_weights, out_bias })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +378,26 @@ mod tests {
             assert_eq!(acc.white[i], original.white[i], "white[{}] mismatch", i);
             assert_eq!(acc.black[i], original.black[i], "black[{}] mismatch", i);
         }
+    }
+
+    #[test]
+    fn file_roundtrip() {
+        let net = Network::from_random();
+        let path = std::env::temp_dir().join("pyro_test_nnue.bin");
+        let path_str = path.to_str().unwrap();
+
+        net.to_file(path_str).expect("write failed");
+        let loaded = Network::from_file(path_str).expect("read failed");
+
+        assert_eq!(net.out_bias, loaded.out_bias, "out_bias mismatch");
+        assert_eq!(net.ft_bias, loaded.ft_bias, "ft_bias mismatch");
+        assert_eq!(net.out_weights, loaded.out_weights, "out_weights mismatch");
+        // Spot-check ft_weights
+        for i in [0, 100, 400, 767] {
+            assert_eq!(net.ft_weights[i], loaded.ft_weights[i], "ft_weights[{}] mismatch", i);
+        }
+
+        std::fs::remove_file(path_str).ok();
     }
 
     #[test]

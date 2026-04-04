@@ -4,11 +4,46 @@ mod nnue;
 mod search;
 
 use board::Board;
+use nnue::Network;
 use search::{best_move, parse_uci_move};
 use std::io::{self, BufRead, Write};
 
+struct Engine {
+    position: Board,
+    network: Option<Network>,
+}
+
+impl Engine {
+    fn new() -> Self {
+        // Try to load NNUE weights from the executable's directory
+        let network = Self::try_load_nnue();
+        match &network {
+            Some(_) => eprintln!("NNUE loaded"),
+            None => eprintln!("NNUE not found, using PST"),
+        }
+        Engine {
+            position: Board::startpos(),
+            network,
+        }
+    }
+
+    fn try_load_nnue() -> Option<Network> {
+        // Look for pyro.nnue next to the executable
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let path = dir.join("pyro.nnue");
+                if let Ok(net) = Network::from_file(path.to_str()?) {
+                    return Some(net);
+                }
+            }
+        }
+        // Also try current working directory
+        Network::from_file("pyro.nnue").ok()
+    }
+}
+
 fn main() {
-    let mut position = Board::startpos();
+    let mut engine = Engine::new();
 
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
@@ -34,14 +69,14 @@ fn main() {
                 io::stdout().flush().ok();
             }
             "ucinewgame" => {
-                position = Board::startpos();
+                engine.position = Board::startpos();
             }
             "position" => {
-                position = handle_position(&tokens);
+                engine.position = handle_position(&tokens);
             }
             "go" => {
                 let depth = parse_go_depth(&tokens);
-                if let Some((mv, score)) = best_move(&position, depth) {
+                if let Some((mv, score)) = best_move(&engine.position, depth, engine.network.as_ref()) {
                     println!("info depth {} score cp {}", depth, score);
                     println!("bestmove {}", mv.to_uci());
                 } else {
