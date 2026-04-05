@@ -1,13 +1,18 @@
 """Train NNUE on self-play data in nnue-pytorch plain text format.
 
-Architecture: 768 → 256×2 → 1 (matches engine/src/nnue.rs)
+Architecture: 768 -> 256x2 -> 1 (matches engine/src/nnue.rs)
   - Feature transformer: shared Linear(768, 256)
-  - Two perspectives: STM and NSTM, concatenated → 512
-  - Output: Linear(512, 1) → scalar
+  - Two perspectives: STM and NSTM, concatenated -> 512
+  - Output: Linear(512, 1) -> raw centipawns
   - Activation: CReLU (clamp 0..1)
 
-Loss: MSE(sigmoid(output), target)
+Loss: MSE(output, logit(target) * SCALE)
   target = 0.5 * sigmoid(score / 400) + 0.5 * game_result_01
+  SCALE = 400.0
+
+The model outputs raw centipawn-scale values. Targets are converted
+from WDL probability [0,1] to centipawn space via logit (inverse sigmoid)
+so that MSE loss and gradients operate in centipawn space.
 
 After training, quantizes weights and writes engine/pyro.nnue.
 
@@ -26,6 +31,7 @@ import chess
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, random_split
 
 
@@ -37,7 +43,7 @@ INPUT_SIZE = 768
 HIDDEN_SIZE = 256
 QA = 255
 QB = 64
-SCALE = 400
+SCALE = 400.0
 
 MAGIC = bytes([0x4E, 0x4E, 0x55, 0x45])  # "NNUE"
 VERSION = 1
@@ -59,15 +65,18 @@ def feature_index(color_idx: int, piece_type: int, square: int) -> int:
     return color_idx * 384 + piece_type * 64 + square
 
 
-def fen_to_features(fen: str) -> tuple[torch.Tensor, torch.Tensor]:
+def fen_to_features(fen) -> tuple[torch.Tensor, torch.Tensor]:
     """Convert FEN to (white_features, black_features) 768-dim binary tensors."""
-    board = chess.Board(fen)
+    if isinstance(fen, str):
+        board = chess.Board(fen)
+    else:
+        board = fen
     wf = torch.zeros(INPUT_SIZE, dtype=torch.float32)
     bf = torch.zeros(INPUT_SIZE, dtype=torch.float32)
 
     for square, piece in board.piece_map().items():
         color = 0 if piece.color == chess.WHITE else 1
-        pt = piece.piece_type - 1  # chess.PAWN=1..chess.KING=6 → 0..5
+        pt = piece.piece_type - 1  # chess.PAWN=1..chess.KING=6 -> 0..5
 
         # White perspective: friendly=0, opponent=1
         wf[feature_index(color, pt, square)] = 1.0
@@ -130,7 +139,7 @@ class NNUEDataset(Dataset):
         white_to_move = board.turn == chess.WHITE
 
         # Features
-        wf, bf = fen_to_features(fen)
+        wf, bf = fen_to_features(board)
 
         # STM / NSTM perspectives
         if white_to_move:
@@ -141,7 +150,7 @@ class NNUEDataset(Dataset):
         # WDL interpolation target
         # sigmoid(score / 400) maps cp to [0, 1] (white perspective)
         wdl = 1.0 / (1.0 + math.exp(-score_cp / 400.0))
-        game_result_01 = (result + 1.0) / 2.0  # -1→0, 0→0.5, 1→1
+        game_result_01 = (result + 1.0) / 2.0  # -1->0, 0->0.5, 1->1
         target = 0.5 * wdl + 0.5 * game_result_01
 
         # Flip to STM perspective: if black to move, target = 1 - target
@@ -152,22 +161,23 @@ class NNUEDataset(Dataset):
 
 
 # ---------------------------------------------------------------------------
-# Model (768 → 256×2 → 1, matching Rust engine)
+# Model (768 -> 256x2 -> 1, matching Rust engine)
 # ---------------------------------------------------------------------------
 
 class RustNNUE(nn.Module):
-    """768→256→1 NNUE matching engine/src/nnue.rs architecture."""
+    """768->256->1 NNUE matching engine/src/nnue.rs architecture."""
 
     def __init__(self):
         super().__init__()
         self.ft = nn.Linear(INPUT_SIZE, HIDDEN_SIZE)   # shared feature transformer
         self.out = nn.Linear(HIDDEN_SIZE * 2, 1)       # output layer
+        nn.init.zeros_(self.out.bias)
 
     def forward(self, stm_feat, nstm_feat):
         """
-        stm_feat:  (batch, 768) — side-to-move features
-        nstm_feat: (batch, 768) — opponent features
-        Returns (batch, 1) raw logit (apply sigmoid for probability).
+        stm_feat:  (batch, 768) -- side-to-move features
+        nstm_feat: (batch, 768) -- opponent features
+        Returns (batch, 1) raw centipawn-scale output.
         """
         stm = self.ft(stm_feat).clamp(0.0, 1.0)     # CReLU
         nstm = self.ft(nstm_feat).clamp(0.0, 1.0)    # CReLU
@@ -209,7 +219,6 @@ def train(args):
 
     model = RustNNUE().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    loss_fn = nn.MSELoss()
 
     os.makedirs(MODELS_DIR, exist_ok=True)
     best_val_loss = float("inf")
@@ -225,11 +234,13 @@ def train(args):
             stm, nstm, target = stm.to(device), nstm.to(device), target.to(device)
 
             output = model(stm, nstm)
-            pred = torch.sigmoid(output)
-            loss = loss_fn(pred, target)
+            target_clamped = target.clamp(0.1, 0.9)
+            target_cp = torch.log(target_clamped / (1.0 - target_clamped)) * SCALE
+            loss = F.mse_loss(output, target_cp)
 
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1000.0)
             optimizer.step()
 
             train_loss_sum += loss.item()
@@ -247,8 +258,9 @@ def train(args):
                 stm, nstm, target = stm.to(device), nstm.to(device), target.to(device)
 
                 output = model(stm, nstm)
-                pred = torch.sigmoid(output)
-                loss = loss_fn(pred, target)
+                target_clamped = target.clamp(0.1, 0.9)
+                target_cp = torch.log(target_clamped / (1.0 - target_clamped)) * SCALE
+                loss = F.mse_loss(output, target_cp)
 
                 val_loss_sum += loss.item()
                 val_batches += 1
@@ -314,7 +326,7 @@ def export_nnue(model_path: str):
 
         # ft_weights: Rust reads [input][hidden], PyTorch stores (out, in) = (256, 768)
         # So we need to transpose: write ft_weight.T which is (768, 256)
-        ft_w_t = ft_w_q.T  # (768, 256) — now [INPUT_SIZE][HIDDEN_SIZE]
+        ft_w_t = ft_w_q.T  # (768, 256) -- now [INPUT_SIZE][HIDDEN_SIZE]
         for row in range(INPUT_SIZE):
             for col in range(HIDDEN_SIZE):
                 f.write(struct.pack("<h", int(ft_w_t[row, col])))

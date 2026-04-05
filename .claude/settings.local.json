@@ -22,7 +22,9 @@
       "Bash(cargo run:*)",
       "Bash(time echo:*)",
       "Bash(./target/release/pyro.exe)",
-      "Bash(/c/Users/shami/OneDrive/Documents/torch/engine/target/release/pyro.exe)"
+      "Bash(/c/Users/shami/OneDrive/Documents/torch/engine/target/release/pyro.exe)",
+      "Bash(\"C:\\\\Users\\\\shami\\\\OneDrive\\\\Documents\\\\torch\\\\engine\\\\target\\\\release\\\\pyro.exe\")",
+      "Bash(\"C:\\\\Users\\\\shami\\\\OneDrive\\\\Documents\\\\torch\\\\engine\\\\target\\\\release\\\\pyro.exe\" --no-nnue)"
     ]
   }
 }

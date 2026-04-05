@@ -14,13 +14,18 @@ struct Engine {
 }
 
 impl Engine {
-    fn new() -> Self {
-        // Try to load NNUE weights from the executable's directory
-        let network = Self::try_load_nnue();
-        match &network {
-            Some(_) => eprintln!("NNUE loaded"),
-            None => eprintln!("NNUE not found, using PST"),
-        }
+    fn new(no_nnue: bool) -> Self {
+        let network = if no_nnue {
+            eprintln!("NNUE disabled (--no-nnue), using PST");
+            None
+        } else {
+            let net = Self::try_load_nnue();
+            match &net {
+                Some(_) => eprintln!("NNUE loaded"),
+                None => eprintln!("NNUE not found, using PST"),
+            }
+            net
+        };
         Engine {
             position: Board::startpos(),
             network,
@@ -43,7 +48,8 @@ impl Engine {
 }
 
 fn main() {
-    let mut engine = Engine::new();
+    let no_nnue = std::env::args().any(|a| a == "--no-nnue");
+    let mut engine = Engine::new(no_nnue);
 
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
