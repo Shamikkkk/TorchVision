@@ -169,8 +169,8 @@ impl Network {
             output += clamped * self.out_weights[HIDDEN_SIZE + i] as i32;
         }
 
-        // Scale to centipawns
-        output * SCALE / (QA * QB)
+        // Scale: model outputs centipawns directly, just undo quantization
+        output / (QA * QB)
     }
 
     /// Create a network with small random weights (for testing only).

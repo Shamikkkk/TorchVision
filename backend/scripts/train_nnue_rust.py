@@ -6,13 +6,11 @@ Architecture: 768 -> 256x2 -> 1 (matches engine/src/nnue.rs)
   - Output: Linear(512, 1) -> raw centipawns
   - Activation: CReLU (clamp 0..1)
 
-Loss: MSE(output, logit(target) * SCALE)
-  target = 0.5 * sigmoid(score / 400) + 0.5 * game_result_01
-  SCALE = 400.0
+Loss: MSE(output, target_cp)
+  target_cp = score_cp (STM-relative centipawns from self-play)
 
-The model outputs raw centipawn-scale values. Targets are converted
-from WDL probability [0,1] to centipawn space via logit (inverse sigmoid)
-so that MSE loss and gradients operate in centipawn space.
+The model outputs raw centipawn-scale values. Targets are the engine's
+search scores from self-play, flipped for black-to-move positions.
 
 After training, quantizes weights and writes engine/pyro.nnue.
 
@@ -119,45 +117,100 @@ def parse_plain_file(path: str) -> list[dict]:
     return positions
 
 
+MAX_PIECES = 32  # max active features per perspective
+
+
+def fen_to_indices(fen: str) -> tuple[np.ndarray, np.ndarray, bool]:
+    """Convert FEN to (white_indices, black_indices, white_to_move).
+
+    Returns arrays of active feature indices (padded to MAX_PIECES with -1).
+    Much more memory-efficient than dense 768-dim tensors.
+    """
+    board = chess.Board(fen)
+    w_idx = []
+    b_idx = []
+
+    for square, piece in board.piece_map().items():
+        color = 0 if piece.color == chess.WHITE else 1
+        pt = piece.piece_type - 1
+
+        w_idx.append(feature_index(color, pt, square))
+        b_idx.append(feature_index(1 - color, pt, square ^ 56))
+
+    # Pad to MAX_PIECES with -1
+    while len(w_idx) < MAX_PIECES:
+        w_idx.append(-1)
+    while len(b_idx) < MAX_PIECES:
+        b_idx.append(-1)
+
+    return (np.array(w_idx[:MAX_PIECES], dtype=np.int16),
+            np.array(b_idx[:MAX_PIECES], dtype=np.int16),
+            board.turn == chess.WHITE)
+
+
 class NNUEDataset(Dataset):
-    """Dataset for NNUE training from parsed plain text positions."""
+    """Dataset for NNUE training — pre-computes sparse feature indices."""
 
     def __init__(self, positions: list[dict]):
-        self.positions = positions
+        n = len(positions)
+        # Store sparse indices (int16) and targets — ~0.3GB for 5M positions
+        self.stm_indices = np.zeros((n, MAX_PIECES), dtype=np.int16)
+        self.nstm_indices = np.zeros((n, MAX_PIECES), dtype=np.int16)
+        self.targets = np.zeros(n, dtype=np.float32)
+
+        for i, pos in enumerate(positions):
+            w_idx, b_idx, white_to_move = fen_to_indices(pos["fen"])
+            score_cp = pos["score"]  # white-relative centipawns
+
+            if white_to_move:
+                self.stm_indices[i] = w_idx
+                self.nstm_indices[i] = b_idx
+                self.targets[i] = score_cp  # already STM-relative
+            else:
+                self.stm_indices[i] = b_idx
+                self.nstm_indices[i] = w_idx
+                self.targets[i] = -score_cp  # flip for black STM
+
+            if (i + 1) % 500_000 == 0:
+                print(f"  Encoded {i+1:,}/{n:,} positions...", flush=True)
+
+        print(f"  Encoded all {n:,} positions", flush=True)
 
     def __len__(self):
-        return len(self.positions)
+        return len(self.targets)
 
     def __getitem__(self, idx):
-        pos = self.positions[idx]
-        fen = pos["fen"]
-        score_cp = pos["score"]       # white-relative centipawns
-        result = pos["result"]        # 1=white wins, 0=draw, -1=black wins
+        # Return sparse indices + target — collate_fn builds dense tensors
+        return (self.stm_indices[idx], self.nstm_indices[idx],
+                self.targets[idx])
 
-        # Parse FEN for side to move
-        board = chess.Board(fen)
-        white_to_move = board.turn == chess.WHITE
 
-        # Features
-        wf, bf = fen_to_features(board)
+def collate_sparse(batch):
+    """Custom collate: convert sparse indices to dense feature tensors (vectorized)."""
+    stm_idx, nstm_idx, targets = zip(*batch)
+    bsz = len(batch)
 
-        # STM / NSTM perspectives
-        if white_to_move:
-            stm_feat, nstm_feat = wf, bf
-        else:
-            stm_feat, nstm_feat = bf, wf
+    # Stack into (bsz, MAX_PIECES) arrays
+    stm_arr = np.stack(stm_idx)    # (bsz, 32) int16
+    nstm_arr = np.stack(nstm_idx)  # (bsz, 32) int16
 
-        # WDL interpolation target
-        # sigmoid(score / 400) maps cp to [0, 1] (white perspective)
-        wdl = 1.0 / (1.0 + math.exp(-score_cp / 400.0))
-        game_result_01 = (result + 1.0) / 2.0  # -1->0, 0->0.5, 1->1
-        target = 0.5 * wdl + 0.5 * game_result_01
+    stm_feat = torch.zeros(bsz, INPUT_SIZE, dtype=torch.float32)
+    nstm_feat = torch.zeros(bsz, INPUT_SIZE, dtype=torch.float32)
+    tgt = torch.tensor(targets, dtype=torch.float32).unsqueeze(1)
 
-        # Flip to STM perspective: if black to move, target = 1 - target
-        if not white_to_move:
-            target = 1.0 - target
+    # Vectorized scatter: create row indices and valid column indices
+    rows = np.repeat(np.arange(bsz), MAX_PIECES)
+    stm_flat = stm_arr.flatten().astype(np.int32)
+    nstm_flat = nstm_arr.flatten().astype(np.int32)
 
-        return stm_feat, nstm_feat, torch.tensor([target], dtype=torch.float32)
+    # Mask out padding (-1)
+    stm_valid = stm_flat >= 0
+    nstm_valid = nstm_flat >= 0
+
+    stm_feat[rows[stm_valid], stm_flat[stm_valid]] = 1.0
+    nstm_feat[rows[nstm_valid], nstm_flat[nstm_valid]] = 1.0
+
+    return stm_feat, nstm_feat, tgt
 
 
 # ---------------------------------------------------------------------------
@@ -229,9 +282,9 @@ class RustNNUE(nn.Module):
 # ---------------------------------------------------------------------------
 
 def train(args):
-    print(f"Loading data from {args.plain}...")
+    print(f"Loading data from {args.plain}...", flush=True)
     positions = parse_plain_file(args.plain)
-    print(f"Loaded {len(positions):,} positions")
+    print(f"Loaded {len(positions):,} positions", flush=True)
 
     if len(positions) < 100:
         print("ERROR: Need at least 100 positions to train")
@@ -246,23 +299,23 @@ def train(args):
         dataset, [train_size, val_size],
         generator=torch.Generator().manual_seed(42),
     )
-    print(f"Train: {train_size:,}  Val: {val_size:,}")
+    print(f"Train: {train_size:,}  Val: {val_size:,}", flush=True)
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
-                              num_workers=0, drop_last=True)
+                              num_workers=0, drop_last=True, collate_fn=collate_sparse)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
-                            num_workers=0)
+                            num_workers=0, collate_fn=collate_sparse)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+    print(f"Device: {device}", flush=True)
 
     if args.resume and os.path.isfile(DEFAULT_OUTPUT):
-        print(f"Resuming from {DEFAULT_OUTPUT}")
+        print(f"Resuming from {DEFAULT_OUTPUT}", flush=True)
         model = RustNNUE(material_init=False)
         model.load_state_dict(torch.load(DEFAULT_OUTPUT, map_location="cpu", weights_only=True))
         model = model.to(device)
     else:
-        print("Initializing with material knowledge")
+        print("Initializing with material knowledge", flush=True)
         model = RustNNUE(material_init=True).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -280,9 +333,7 @@ def train(args):
             stm, nstm, target = stm.to(device), nstm.to(device), target.to(device)
 
             output = model(stm, nstm)
-            target_clamped = target.clamp(0.1, 0.9)
-            target_cp = torch.log(target_clamped / (1.0 - target_clamped)) * SCALE
-            loss = F.mse_loss(output, target_cp)
+            loss = F.mse_loss(output, target)
 
             optimizer.zero_grad()
             loss.backward()
@@ -304,9 +355,7 @@ def train(args):
                 stm, nstm, target = stm.to(device), nstm.to(device), target.to(device)
 
                 output = model(stm, nstm)
-                target_clamped = target.clamp(0.1, 0.9)
-                target_cp = torch.log(target_clamped / (1.0 - target_clamped)) * SCALE
-                loss = F.mse_loss(output, target_cp)
+                loss = F.mse_loss(output, target)
 
                 val_loss_sum += loss.item()
                 val_batches += 1
@@ -315,7 +364,7 @@ def train(args):
 
         print(f"Epoch {epoch:3d}/{args.epochs}  "
               f"train_loss={train_loss:.6f}  val_loss={val_loss:.6f}"
-              f"{'  *best*' if val_loss < best_val_loss else ''}")
+              f"{'  *best*' if val_loss < best_val_loss else ''}", flush=True)
 
         # Early stopping
         if val_loss < best_val_loss:
@@ -356,6 +405,8 @@ def export_nnue(model_path: str):
     ft_w_q = np.clip(np.round(ft_weight * QA), -32768, 32767).astype(np.int16)
     ft_b_q = np.clip(np.round(ft_bias * QA), -32768, 32767).astype(np.int16)
     # out: multiply by QB
+    # NOTE: Rust eval does output / (QA * QB) (no SCALE multiply)
+    # because our model outputs centipawns directly
     out_w_q = np.clip(np.round(out_weight.flatten() * QB), -32768, 32767).astype(np.int16)
     out_b_q = np.int16(np.clip(np.round(float(out_bias[0]) * QB), -32768, 32767))
 

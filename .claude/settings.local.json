@@ -24,7 +24,10 @@
       "Bash(./target/release/pyro.exe)",
       "Bash(/c/Users/shami/OneDrive/Documents/torch/engine/target/release/pyro.exe)",
       "Bash(\"C:\\\\Users\\\\shami\\\\OneDrive\\\\Documents\\\\torch\\\\engine\\\\target\\\\release\\\\pyro.exe\")",
-      "Bash(\"C:\\\\Users\\\\shami\\\\OneDrive\\\\Documents\\\\torch\\\\engine\\\\target\\\\release\\\\pyro.exe\" --no-nnue)"
+      "Bash(\"C:\\\\Users\\\\shami\\\\OneDrive\\\\Documents\\\\torch\\\\engine\\\\target\\\\release\\\\pyro.exe\" --no-nnue)",
+      "Bash(tasklist)",
+      "Bash(taskkill //PID 44660 //F)",
+      "Bash(taskkill //PID 44480 //F)"
     ]
   }
 }
