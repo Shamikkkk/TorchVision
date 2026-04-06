@@ -106,8 +106,12 @@ Features:
 - `--no-nnue` CLI flag to force PST eval
 
 ### Current engine state:
-- `pyro.nnue`: material-initialized weights (not yet trained on real data)
+- `pyro.nnue`: trained on 5M self-play positions (50k games), val_loss=7.79
 - Fallback: PeSTO PST eval when pyro.nnue absent or `--no-nnue` flag
+- NNUE eval: KQ vs K = +1096cp, KR vs K = +481cp (correct direction)
+- Validation result: NNUE 0% vs PST (0W/0D/200L) — FAIL
+- Root cause: NNUE trained on PST self-play can only approximate PST at best;
+  quantization error + slower eval (from_board rebuild) = strictly worse
 
 ### Training pipeline:
 
@@ -120,21 +124,19 @@ Features:
 - Result mapping: 1=white wins, 0=draw, -1=black wins
 - Filters: skip first 8 plies, clip |eval|>3000cp
 - Supports --games, --output, --resume, --nodes, --seed
+- Generated: 50k games -> 5,065,639 positions (528MB)
 
 **NNUE trainer:** `backend/scripts/train_nnue_rust.py`
 - Architecture: 768->256x2->1 (matches `engine/src/nnue.rs`)
 - Shared feature transformer: Linear(768, 256) with CReLU
 - Two perspectives: STM + NSTM concat -> Linear(512, 1)
-- Loss: MSE in logit-centipawn space:
-  `MSE(output, logit(target) * SCALE)`
-  where `logit(x) = log(x/(1-x))`, SCALE=400
-- WDL interpolation target:
-  `target = 0.5 * sigmoid(score_cp/400) + 0.5 * game_result_01`
-  STM perspective (flip for Black)
-- Target clamp: [0.1, 0.9] to avoid extreme logit values
+- Loss: MSE on centipawns (direct score targets from self-play)
+- Material initialization: DIVISOR=5000, out_weight=DIVISOR/HIDDEN_SIZE
 - Gradient clipping: 1000.0
+- Sparse feature encoding: int16 indices -> vectorized collate (memory efficient)
 - Exports quantized weights to `engine/pyro.nnue`
 - Quantization: ft_weights * QA=255, out_weights * QB=64
+- Rust eval: `output / (QA * QB)` (no SCALE multiply, model outputs cp directly)
 - Supports --plain, --epochs, --batch-size, --lr, --patience, --no-export
 
 **NNUE validator:** `backend/scripts/validate_nnue_rust.py`
@@ -150,23 +152,22 @@ Features:
 - DIVISOR=5000 scaling for i16 quantization
 - Verified: startpos=0cp, +queen=+868cp, -rook=-482cp
 
-### Next steps (in order):
-1. Generate 100k+ self-play games (millions of positions)
-2. Train NNUE until val_loss converges
-3. Verify: White +Queen > +300cp, K+Q vs K > +600cp
-4. Validate: NNUE wins 52%+ vs PST in 200 games
-5. Wire Rust engine into Python backend via UCI subprocess
-6. Add Tal bonuses to Rust evaluate()
-7. Phase C: MCTS (after NNUE validated)
+### Next steps to make NNUE work:
+1. Use Stockfish-labeled positions instead of self-play (higher quality targets)
+2. OR: use the Bullet trainer (Rust, SIMD) for much faster training on 100M+ positions
+3. Validate: NNUE wins 52%+ vs PST in 200 games
+4. Wire Rust engine into Python backend via UCI subprocess
+5. Add Tal bonuses to Rust evaluate()
 
-### Why NNUE failed in Python (lessons learned):
+### Why NNUE has failed so far (all attempts):
 - Python v1: 864k positions, W/D/L labels -> 30% vs classical
 - Python v2: 41k positions, too few
 - Python v3: 5M Lichess positions, scale mismatch -> 37%
-- Root causes: wrong loss function (sigmoid-space MSE had vanishing gradients),
-  scale mismatch, insufficient data, no material initialization
-- Rust solution: logit-space loss, material-initialized weights,
-  correct 768->256->1 architecture, millions of positions
+- Rust v1 (logit-space MSE + WDL): val_loss=0.20, 0W/0D/200L (quantization mismatch)
+- Rust v2 (direct cp MSE): val_loss=7.79, 0W/0D/200L (NNUE approximates PST poorly)
+- Key insight: training on PST self-play produces an NNUE that can only match PST quality;
+  with quantization noise and from_board rebuild overhead, it's strictly worse
+- Solution: need higher-quality training targets (Stockfish) or Bullet trainer with 100M+ positions
 
 ### Key technical details:
 - Square mapping: index = rank*8 + file, a1=0, h8=63
