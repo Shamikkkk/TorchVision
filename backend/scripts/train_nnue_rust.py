@@ -164,14 +164,53 @@ class NNUEDataset(Dataset):
 # Model (768 -> 256x2 -> 1, matching Rust engine)
 # ---------------------------------------------------------------------------
 
+PIECE_VALUES = {0: 100, 1: 320, 2: 330, 3: 500, 4: 900, 5: 0}  # P N B R Q K
+DIVISOR = 5000.0
+
+
 class RustNNUE(nn.Module):
     """768->256->1 NNUE matching engine/src/nnue.rs architecture."""
 
-    def __init__(self):
+    def __init__(self, material_init: bool = True):
         super().__init__()
         self.ft = nn.Linear(INPUT_SIZE, HIDDEN_SIZE)   # shared feature transformer
         self.out = nn.Linear(HIDDEN_SIZE * 2, 1)       # output layer
         nn.init.zeros_(self.out.bias)
+
+        if material_init:
+            self._init_material_weights()
+
+    def _init_material_weights(self):
+        """Initialize ft weights with material knowledge (like init_nnue_weights.py).
+
+        Each piece feature gets a uniform weight across all hidden neurons
+        proportional to its material value / DIVISOR. Small noise breaks symmetry.
+        Output weights: STM positive, NSTM negative.
+        """
+        with torch.no_grad():
+            self.ft.weight.zero_()
+            self.ft.bias.zero_()
+
+            for color_idx in range(2):
+                sign = 1.0 if color_idx == 0 else -1.0
+                for pt in range(6):
+                    val = PIECE_VALUES[pt] * sign / DIVISOR
+                    for sq in range(64):
+                        feat_idx = color_idx * 384 + pt * 64 + sq
+                        self.ft.weight[:, feat_idx] = val
+
+            # Small noise to break symmetry
+            self.ft.weight.add_(torch.randn_like(self.ft.weight) * 0.005)
+
+            # Output weights: DIVISOR / HIDDEN_SIZE
+            # ft outputs piece_val/DIVISOR per neuron, 256 neurons sum to
+            # 256 * piece_val/DIVISOR.  We need out_w * that = piece_val,
+            # so out_w = DIVISOR / 256 = 19.53.
+            out_float = DIVISOR / HIDDEN_SIZE
+            self.out.weight.zero_()
+            self.out.weight[0, :HIDDEN_SIZE] = out_float    # STM positive
+            self.out.weight[0, HIDDEN_SIZE:] = -out_float   # NSTM negative
+            self.out.bias.zero_()
 
     def forward(self, stm_feat, nstm_feat):
         """
@@ -217,7 +256,14 @@ def train(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
-    model = RustNNUE().to(device)
+    if args.resume and os.path.isfile(DEFAULT_OUTPUT):
+        print(f"Resuming from {DEFAULT_OUTPUT}")
+        model = RustNNUE(material_init=False)
+        model.load_state_dict(torch.load(DEFAULT_OUTPUT, map_location="cpu", weights_only=True))
+        model = model.to(device)
+    else:
+        print("Initializing with material knowledge")
+        model = RustNNUE(material_init=True).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     os.makedirs(MODELS_DIR, exist_ok=True)
@@ -364,6 +410,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=16384, help="Batch size")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
     parser.add_argument("--patience", type=int, default=5, help="Early stopping patience")
+    parser.add_argument("--resume", action="store_true", help="Resume from existing nnue_rust.pt")
     parser.add_argument("--no-export", action="store_true", help="Skip pyro.nnue export")
     args = parser.parse_args()
 
