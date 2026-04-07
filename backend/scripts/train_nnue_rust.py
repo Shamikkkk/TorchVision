@@ -1,4 +1,4 @@
-"""Train NNUE on self-play data in nnue-pytorch plain text format.
+"""Train NNUE from self-play (.plain) or Stockfish-labeled CSV data.
 
 Architecture: 768 -> 256x2 -> 1 (matches engine/src/nnue.rs)
   - Feature transformer: shared Linear(768, 256)
@@ -7,19 +7,18 @@ Architecture: 768 -> 256x2 -> 1 (matches engine/src/nnue.rs)
   - Activation: CReLU (clamp 0..1)
 
 Loss: MSE(output, target_cp)
-  target_cp = score_cp (STM-relative centipawns from self-play)
-
-The model outputs raw centipawn-scale values. Targets are the engine's
-search scores from self-play, flipped for black-to-move positions.
+  target_cp = score_cp (STM-relative centipawns)
 
 After training, quantizes weights and writes engine/pyro.nnue.
 
 Usage:
   cd backend && source venv/Scripts/activate
   python -m scripts.train_nnue_rust --plain data/selfplay_rust.plain
+  python -m scripts.train_nnue_rust --csv data/lichess_positions.csv
 """
 
 import argparse
+import csv
 import math
 import os
 import struct
@@ -114,6 +113,21 @@ def parse_plain_file(path: str) -> list[dict]:
             elif line.startswith("result "):
                 current["result"] = int(line[7:])
 
+    return positions
+
+
+EVAL_CLIP = 2000  # clamp eval_cp to [-2000, 2000]
+
+
+def parse_csv_file(path: str) -> list[dict]:
+    """Parse CSV with fen,eval_cp columns (Stockfish centipawn labels)."""
+    positions = []
+    with open(path, "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            score = float(row["eval_cp"])
+            score = max(-EVAL_CLIP, min(EVAL_CLIP, score))
+            positions.append({"fen": row["fen"], "score": int(score)})
     return positions
 
 
@@ -282,8 +296,12 @@ class RustNNUE(nn.Module):
 # ---------------------------------------------------------------------------
 
 def train(args):
-    print(f"Loading data from {args.plain}...", flush=True)
-    positions = parse_plain_file(args.plain)
+    if args.csv:
+        print(f"Loading CSV from {args.csv}...", flush=True)
+        positions = parse_csv_file(args.csv)
+    else:
+        print(f"Loading data from {args.plain}...", flush=True)
+        positions = parse_plain_file(args.plain)
     print(f"Loaded {len(positions):,} positions", flush=True)
 
     if len(positions) < 100:
@@ -454,9 +472,11 @@ def export_nnue(model_path: str):
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Train NNUE on self-play data")
-    parser.add_argument("--plain", type=str, default=DEFAULT_PLAIN,
+    parser = argparse.ArgumentParser(description="Train NNUE on self-play or Stockfish data")
+    parser.add_argument("--plain", type=str, default=None,
                         help="Path to .plain training data")
+    parser.add_argument("--csv", type=str, default=None,
+                        help="Path to CSV with fen,eval_cp columns")
     parser.add_argument("--epochs", type=int, default=30, help="Max epochs")
     parser.add_argument("--batch-size", type=int, default=16384, help="Batch size")
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
@@ -465,9 +485,12 @@ def main():
     parser.add_argument("--no-export", action="store_true", help="Skip pyro.nnue export")
     args = parser.parse_args()
 
-    if not os.path.isfile(args.plain):
-        print(f"Data file not found: {args.plain}")
-        print("Generate it first: python -m scripts.generate_selfplay_rust --games 10000")
+    if not args.csv and not args.plain:
+        args.plain = DEFAULT_PLAIN
+
+    data_path = args.csv or args.plain
+    if not os.path.isfile(data_path):
+        print(f"Data file not found: {data_path}")
         sys.exit(1)
 
     model_path = train(args)

@@ -16,7 +16,7 @@ struct Engine {
 impl Engine {
     fn new(no_nnue: bool) -> Self {
         let network = if no_nnue {
-            eprintln!("NNUE disabled (--no-nnue), using PST");
+            eprintln!("NNUE disabled (--no-nnue), using PST + Tal");
             None
         } else {
             let net = Self::try_load_nnue();

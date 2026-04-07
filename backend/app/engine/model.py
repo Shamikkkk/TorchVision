@@ -24,6 +24,7 @@ from stockfish import Stockfish, StockfishException
 from .evaluate import tal_style_eval
 from .nnue import nnue as _nnue
 from .opening_book import book as _opening_book
+from .rust_engine import try_load_rust_engine
 from .tablebase import tablebase as _tablebase
 from . import search as _search
 
@@ -55,6 +56,10 @@ class PyroEngine:
         self._stockfish_path = stockfish_path
         self._sf_params      = {"Skill Level": 10}
         self._sf_available   = False
+        self._rust_engine    = None
+
+        # --- Priority 1.5: Rust engine (Tal-style PST, much faster) ---
+        self._rust_engine = try_load_rust_engine()
 
         # --- Priority 2: neural weights (minimax with NNUE eval) ---
         # MCTS is disabled regardless of whether a policy head exists —
@@ -72,7 +77,10 @@ class PyroEngine:
         if not hasattr(self, "mode"):
             self.mode = "classical"
 
-        logger.info("Pyro ready -- Tal style (depth %d + NMP + LMR + AW)", _MINIMAX_DEPTH)
+        if self._rust_engine:
+            logger.info("Pyro ready -- Rust Tal style (depth 4 + NMP + LMR)")
+        else:
+            logger.info("Pyro ready -- Tal style (depth %d + NMP + LMR + AW)", _MINIMAX_DEPTH)
 
         if _tablebase.available:
             logger.info("Tablebase: loaded ✅")
@@ -230,11 +238,23 @@ class PyroEngine:
             logger.debug("Book move: %s", book_move)
             return book_move
 
-        eval_fn = tal_style_eval
+        # Priority 1.5: Rust engine (fast, Tal-style PST)
+        if self._rust_engine:
+            try:
+                uci, score = self._rust_engine.best_move(fen)
+                if uci:
+                    self.last_eval = score
+                    return uci
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Rust engine error (%s) — falling back to Python", exc)
+                self._rust_engine = None
 
+        # Priority 2/3: Python minimax
+        eval_fn = tal_style_eval
         uci, score = _search.best_move(fen, depth=_MINIMAX_DEPTH, eval_fn=eval_fn)
-        self.last_eval = score
-        return uci
+        if uci:
+            self.last_eval = score
+            return uci
 
         # Stockfish last resort.
         if self._sf_available:

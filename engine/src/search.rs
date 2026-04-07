@@ -181,6 +181,208 @@ const EG_KING_TABLE: [i32; 64] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Tal-style bonuses
+// ---------------------------------------------------------------------------
+
+const TAL_AGGRESSION: f32 = 1.5;
+
+/// File mask: all 8 squares on a given file (0=a .. 7=h).
+const fn file_mask(file: u8) -> u64 {
+    0x0101_0101_0101_0101u64 << file
+}
+
+/// 3x3 zone around a king square (clamped to board edges).
+fn king_zone(king_sq: u8) -> u64 {
+    let kf = (king_sq % 8) as i8;
+    let kr = (king_sq / 8) as i8;
+    let mut zone = 0u64;
+    for dr in -1..=1i8 {
+        for df in -1..=1i8 {
+            let f = kf + df;
+            let r = kr + dr;
+            if f >= 0 && f < 8 && r >= 0 && r < 8 {
+                zone |= 1u64 << (r * 8 + f);
+            }
+        }
+    }
+    zone
+}
+
+/// Count how many set bits in bb are adjacent (within 1 file) to a king on king_sq.
+fn count_near_king(bb: u64, king_sq: u8) -> i32 {
+    (bb & king_zone(king_sq)).count_ones() as i32
+}
+
+/// Tal-style bonus from white's perspective (before side-to-move flip).
+fn tal_bonuses(board: &Board) -> i32 {
+    let mut bonus = 0i32;
+
+    let wk_sq = board.white_kings.trailing_zeros() as u8;
+    let bk_sq = board.black_kings.trailing_zeros() as u8;
+    let bk_zone = king_zone(bk_sq);
+    let wk_zone = king_zone(wk_sq);
+
+    // --- King attack: white pieces near black king ---
+    let mut w_attackers = 0i32;
+    let mut w_attack_sum = 0i32;
+    for &(bb, val) in &[
+        (board.white_knights, 20), (board.white_bishops, 20),
+        (board.white_rooks, 25), (board.white_queens, 40),
+    ] {
+        let near = (bb & bk_zone).count_ones() as i32;
+        if near > 0 {
+            w_attackers += near;
+            w_attack_sum += near * val;
+        }
+    }
+    if w_attackers > 0 {
+        bonus += w_attack_sum * w_attackers;  // scale by attacker count
+    }
+
+    // --- King attack: black pieces near white king ---
+    let mut b_attackers = 0i32;
+    let mut b_attack_sum = 0i32;
+    for &(bb, val) in &[
+        (board.black_knights, 20), (board.black_bishops, 20),
+        (board.black_rooks, 25), (board.black_queens, 40),
+    ] {
+        let near = (bb & wk_zone).count_ones() as i32;
+        if near > 0 {
+            b_attackers += near;
+            b_attack_sum += near * val;
+        }
+    }
+    if b_attackers > 0 {
+        bonus -= b_attack_sum * b_attackers;
+    }
+
+    // --- Pawn storm: pawns on rank 5/6 near enemy king file ---
+    let bk_file = bk_sq % 8;
+    let mut wp = board.white_pawns;
+    while wp != 0 {
+        let sq = wp.trailing_zeros() as u8;
+        wp &= wp - 1;
+        let f = sq % 8;
+        let r = sq / 8;
+        if (f as i8 - bk_file as i8).unsigned_abs() <= 2 {
+            if r == 4 { bonus += 15; }       // rank 5
+            else if r == 5 { bonus += 15; }  // rank 6
+        }
+    }
+    let wk_file = wk_sq % 8;
+    let mut bp = board.black_pawns;
+    while bp != 0 {
+        let sq = bp.trailing_zeros() as u8;
+        bp &= bp - 1;
+        let f = sq % 8;
+        let r = sq / 8;
+        if (f as i8 - wk_file as i8).unsigned_abs() <= 2 {
+            if r == 3 { bonus -= 15; }       // rank 4 (from black's perspective = rank 5)
+            else if r == 2 { bonus -= 15; }  // rank 3 (from black's perspective = rank 6)
+        }
+    }
+
+    // --- Castling bonus: +80cp if castling rights intact ---
+    if board.castling_rights & (crate::board::CASTLING_WK | crate::board::CASTLING_WQ) != 0 {
+        bonus += 80;
+    }
+    if board.castling_rights & (crate::board::CASTLING_BK | crate::board::CASTLING_BQ) != 0 {
+        bonus -= 80;
+    }
+
+    // --- Early queen penalty: -60cp if queen not on starting square before move 10 ---
+    if board.fullmove_number < 10 {
+        // White queen starting square is d1 = index 3
+        if board.white_queens != 0 && board.white_queens & (1u64 << 3) == 0 {
+            bonus -= 60;
+        }
+        // Black queen starting square is d8 = index 59
+        if board.black_queens != 0 && board.black_queens & (1u64 << 59) == 0 {
+            bonus += 60;
+        }
+    }
+
+    // --- Open file rook: +25cp per rook on file with no pawns ---
+    let all_pawns = board.white_pawns | board.black_pawns;
+    let mut wr = board.white_rooks;
+    while wr != 0 {
+        let sq = wr.trailing_zeros() as u8;
+        wr &= wr - 1;
+        let fmask = file_mask(sq % 8);
+        if all_pawns & fmask == 0 {
+            bonus += 25;
+        }
+    }
+    let mut br = board.black_rooks;
+    while br != 0 {
+        let sq = br.trailing_zeros() as u8;
+        br &= br - 1;
+        let fmask = file_mask(sq % 8);
+        if all_pawns & fmask == 0 {
+            bonus -= 25;
+        }
+    }
+
+    // --- Bishop pair: +50cp if both bishops present ---
+    if board.white_bishops.count_ones() >= 2 {
+        bonus += 50;
+    }
+    if board.black_bishops.count_ones() >= 2 {
+        bonus -= 50;
+    }
+
+    // --- Passed pawn bonus (endgame: < 10 pieces): +30cp per passed pawn ---
+    let piece_count = board.occupied().count_ones();
+    if piece_count < 10 {
+        // White passed pawns
+        let mut wp2 = board.white_pawns;
+        while wp2 != 0 {
+            let sq = wp2.trailing_zeros() as u8;
+            wp2 &= wp2 - 1;
+            let f = sq % 8;
+            let r = sq / 8;
+            // Check no black pawns on same or adjacent files ahead
+            let mut passed = true;
+            let mut bp2 = board.black_pawns;
+            while bp2 != 0 {
+                let bsq = bp2.trailing_zeros() as u8;
+                bp2 &= bp2 - 1;
+                let bf = bsq % 8;
+                let br2 = bsq / 8;
+                if (bf as i8 - f as i8).unsigned_abs() <= 1 && br2 > r {
+                    passed = false;
+                    break;
+                }
+            }
+            if passed { bonus += 30; }
+        }
+        // Black passed pawns
+        let mut bp3 = board.black_pawns;
+        while bp3 != 0 {
+            let sq = bp3.trailing_zeros() as u8;
+            bp3 &= bp3 - 1;
+            let f = sq % 8;
+            let r = sq / 8;
+            let mut passed = true;
+            let mut wp3 = board.white_pawns;
+            while wp3 != 0 {
+                let wsq = wp3.trailing_zeros() as u8;
+                wp3 &= wp3 - 1;
+                let wf = wsq % 8;
+                let wr2 = wsq / 8;
+                if (wf as i8 - f as i8).unsigned_abs() <= 1 && wr2 < r {
+                    passed = false;
+                    break;
+                }
+            }
+            if passed { bonus -= 30; }
+        }
+    }
+
+    bonus
+}
+
+// ---------------------------------------------------------------------------
 // Tapered PeSTO evaluation
 // ---------------------------------------------------------------------------
 
@@ -226,7 +428,11 @@ pub fn evaluate(board: &Board) -> i32 {
     // Taper between midgame and endgame
     let mg_phase = phase.min(MAX_PHASE);
     let eg_phase = MAX_PHASE - mg_phase;
-    let score = (mg * mg_phase + eg * eg_phase) / MAX_PHASE;
+    let pst_score = (mg * mg_phase + eg * eg_phase) / MAX_PHASE;
+
+    // Add Tal-style bonuses (white-relative, then flip for STM)
+    let tal = (tal_bonuses(board) as f32 * TAL_AGGRESSION) as i32;
+    let score = pst_score + tal;
 
     if board.side_to_move { score } else { -score }
 }

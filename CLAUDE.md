@@ -8,47 +8,25 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 
 ## Session handoff (read this first)
 
-Current active task:
-- NNUE training running: `python -m scripts.train_nnue_rust --plain data/selfplay_rust.plain --epochs 30`
-- Check if `backend/models/nnue_rust.pt` exists and is recent
-- Check `engine/pyro.nnue` exists and is recent
-- Run position quality test to see if training worked
+Completed this session:
+1. Phase B NNUE abandoned (see below)
+2. Added Tal-style bonuses to Rust engine (`engine/src/search.rs`)
+3. Wired Rust engine into Python backend via UCI subprocess
+4. `backend/app/engine/rust_engine.py` — launches pyro.exe --no-nnue
 
 First thing to do in new session:
-1. Check training status (is it still running or done?)
-2. Run position quality test:
-```bash
-cd backend && source venv/Scripts/activate && python -c "
-import torch, chess
-from scripts.train_nnue_rust import RustNNUE, fen_to_features
-model = RustNNUE()
-model.load_state_dict(torch.load('models/nnue_rust.pt', map_location='cpu', weights_only=True))
-model.eval()
-for label, fen in [
-    ('Starting pos', chess.STARTING_FEN),
-    ('White +Queen', 'rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'),
-    ('Black +Queen', 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1'),
-    ('K+Q vs K',     '4k3/8/8/8/8/8/8/4K2Q w - - 0 1'),
-]:
-    board = chess.Board(fen)
-    wf, bf = fen_to_features(board)
-    stm, nstm = (wf, bf) if board.turn == chess.WHITE else (bf, wf)
-    with torch.no_grad():
-        raw = model(stm.unsqueeze(0), nstm.unsqueeze(0)).item()
-    print(f'  {label:20s}: {raw:+8.1f}cp')
-"
-```
-3. If White +Queen > +300cp and K+Q vs K > +600cp -> run validation:
-   `python -m scripts.validate_nnue_rust --games 200`
-4. If outputs are near 0cp -> training needs more data or more epochs
-5. If training failed -> check loss curve, generate more self-play data
+1. Test backend: `cd backend && source venv/Scripts/activate && uvicorn app.main:app --port 8000`
+2. Verify log shows: "Rust engine loaded" and "Pyro ready -- Rust Tal style"
+3. Play a game via the frontend to verify Rust engine is responding
 
 ---
 
 ## Current Status
 
 **Phase A (classical Python engine) — COMPLETE ✅**
-**Phase B (Rust NNUE engine) — IN PROGRESS 🔄**
+**Phase B (Rust Tal engine + backend wiring) — COMPLETE ✅**
+**Phase B NNUE — ABANDONED ❌** (768→256→1 plateaus at ~86cp RMSE, cannot beat PeSTO)
+**Phase C (Tal bonuses in Rust) — COMPLETE ✅**
 **Game Analyzer — COMPLETE ✅**
 
 ---
@@ -82,99 +60,49 @@ Features:
 `PyroEngine.best_move()` in `backend/app/engine/model.py`:
 0. **Syzygy tablebase** — <=6 pieces, no castling rights -> perfect play
 1. **Opening book** — grandmaster PGN positions, first 15 moves, freq >= 3
-2. **Minimax depth 4** — alpha-beta + NMP + LMR + AW + TT + `tal_style_eval`
-3. **Stockfish** — external binary, last resort only
+2. **Rust engine** — `pyro.exe --no-nnue`, PeSTO + Tal, go nodes 5000
+3. **Python minimax depth 4** — alpha-beta + NMP + LMR + AW + TT + `tal_style_eval`
+4. **Stockfish** — external binary, last resort only
 
 ---
 
-## Phase B — Rust NNUE Engine (IN PROGRESS)
+## Phase B — Rust Engine (COMPLETE)
 
 ### What's built (Rust engine `engine/`):
 - Bitboard board representation (12 x u64)
 - Full legal move generation (perft verified: 20/400/8902)
 - Alpha-beta search with negamax
-- PeSTO PST tapered evaluation
+- PeSTO PST tapered evaluation + Tal-style bonuses (1.5x aggression)
+- Tal bonuses: king attack, pawn storm, castling, early queen penalty,
+  open file rooks, bishop pair, passed pawns (endgame)
 - MVV-LVA move ordering
 - Killer moves (2 slots per ply)
 - Quiescence search
 - Null move pruning (NMP, R=2)
 - Late Move Reductions (LMR)
-- NNUE accumulator (768->256->1, CReLU, incremental)
-- Binary weight file (pyro.nnue, 394KB)
 - UCI protocol (position/go/go depth/go nodes/uci/isready/quit)
 - Node-limited search (`go nodes N`)
-- `--no-nnue` CLI flag to force PST eval
+- `--no-nnue` CLI flag (legacy, forces PST eval without NNUE attempt)
+- NNUE accumulator (768->256->1, CReLU) — built but abandoned
 
 ### Current engine state:
-- `pyro.nnue`: trained on 5M self-play positions (50k games), val_loss=7.79
-- Fallback: PeSTO PST eval when pyro.nnue absent or `--no-nnue` flag
-- NNUE eval: KQ vs K = +1096cp, KR vs K = +481cp (correct direction)
-- Validation result: NNUE 0% vs PST (0W/0D/200L) — FAIL
-- Root cause: NNUE trained on PST self-play can only approximate PST at best;
-  quantization error + slower eval (from_board rebuild) = strictly worse
+- Evaluation: PeSTO + Tal bonuses (always-on, no NNUE)
+- Startup: `"Pyro ready -- Rust Tal style (depth 4 + NMP + LMR)"`
+- Wired into Python backend via `backend/app/engine/rust_engine.py`
+- Falls back to Python `tal_style_eval` if Rust binary not found
 
-### Training pipeline:
+### Backend wiring:
+- `backend/app/engine/rust_engine.py`: launches `pyro.exe --no-nnue` subprocess
+- `RustEngine.best_move(fen)` → sends `position fen` + `go nodes 5000` via UCI
+- `model.py` tries Rust engine first, falls back to Python minimax
+- Move priority: Tablebase → Opening book → Rust engine → Python minimax → Stockfish
 
-**Self-play generator:** `backend/scripts/generate_selfplay_rust.py`
-- Drives Rust engine via UCI protocol
-- Randomized openings (8 first moves x varied responses)
-- Node limit: 5000/move
-- Output: nnue-pytorch plain text format (.plain)
-- Format: `fen/move/score/ply/result/e` (6 lines per position)
-- Result mapping: 1=white wins, 0=draw, -1=black wins
-- Filters: skip first 8 plies, clip |eval|>3000cp
-- Supports --games, --output, --resume, --nodes, --seed
-- Generated: 50k games -> 5,065,639 positions (528MB)
-
-**NNUE trainer:** `backend/scripts/train_nnue_rust.py`
-- Architecture: 768->256x2->1 (matches `engine/src/nnue.rs`)
-- Shared feature transformer: Linear(768, 256) with CReLU
-- Two perspectives: STM + NSTM concat -> Linear(512, 1)
-- Loss: MSE on centipawns (direct score targets from self-play)
-- Material initialization: DIVISOR=5000, out_weight=DIVISOR/HIDDEN_SIZE
-- Gradient clipping: 1000.0
-- Sparse feature encoding: int16 indices -> vectorized collate (memory efficient)
-- Exports quantized weights to `engine/pyro.nnue`
-- Quantization: ft_weights * QA=255, out_weights * QB=64
-- Rust eval: `output / (QA * QB)` (no SCALE multiply, model outputs cp directly)
-- Supports --plain, --epochs, --batch-size, --lr, --patience, --no-export
-
-**NNUE validator:** `backend/scripts/validate_nnue_rust.py`
-- Plays NNUE engine vs PST engine (--no-nnue flag)
-- Two engine instances, alternating colors
-- `go nodes 5000` per move
-- Reports W/D/L and score percentage
-- PASS if NNUE scores >= 52%, FAIL otherwise
-- Supports --games, --nodes, --engine, --pass-threshold
-
-**Weight initializer:** `backend/scripts/init_nnue_weights.py`
-- Encodes material values into NNUE weight matrix
-- DIVISOR=5000 scaling for i16 quantization
-- Verified: startpos=0cp, +queen=+868cp, -rook=-482cp
-
-### Next steps to make NNUE work:
-1. Use Stockfish-labeled positions instead of self-play (higher quality targets)
-2. OR: use the Bullet trainer (Rust, SIMD) for much faster training on 100M+ positions
-3. Validate: NNUE wins 52%+ vs PST in 200 games
-4. Wire Rust engine into Python backend via UCI subprocess
-5. Add Tal bonuses to Rust evaluate()
-
-### Why NNUE has failed so far (all attempts):
-- Python v1: 864k positions, W/D/L labels -> 30% vs classical
-- Python v2: 41k positions, too few
-- Python v3: 5M Lichess positions, scale mismatch -> 37%
-- Rust v1 (logit-space MSE + WDL): val_loss=0.20, 0W/0D/200L (quantization mismatch)
-- Rust v2 (direct cp MSE): val_loss=7.79, 0W/0D/200L (NNUE approximates PST poorly)
-- Key insight: training on PST self-play produces an NNUE that can only match PST quality;
-  with quantization noise and from_board rebuild overhead, it's strictly worse
-- Solution: need higher-quality training targets (Stockfish) or Bullet trainer with 100M+ positions
-
-### Key technical details:
-- Square mapping: index = rank*8 + file, a1=0, h8=63
-- Feature index: `color_idx * 384 + piece_type * 64 + sq` (black perspective mirrors sq via sq^56)
-- NNUE binary format: magic "NNUE" (4 bytes) + version u32 + i16 weights LE (ft_weights 768x256, ft_bias 256, out_weights 512, out_bias 1)
-- Node counting via `Cell<u64>` threaded through search; iterative deepening in `best_move_nodes()`
-- Self-play plain format: fen/move/score/ply/result/e (nnue-pytorch compatible)
+### NNUE — ABANDONED
+- 768→256→1 architecture plateaus at ~86cp RMSE after 130 epochs on 5M Stockfish positions
+- Cannot beat PeSTO (0cp error) — lost 0-200 in every validation attempt
+- All attempts: PST self-play, Stockfish CSV, logit-space loss, direct cp MSE — all 0%
+- Scripts remain in `backend/scripts/` for future reference
+- Would need deeper architecture (768→512→32→32→1) or Bullet trainer with 100M+ positions
 
 ---
 
@@ -196,9 +124,9 @@ Features:
 ### Rust Engine
 - **Bitboards** — 12 x u64 piece representation
 - **Alpha-beta** + NMP + LMR + killers + qsearch
-- **PeSTO** tapered PST evaluation (fallback)
-- **NNUE** 768->256->1, CReLU, i16 quantized weights
-- **UCI protocol** — stdin/stdout interface
+- **PeSTO** tapered PST evaluation + **Tal bonuses** (1.5x aggression)
+- **UCI protocol** — stdin/stdout, wired into Python backend
+- **NNUE** 768->256->1, CReLU (abandoned, code remains)
 
 ### Communication
 - **WebSocket** — live game loop (moves, game state, clocks)
@@ -230,6 +158,7 @@ torch/
 │   │   │   ├── search.py        # Minimax + alpha-beta + TT (eval_fn is a parameter)
 │   │   │   ├── opening_book.py  # Grandmaster PGN book — weighted random move selection
 │   │   │   ├── tablebase.py     # Syzygy tablebase prober (WDL+DTZ, <=6 pieces)
+│   │   │   ├── rust_engine.py    # UCI subprocess wrapper for Rust Pyro engine
 │   │   │   ├── nnue.py          # Python NNUE eval wrapper (768->256->32->32->1)
 │   │   │   └── suggest.py       # Async wrapper (run_in_executor)
 │   │   └── chess_utils/
