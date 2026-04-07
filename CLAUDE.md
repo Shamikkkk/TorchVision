@@ -28,6 +28,121 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 - Would need: deeper architecture OR Bullet trainer
   with 100M+ positions in C++/Rust to beat PST
 
+## NNUE v2 Plan (next serious attempt)
+
+### Key research findings:
+
+1. From original Stockfish NNUE docs (nodchip, 2020):
+   - Correct architecture: 768 → 256x2 → 32 → 32 → 1
+   - We had: 768 → 256x2 → 1 (missing two hidden layers!)
+   - Training uses gensfen depth 8, 10M+ positions
+   - Lambda=0.5 (50% eval + 50% game result interpolation)
+   - Iterative: train → gensfen with new net → retrain
+   - halfkp needs 300M positions; k-p (piece,square) needs less
+
+2. From Chess Stack Exchange research (confirmed independently):
+   - "Before having at least billions of positions, use simple
+     (piece, square) features — no king buckets"
+   - "Instead of focusing on training loss, use SPRT tests
+     (matches to measure ELO difference) against previous nets"
+   - "Many strong engines do not have 32 king buckets"
+   - Our 5M positions = 60x too little even for simple features
+
+3. Why our attempts failed:
+   - Architecture too shallow (missing 32→32 layers)
+   - Data too little (5M vs 10M+ needed minimum)
+   - Loss metric wrong (val_loss doesn't predict ELO)
+   - Should validate with SPRT games not MSE
+
+### Correct architecture for v2:
+   Input:   768 features (piece × square × color)
+            NO king buckets — simple (piece, square) only
+            Confirmed correct for our data scale
+   Layer 1: 256 neurons × 2 perspectives (STM + NSTM)
+            = 512 concatenated, same as current
+   Layer 2: 32 neurons (CReLU activation)  ← MISSING
+   Layer 3: 32 neurons (CReLU activation)  ← MISSING
+   Output:  1 scalar (centipawns)
+   
+   This is the ORIGINAL Stockfish NNUE architecture
+   before they added king buckets and larger layers.
+
+### Correct training procedure for v2:
+
+Step 1 — Generate training data properly:
+   - Use Rust engine with depth 8 (not nodes 5000)
+   - Generate 10M+ positions minimum
+   - Use Stockfish gensfen-style: random positions +
+     quiet search to avoid tactical noise
+   - Save FEN + depth-8 eval + game result
+   - Target: 50M positions for good results
+
+Step 2 — Training with correct loss:
+   - Loss: MSE(sigmoid(output/600), target)
+     where target = lambda * sigmoid(eval/600) + 
+                    (1-lambda) * game_result
+     lambda = 0.5 (from nodchip's original)
+   - Scale: 600cp (not 400) matches Stockfish convention
+   - Clamp eval to [-2000, 2000]cp before normalization
+
+Step 3 — Validate with SPRT not val_loss:
+   - After each training run, play 200 games
+     NNUE v2 vs previous best NNUE
+   - PASS: score >= 52% (statistically significant)
+   - FAIL: stop, analyze, adjust
+   - NEVER enable a network that hasn't passed SPRT
+
+Step 4 — Iterative improvement:
+   - Once NNUE v2 beats baseline PST in SPRT:
+     generate new training data WITH the new NNUE
+     retrain on new data → better network
+   - Repeat 3-5 iterations
+   - Each iteration should gain 50-100 ELO
+
+### Implementation changes needed for v2:
+
+In backend/scripts/train_nnue_rust.py:
+- Add two hidden layers (32→32) to RustNNUE model
+- Change loss to: MSE(sigmoid(output/600), target)
+  where target = 0.5*sigmoid(eval/600) + 0.5*result
+- Learning rate schedule: start 0.001, decay by 0.5
+  when val_loss plateaus (like nodchip's newbob_decay)
+
+In engine/src/nnue.rs:
+- Add two more layers to Network struct:
+  l2_weights: [i16; 32 * 32]
+  l2_bias:    [i16; 32]
+  l3_weights: [i16; 1 * 32]  
+  l3_bias:    i16
+- Update forward() to pass through l2 and l3
+- Update binary format for new weight file size
+
+In backend/scripts/generate_selfplay_rust.py:
+- Add --depth flag (use depth 8 not nodes 5000)
+- Add quiet position filter (skip tactical positions)
+- Generate 50M positions for v2 training
+
+### What NOT to do (lessons learned):
+- Do NOT use halfkp/halfka features (need billions)
+- Do NOT measure success by val_loss alone
+- Do NOT train on PST self-play (circular, can't improve)
+- Do NOT use only 5M positions
+- Do NOT train more epochs hoping loss converges
+  (architecture capacity is the bottleneck, not epochs)
+
+### Prerequisites before starting NNUE v2:
+1. Complete items 1-8 from roadmap (Rust engine improvements)
+2. Have 50M+ quality positions generated
+3. Rust engine must be strong enough to generate
+   useful training data (Tal bonuses help here)
+4. Budget ~1 week of compute time for 5+ iterations
+
+### Expected outcome if done correctly:
+- RMSE should drop below 40cp (vs 86cp currently)  
+- SPRT validation: NNUE beats PST in 200 games
+- Estimated ELO gain: +200-400 over PST baseline
+- Timeline: 3-5 sessions of serious work
+
 ---
 
 ## Phase A — Classical Python Engine (COMPLETE)
