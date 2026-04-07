@@ -6,28 +6,27 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 
 ---
 
-## Session handoff (read this first)
-
-Completed this session:
-1. Phase B NNUE abandoned (see below)
-2. Added Tal-style bonuses to Rust engine (`engine/src/search.rs`)
-3. Wired Rust engine into Python backend via UCI subprocess
-4. `backend/app/engine/rust_engine.py` — launches pyro.exe --no-nnue
-
-First thing to do in new session:
-1. Test backend: `cd backend && source venv/Scripts/activate && uvicorn app.main:app --port 8000`
-2. Verify log shows: "Rust engine loaded" and "Pyro ready -- Rust Tal style"
-3. Play a game via the frontend to verify Rust engine is responding
-
----
-
-## Current Status
-
-**Phase A (classical Python engine) — COMPLETE ✅**
-**Phase B (Rust Tal engine + backend wiring) — COMPLETE ✅**
-**Phase B NNUE — ABANDONED ❌** (768→256→1 plateaus at ~86cp RMSE, cannot beat PeSTO)
-**Phase C (Tal bonuses in Rust) — COMPLETE ✅**
+## Current State (as of April 7, 2026)
+**Phase A (Python classical engine) — COMPLETE ✅**
+**Phase B (Rust engine + Tal bonuses) — COMPLETE ✅**
+**Phase C (NNUE) — ABANDONED ❌**
 **Game Analyzer — COMPLETE ✅**
+
+### What's working right now:
+- Rust engine live via UCI subprocess
+- Tal-style bonuses in Rust evaluate()
+- PeSTO PST tapered evaluation
+- NMP + LMR + killers + quiescence
+- Plays solid chess, very fast, few blunders
+- Python backend falls back to tal_style_eval if Rust binary missing
+
+### Why NNUE was abandoned:
+- 768→256→1 architecture plateaus at ~86cp RMSE
+- PeSTO has 0cp error (it IS the eval)
+- Trained on: self-play (0-200), Lichess SF (0-200)
+- 130 epochs, 5M positions — still losing all games
+- Would need: deeper architecture OR Bullet trainer
+  with 100M+ positions in C++/Rust to beat PST
 
 ---
 
@@ -328,3 +327,80 @@ LOG_LEVEL=DEBUG
 - If `uvicorn --reload` misses changes, set `WATCHFILES_FORCE_POLLING=true`.
 - PyTorch CPU: `pip install torch --index-url https://download.pytorch.org/whl/cpu`.
 - **Killing uvicorn**: Claude Code cannot kill processes from other terminals. Use `Ctrl+C` in the uvicorn terminal.
+
+---
+
+## Next Session Roadmap (in priority order):
+
+### Quick wins (1-2 sessions):
+1. Tune Tal aggression constant in Rust engine
+   - Currently TAL_AGGRESSION = 1.5
+   - Try 1.2, 1.8, 2.0 and validate which plays best
+   - Play 50 games at each setting vs baseline
+
+2. Add opening book to Rust engine
+   - Port GM PGN opening book logic to Rust
+   - Or: have Python backend intercept first 15 moves
+     and use existing Python opening book
+   - Currently Rust engine has no opening book
+
+3. Wire Syzygy tablebases into Rust engine
+   - Currently only Python engine uses tablebases
+   - Rust engine should probe Syzygy for <=6 pieces
+   - Use syzygy crate or implement probe logic
+
+4. Fix "mode: neural" cosmetic log in main.py
+   - Still shows old mode string, harmless but ugly
+
+### Medium term (2-3 sessions):
+5. Iterative deepening with time management
+   - Currently uses fixed node budget (5000 nodes)
+   - Add proper time control: "go wtime btime"
+   - Search deeper when time allows
+   - This alone could add 100-200 ELO
+
+6. Transposition table in Rust engine
+   - Currently no TT in Rust search
+   - Add Zobrist hashing + TT
+   - Significant strength improvement
+
+7. History heuristic in Rust engine
+   - Currently only killer moves
+   - Add history table for better move ordering
+
+8. Aspiration windows in Rust engine
+   - Currently missing from Rust search
+   - Port from Python search.py
+
+### Longer term:
+9. NNUE v2 (if returning to neural approach):
+   - Need: deeper architecture (768→512→256→1)
+   - Need: Bullet trainer (Rust, SIMD)
+   - Need: 100M+ positions
+   - Only attempt after items 5-8 are done
+
+10. MCTS (Phase D):
+    - Requires working policy head
+    - Only after NNUE v2 succeeds
+    - Target: 1800+ ELO
+
+11. Opening explorer UI
+    - ECO codes display
+    - Transposition detection
+    - Show opening name during game
+
+### Known issues:
+- Rust engine NNUE loads but doesn't help (86cp RMSE)
+  → Could disable NNUE loading to save startup time
+- "mode: neural" in Python startup log (cosmetic)
+- Premove smoothness (minor UI issue)
+- Opening book not available in Rust engine path
+
+## Start of next session checklist:
+1. git pull (get latest)
+2. cargo build --release (in engine/)
+3. Start backend: uvicorn app.main:app --port 8000
+4. Start frontend: npm run dev
+5. Confirm: "Rust engine loaded" in uvicorn log
+6. Play a game to verify engine works
+7. Then proceed with roadmap item 1 (Tal tuning)
