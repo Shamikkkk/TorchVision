@@ -6,7 +6,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 
 ---
 
-## Current State (as of April 7, 2026)
+## Current State (as of April 12, 2026)
 **Phase A (Python classical engine) — COMPLETE ✅**
 **Phase B (Rust engine + Tal bonuses) — COMPLETE ✅**
 **Phase C (NNUE) — ABANDONED ❌**
@@ -19,6 +19,9 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 - NMP + LMR + killers + quiescence
 - Plays solid chess, very fast, few blunders
 - Python backend falls back to tal_style_eval if Rust binary missing
+- Opening book works correctly (both colors, checked before Rust engine)
+- Fool's Mate correctly found (quiescence checkmate detection fix)
+- Mode log shows "rust" or "classical" correctly
 
 ### Why NNUE was abandoned:
 - 768→256→1 architecture plateaus at ~86cp RMSE
@@ -447,69 +450,46 @@ LOG_LEVEL=DEBUG
 
 ## Next Session Roadmap (in priority order):
 
-### Quick wins (1-2 sessions):
-1. Tune Tal aggression constant in Rust engine
-   - Currently TAL_AGGRESSION = 1.5
-   - Try 1.2, 1.8, 2.0 and validate which plays best
-   - Play 50 games at each setting vs baseline
+### Completed this session (April 12, 2026):
+- ✅ Fix Fool's Mate bug (quiescence checkmate detection)
+- ✅ Fix "mode: neural" cosmetic log → now shows "rust" or "classical"
+- ✅ Verify opening book works with Rust engine (confirmed, both colors)
 
-2. Add opening book to Rust engine
-   - Port GM PGN opening book logic to Rust
-   - Or: have Python backend intercept first 15 moves
-     and use existing Python opening book
-   - Currently Rust engine has no opening book
+### Next up:
+1. Transposition table in Rust engine (NEXT)
+   - Zobrist hashing + 1M entry TT
+   - EXACT/LOWER/UPPER flag entries
+   - TT move ordering (try TT best move first)
+   - Expected: significant strength + speed improvement
 
-3. Wire Syzygy tablebases into Rust engine
-   - Currently only Python engine uses tablebases
-   - Rust engine should probe Syzygy for <=6 pieces
-   - Use syzygy crate or implement probe logic
-
-4. Fix "mode: neural" cosmetic log in main.py
-   - Still shows old mode string, harmless but ugly
-
-### Medium term (2-3 sessions):
-5. Iterative deepening with time management
-   - Currently uses fixed node budget (5000 nodes)
-   - Add proper time control: "go wtime btime"
-   - Search deeper when time allows
-   - This alone could add 100-200 ELO
-
-6. Transposition table in Rust engine
-   - Currently no TT in Rust search
-   - Add Zobrist hashing + TT
-   - Significant strength improvement
-
-7. History heuristic in Rust engine
+2. History heuristic in Rust engine
    - Currently only killer moves
    - Add history table for better move ordering
 
-8. Aspiration windows in Rust engine
+3. Aspiration windows in Rust engine
    - Currently missing from Rust search
    - Port from Python search.py
 
+4. Iterative deepening with time management
+   - Currently fixed node budget (5000 nodes)
+   - Add "go wtime btime" support
+   - Search deeper when time allows
+   - This alone could add 100-200 ELO
+
+5. Tune TAL_AGGRESSION constant
+   - Currently 1.5
+   - Try 1.2, 1.8, 2.0 vs baseline
+   - 50 games each
+
 ### Longer term:
-9. NNUE v2 (if returning to neural approach):
-   - Need: deeper architecture (768→512→256→1)
-   - Need: Bullet trainer (Rust, SIMD)
-   - Need: 100M+ positions
-   - Only attempt after items 5-8 are done
-
-10. MCTS (Phase D):
-    - Requires working policy head
-    - Only after NNUE v2 succeeds
-    - Target: 1800+ ELO
-
-11. Opening explorer UI
-    - ECO codes display
-    - Transposition detection
-    - Show opening name during game
+- NNUE v2 (see NNUE v2 Plan section)
+- MCTS (Phase D)
+- Opening explorer UI
 
 ### Known issues:
 - Rust engine NNUE loads but doesn't help (86cp RMSE)
   → Could disable NNUE loading to save startup time
-- "mode: neural" in Python startup log (cosmetic)
 - Premove smoothness (minor UI issue)
-- Opening book not available in Rust engine path
 
 ## Start of next session checklist:
 1. git pull (get latest)
@@ -518,4 +498,4 @@ LOG_LEVEL=DEBUG
 4. Start frontend: npm run dev
 5. Confirm: "Rust engine loaded" in uvicorn log
 6. Play a game to verify engine works
-7. Then proceed with roadmap item 1 (Tal tuning)
+7. Start with transposition table implementation
