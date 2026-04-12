@@ -615,6 +615,10 @@ fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize, tt_move: 
             piece_val_on(board, mv.to_sq, !board.side_to_move)
         };
         let attacker = piece_val_on(board, mv.from_sq, board.side_to_move);
+        // Losing captures (attacker worth much more than victim): below killers
+        if victim < attacker - 200 {
+            return 3_000 + victim - attacker / 10;
+        }
         return 10_000 + victim - attacker / 10;
     }
     // Killer moves: searched after captures, before quiet
