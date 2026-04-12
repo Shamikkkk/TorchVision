@@ -8,6 +8,94 @@ const INF: i32 = 100_000;
 const CHECKMATE: i32 = 50_000;
 
 // ---------------------------------------------------------------------------
+// Transposition table
+// ---------------------------------------------------------------------------
+
+const TT_SIZE: usize = 1 << 20; // ~1M entries (16 MB)
+
+const TT_EXACT: u8 = 0;
+const TT_LOWER: u8 = 1; // score is a lower bound (failed high)
+const TT_UPPER: u8 = 2; // score is an upper bound (failed low)
+
+#[derive(Clone, Copy)]
+struct TTEntry {
+    hash: u64,
+    score: i32,
+    depth: u8,
+    flag: u8,
+    best_from: u8, // 64 = no move
+    best_to: u8,
+}
+
+impl TTEntry {
+    const EMPTY: Self = TTEntry {
+        hash: 0, score: 0, depth: 0, flag: 0,
+        best_from: 64, best_to: 64,
+    };
+
+    fn best_move(&self) -> Option<(u8, u8)> {
+        if self.best_from < 64 {
+            Some((self.best_from, self.best_to))
+        } else {
+            None
+        }
+    }
+}
+
+pub struct TTable {
+    entries: Vec<TTEntry>,
+}
+
+impl TTable {
+    pub fn new() -> Self {
+        TTable {
+            entries: vec![TTEntry::EMPTY; TT_SIZE],
+        }
+    }
+
+    fn probe(&self, hash: u64) -> Option<&TTEntry> {
+        let entry = &self.entries[hash as usize & (TT_SIZE - 1)];
+        if entry.hash == hash { Some(entry) } else { None }
+    }
+
+    fn store(&mut self, hash: u64, depth: u8, score: i32, flag: u8, best: Option<(u8, u8)>) {
+        let idx = hash as usize & (TT_SIZE - 1);
+        if self.entries[idx].hash == 0 || depth >= self.entries[idx].depth {
+            self.entries[idx] = TTEntry {
+                hash,
+                score,
+                depth,
+                flag,
+                best_from: best.map_or(64, |m| m.0),
+                best_to: best.map_or(64, |m| m.1),
+            };
+        }
+    }
+}
+
+/// Adjust mate scores for TT storage (make ply-independent).
+fn tt_score_store(score: i32, ply: usize) -> i32 {
+    if score > CHECKMATE - MAX_DEPTH as i32 {
+        score + ply as i32
+    } else if score < -(CHECKMATE - MAX_DEPTH as i32) {
+        score - ply as i32
+    } else {
+        score
+    }
+}
+
+/// Adjust mate scores from TT retrieval (make ply-relative).
+fn tt_score_probe(score: i32, ply: usize) -> i32 {
+    if score > CHECKMATE - MAX_DEPTH as i32 {
+        score - ply as i32
+    } else if score < -(CHECKMATE - MAX_DEPTH as i32) {
+        score + ply as i32
+    } else {
+        score
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PeSTO piece-square tables (tapered evaluation)
 //
 // Tables are in internal square order: index 0 = a1, index 63 = h8.
@@ -513,7 +601,13 @@ fn piece_val_on(board: &Board, sq: u8, is_white: bool) -> i32 {
 }
 
 /// Score a move for ordering. Higher = searched first.
-fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize) -> i32 {
+fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize, tt_move: Option<(u8, u8)>) -> i32 {
+    // TT best move: highest priority
+    if let Some((from, to)) = tt_move {
+        if mv.from_sq == from && mv.to_sq == to {
+            return 100_000;
+        }
+    }
     if mv.flags & movegen::FLAG_CAPTURE != 0 {
         let victim = if mv.flags & movegen::FLAG_EN_PASSANT != 0 {
             MVV_LVA_VAL[0] // en passant always captures a pawn
@@ -536,11 +630,11 @@ fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize) -> i32 {
     0
 }
 
-/// Sort moves in-place: captures (MVV-LVA) → killers → quiet.
-fn order_moves(board: &Board, moves: &mut [Move], killers: &Killers, ply: usize) {
+/// Sort moves in-place: TT move → captures (MVV-LVA) → killers → quiet.
+fn order_moves(board: &Board, moves: &mut [Move], killers: &Killers, ply: usize, tt_move: Option<(u8, u8)>) {
     moves.sort_unstable_by(|a, b| {
-        score_move(board, b, killers, ply)
-            .cmp(&score_move(board, a, killers, ply))
+        score_move(board, b, killers, ply, tt_move)
+            .cmp(&score_move(board, a, killers, ply, tt_move))
     });
 }
 
@@ -639,19 +733,20 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::N
 pub fn alpha_beta(board: &Board, depth: u32, alpha: i32, beta: i32) -> i32 {
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
     let nodes = Cell::new(0u64);
-    ab_search(board, depth, alpha, beta, 0, &mut killers, None, true, &nodes, u64::MAX)
+    let mut tt = TTable::new();
+    ab_search(board, depth, alpha, beta, 0, &mut killers, None, true, &nodes, u64::MAX, &mut tt)
 }
 
-/// Recursive alpha-beta with move ordering, killer heuristic, NMP, and LMR.
+/// Recursive alpha-beta with move ordering, killer heuristic, NMP, LMR, and TT.
 fn ab_search(
     board: &Board, depth: u32, mut alpha: i32, beta: i32,
     ply: usize, killers: &mut Killers, network: Option<&nnue::Network>,
     allow_null: bool, nodes: &Cell<u64>, node_limit: u64,
+    tt: &mut TTable,
 ) -> i32 {
     nodes.set(nodes.get() + 1);
 
     if nodes.get() >= node_limit {
-        // Over node budget — return static eval
         return if let Some(net) = network {
             let acc = nnue::Accumulator::from_board(net, board);
             net.evaluate(&acc, board.side_to_move)
@@ -664,14 +759,30 @@ fn ab_search(
         return quiescence(board, alpha, beta, network, nodes, node_limit);
     }
 
+    // --- TT probe ---
+    let hash = board.zobrist_hash();
+    let mut tt_move: Option<(u8, u8)> = None;
+
+    if let Some(entry) = tt.probe(hash) {
+        tt_move = entry.best_move();
+        if entry.depth as u32 >= depth {
+            let tt_score = tt_score_probe(entry.score, ply);
+            match entry.flag {
+                TT_EXACT => return tt_score,
+                TT_LOWER => { if tt_score >= beta { return tt_score; } }
+                TT_UPPER => { if tt_score <= alpha { return tt_score; } }
+                _ => {}
+            }
+        }
+    }
+
     let in_check = is_in_check(board);
 
     // --- Null Move Pruning ---
-    // Skip when: in check, not enough pieces, or after a previous null move
     if allow_null && !in_check && depth >= 3 && board.occupied().count_ones() >= 10 {
         let null_board = board.make_null_move();
-        let r = 2; // reduction
-        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, network, false, nodes, node_limit);
+        let r = 2;
+        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, network, false, nodes, node_limit, tt);
         if score >= beta {
             return beta;
         }
@@ -686,7 +797,10 @@ fn ab_search(
         return 0;
     }
 
-    order_moves(board, &mut moves, killers, ply);
+    order_moves(board, &mut moves, killers, ply, tt_move);
+
+    let original_alpha = alpha;
+    let mut best_mv: Option<(u8, u8)> = None;
 
     for (move_index, mv) in moves.iter().enumerate() {
         if nodes.get() >= node_limit {
@@ -702,30 +816,33 @@ fn ab_search(
         let score;
 
         // --- Late Move Reductions ---
-        // Reduce quiet non-killer moves beyond move 3 at depth >= 3
         if depth >= 3 && move_index > 3 && !is_capture && !is_killer && !in_check {
-            // Reduced search (depth - 2 instead of depth - 1)
-            let reduced = -ab_search(&new_board, depth - 2, -beta, -alpha, ply + 1, killers, network, true, nodes, node_limit);
+            let reduced = -ab_search(&new_board, depth - 2, -beta, -alpha, ply + 1, killers, network, true, nodes, node_limit, tt);
             if reduced > alpha {
-                // Re-search at full depth if reduced search looks interesting
-                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network, true, nodes, node_limit);
+                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network, true, nodes, node_limit, tt);
             } else {
                 score = reduced;
             }
         } else {
-            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network, true, nodes, node_limit);
+            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, network, true, nodes, node_limit, tt);
         }
 
         if score >= beta {
             if !is_capture {
                 store_killer(killers, ply, mv);
             }
+            tt.store(hash, depth as u8, tt_score_store(beta, ply), TT_LOWER, Some((mv.from_sq, mv.to_sq)));
             return beta;
         }
         if score > alpha {
             alpha = score;
+            best_mv = Some((mv.from_sq, mv.to_sq));
         }
     }
+
+    // Store result in TT
+    let flag = if alpha > original_alpha { TT_EXACT } else { TT_UPPER };
+    tt.store(hash, depth as u8, tt_score_store(alpha, ply), flag, best_mv.or(tt_move));
 
     alpha
 }
@@ -740,7 +857,12 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
     let nodes = Cell::new(0u64);
-    order_moves(board, &mut moves, &killers, 0);
+    let mut tt = TTable::new();
+
+    // Probe TT for root move ordering
+    let root_hash = board.zobrist_hash();
+    let tt_move = tt.probe(root_hash).and_then(|e| e.best_move());
+    order_moves(board, &mut moves, &killers, 0, tt_move);
 
     let mut best: Option<(Move, i32)> = None;
     let mut alpha = -INF;
@@ -748,7 +870,7 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 
     for mv in moves {
         let new_board = make_move(board, &mv);
-        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, network, true, &nodes, u64::MAX);
+        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, network, true, &nodes, u64::MAX, &mut tt);
         if score > alpha {
             alpha = score;
             best = Some((mv, score));
@@ -761,19 +883,25 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 /// Iterative deepening search with a node limit.
 /// Increases depth until the node budget is exhausted.
 /// Returns the best move + score from the last completed depth.
+/// TT persists across depths for move ordering benefit.
 pub fn best_move_nodes(board: &Board, node_limit: u64, network: Option<&nnue::Network>) -> Option<(Move, i32, u32)> {
     let moves = generate_moves(board);
     if moves.is_empty() {
         return None;
     }
 
+    let mut tt = TTable::new();
+    let root_hash = board.zobrist_hash();
     let mut best_overall: Option<(Move, i32, u32)> = None;
 
     for depth in 1..=MAX_DEPTH as u32 {
         let mut killers: Killers = [[None; 2]; MAX_DEPTH];
         let nodes = Cell::new(0u64);
         let mut ordered_moves = moves.clone();
-        order_moves(board, &mut ordered_moves, &killers, 0);
+
+        // Use TT best move from previous depth for ordering
+        let tt_move = tt.probe(root_hash).and_then(|e| e.best_move());
+        order_moves(board, &mut ordered_moves, &killers, 0, tt_move);
 
         let mut best: Option<(Move, i32)> = None;
         let mut alpha = -INF;
@@ -782,9 +910,8 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, network: Option<&nnue::Ne
 
         for mv in &ordered_moves {
             let new_board = make_move(board, mv);
-            let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, network, true, &nodes, node_limit);
+            let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, network, true, &nodes, node_limit, &mut tt);
             if nodes.get() >= node_limit && best.is_none() {
-                // First move wasn't even completed — use previous depth result
                 completed = false;
                 break;
             }
@@ -793,7 +920,6 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, network: Option<&nnue::Ne
                 best = Some((mv.clone(), score));
             }
             if nodes.get() >= node_limit {
-                // Got at least one move scored — use it but stop deepening
                 break;
             }
         }

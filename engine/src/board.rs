@@ -208,6 +208,109 @@ impl Board {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Zobrist hashing
+// ---------------------------------------------------------------------------
+
+pub(crate) struct ZobristKeys {
+    pub piece: [[[u64; 64]; 6]; 2],   // [color][piece_type][square]
+    pub side: u64,                      // XOR when black to move
+    pub castling: [u64; 16],            // indexed by 4-bit castling rights
+    pub en_passant: [u64; 8],           // indexed by file of EP square
+}
+
+const fn xorshift64(state: u64) -> u64 {
+    let mut s = state;
+    s ^= s << 13;
+    s ^= s >> 7;
+    s ^= s << 17;
+    s
+}
+
+const fn generate_zobrist() -> ZobristKeys {
+    let mut piece = [[[0u64; 64]; 6]; 2];
+    let mut state: u64 = 0x2E8BA2E8_BA2E8BA3;
+
+    let mut color = 0usize;
+    while color < 2 {
+        let mut pc = 0usize;
+        while pc < 6 {
+            let mut sq = 0usize;
+            while sq < 64 {
+                state = xorshift64(state);
+                piece[color][pc][sq] = state;
+                sq += 1;
+            }
+            pc += 1;
+        }
+        color += 1;
+    }
+
+    state = xorshift64(state);
+    let side = state;
+
+    let mut castling = [0u64; 16];
+    let mut ci = 0usize;
+    while ci < 16 {
+        state = xorshift64(state);
+        castling[ci] = state;
+        ci += 1;
+    }
+
+    let mut en_passant = [0u64; 8];
+    let mut ei = 0usize;
+    while ei < 8 {
+        state = xorshift64(state);
+        en_passant[ei] = state;
+        ei += 1;
+    }
+
+    ZobristKeys { piece, side, castling, en_passant }
+}
+
+pub(crate) static ZOBRIST: ZobristKeys = generate_zobrist();
+
+fn hash_bb(h: &mut u64, mut bb: u64, color: usize, piece: usize) {
+    while bb != 0 {
+        let sq = bb.trailing_zeros() as usize;
+        bb &= bb - 1;
+        *h ^= ZOBRIST.piece[color][piece][sq];
+    }
+}
+
+impl Board {
+    /// Compute Zobrist hash from scratch.
+    pub fn zobrist_hash(&self) -> u64 {
+        let mut h = 0u64;
+
+        hash_bb(&mut h, self.white_pawns,   0, 0);
+        hash_bb(&mut h, self.white_knights, 0, 1);
+        hash_bb(&mut h, self.white_bishops, 0, 2);
+        hash_bb(&mut h, self.white_rooks,   0, 3);
+        hash_bb(&mut h, self.white_queens,  0, 4);
+        hash_bb(&mut h, self.white_kings,   0, 5);
+
+        hash_bb(&mut h, self.black_pawns,   1, 0);
+        hash_bb(&mut h, self.black_knights, 1, 1);
+        hash_bb(&mut h, self.black_bishops, 1, 2);
+        hash_bb(&mut h, self.black_rooks,   1, 3);
+        hash_bb(&mut h, self.black_queens,  1, 4);
+        hash_bb(&mut h, self.black_kings,   1, 5);
+
+        if !self.side_to_move {
+            h ^= ZOBRIST.side;
+        }
+
+        h ^= ZOBRIST.castling[self.castling_rights as usize];
+
+        if let Some(ep_sq) = self.en_passant {
+            h ^= ZOBRIST.en_passant[(ep_sq % 8) as usize];
+        }
+
+        h
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,5 +369,26 @@ mod tests {
         let b = Board::from_fen(fen).unwrap();
         assert_eq!(b.castling_rights, 0);
         assert_eq!(b.occupied(), 0);
+    }
+
+    #[test]
+    fn zobrist_same_position() {
+        let a = Board::startpos();
+        let b = Board::startpos();
+        assert_eq!(a.zobrist_hash(), b.zobrist_hash());
+    }
+
+    #[test]
+    fn zobrist_different_positions() {
+        let a = Board::startpos();
+        let b = Board::from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1").unwrap();
+        assert_ne!(a.zobrist_hash(), b.zobrist_hash());
+    }
+
+    #[test]
+    fn zobrist_side_to_move_matters() {
+        let a = Board::from_fen("4k3/8/8/8/8/8/8/4K3 w - - 0 1").unwrap();
+        let b = Board::from_fen("4k3/8/8/8/8/8/8/4K3 b - - 0 1").unwrap();
+        assert_ne!(a.zobrist_hash(), b.zobrist_hash());
     }
 }
