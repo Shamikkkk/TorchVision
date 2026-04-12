@@ -566,6 +566,16 @@ fn store_killer(killers: &mut Killers, ply: usize, mv: &Move) {
 fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::Network>, nodes: &Cell<u64>, node_limit: u64) -> i32 {
     nodes.set(nodes.get() + 1);
 
+    let all_moves = generate_moves(board);
+
+    // Detect checkmate / stalemate before stand-pat (must not be masked by beta cutoff)
+    if all_moves.is_empty() {
+        if is_in_check(board) {
+            return -(CHECKMATE);
+        }
+        return 0;
+    }
+
     let stand_pat = if let Some(net) = network {
         let acc = nnue::Accumulator::from_board(net, board);
         net.evaluate(&acc, board.side_to_move)
@@ -579,7 +589,6 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::N
         alpha = stand_pat;
     }
 
-    let all_moves = generate_moves(board);
     // Collect and order captures by MVV-LVA
     let mut captures: Vec<Move> = all_moves
         .into_iter()
@@ -880,6 +889,17 @@ mod tests {
         assert!(result.is_some());
         let (_, score) = result.unwrap();
         assert!(score > 40_000, "Should find checkmate, score={}", score);
+    }
+
+    #[test]
+    fn finds_qh4_mate_in_one() {
+        // Black to move after 1.f3 e5 2.g4 — Qh4# is checkmate
+        let board = Board::from_fen("rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2").unwrap();
+        let result = best_move(&board, 1, None);
+        assert!(result.is_some());
+        let (mv, score) = result.unwrap();
+        assert_eq!(mv.to_uci(), "d8h4", "Should find Qh4# checkmate");
+        assert!(score > 40_000, "Should return mate score, got {}", score);
     }
 
     #[test]
