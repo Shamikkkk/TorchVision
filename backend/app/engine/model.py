@@ -67,14 +67,15 @@ class PyroEngine:
         if _WEIGHTS_PATH.exists():
             try:
                 self._load_nn()
-                self.mode = "neural"
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "Neural weights found but failed to load (%s) — falling back", exc
                 )
 
-        # --- Priority 3: classical (always works) ---
-        if not hasattr(self, "mode"):
+        # --- Set mode based on actual engine in use ---
+        if self._rust_engine:
+            self.mode = "rust"
+        else:
             self.mode = "classical"
 
         if self._rust_engine:

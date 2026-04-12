@@ -39,7 +39,7 @@ class RustEngine:
         self._wait_for("uciok")
         self._send("isready")
         self._wait_for("readyok")
-        logger.info("Rust engine loaded: %s", path)
+        logger.info("Rust engine loaded (%s)", os.path.abspath(path))
 
     def _send(self, cmd: str) -> None:
         self.proc.stdin.write(cmd + "\n")
