@@ -773,8 +773,8 @@ fn ab_search(
             let tt_score = tt_score_probe(entry.score, ply);
             match entry.flag {
                 TT_EXACT => return tt_score,
-                TT_LOWER => { if tt_score >= beta { return tt_score; } }
-                TT_UPPER => { if tt_score <= alpha { return tt_score; } }
+                TT_LOWER => { if tt_score >= beta { return beta; } }
+                TT_UPPER => { if tt_score <= alpha { return alpha; } }
                 _ => {}
             }
         }
@@ -806,8 +806,11 @@ fn ab_search(
     let original_alpha = alpha;
     let mut best_mv: Option<(u8, u8)> = None;
 
+    let mut searched_all = true;
+
     for (move_index, mv) in moves.iter().enumerate() {
         if nodes.get() >= node_limit {
+            searched_all = false;
             break;
         }
 
@@ -835,6 +838,7 @@ fn ab_search(
             if !is_capture {
                 store_killer(killers, ply, mv);
             }
+            // Beta cutoff is always reliable — one move proves it
             tt.store(hash, depth as u8, tt_score_store(beta, ply), TT_LOWER, Some((mv.from_sq, mv.to_sq)));
             return beta;
         }
@@ -844,9 +848,28 @@ fn ab_search(
         }
     }
 
-    // Store result in TT
-    let flag = if alpha > original_alpha { TT_EXACT } else { TT_UPPER };
-    tt.store(hash, depth as u8, tt_score_store(alpha, ply), flag, best_mv.or(tt_move));
+    // If truncated before any move improved alpha, we have no real search result.
+    // Return static eval instead of the original alpha (which could be -INF).
+    if !searched_all && alpha == original_alpha {
+        return if let Some(net) = network {
+            let acc = nnue::Accumulator::from_board(net, board);
+            net.evaluate(&acc, board.side_to_move)
+        } else {
+            evaluate(board)
+        };
+    }
+
+    // Only store TT entries from complete searches.
+    // Truncated searches (node limit) haven't evaluated all moves,
+    // so UPPER bound ("no move beats alpha") is unreliable.
+    // If alpha improved in a truncated search, store as LOWER bound
+    // (we know score >= alpha, but there may be better moves unsearched).
+    if searched_all {
+        let flag = if alpha > original_alpha { TT_EXACT } else { TT_UPPER };
+        tt.store(hash, depth as u8, tt_score_store(alpha, ply), flag, best_mv.or(tt_move));
+    } else if alpha > original_alpha {
+        tt.store(hash, depth as u8, tt_score_store(alpha, ply), TT_LOWER, best_mv);
+    }
 
     alpha
 }
