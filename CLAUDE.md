@@ -6,7 +6,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 
 ---
 
-## Current State (as of April 12, 2026)
+## Current State (as of April 14, 2026)
 **Phase A (Python classical engine) — COMPLETE ✅**
 **Phase B (Rust engine + Tal bonuses) — COMPLETE ✅**
 **Phase C (NNUE) — ABANDONED ❌**
@@ -17,11 +17,36 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 - Tal-style bonuses in Rust evaluate()
 - PeSTO PST tapered evaluation
 - NMP + LMR + killers + quiescence
-- Plays solid chess, very fast, few blunders
+- Transposition table (Zobrist hashing, 1M entries)
+- History heuristic (gravity formula, malus for searched quiets)
+- Losing capture ordering (QxP searched after killers)
+- Fool's Mate fix (quiescence checkmate before stand-pat)
+- Mate distance preference (faster mates scored higher)
+- NODE_LIMIT = 100000 (depth 6+ consistently)
+- Plays ruthless chess, very fast, few blunders
 - Python backend falls back to tal_style_eval if Rust binary missing
-- Opening book works correctly (both colors, checked before Rust engine)
-- Fool's Mate correctly found (quiescence checkmate detection fix)
-- Mode log shows "rust" or "classical" correctly
+
+### Recent fixes (this session):
+- Fool's Mate bug: quiescence checkmate detection
+  was masked by beta cutoff on stand-pat. Fixed by
+  moving generate_moves + checkmate check BEFORE 
+  stand-pat.
+- "mode: neural" log: fixed to show "rust" or 
+  "classical" correctly
+- TT fail-hard mismatch: TT_UPPER/LOWER returning
+  wrong scores (+INF propagation). Fixed: TT_UPPER
+  returns alpha, TT_LOWER returns beta. Also fixed
+  truncated search poisoning TT entries. Also fixed
+  TT_EXACT leaking scores outside window.
+- Losing capture ordering: QxP now scored below
+  killers (3000) instead of equal to PxQ (10000+)
+- History heuristic: tracks quiet moves that cause
+  beta cutoffs, uses gravity formula to prevent
+  unbounded growth
+- Mate distance: quiescence now uses 
+  -(CHECKMATE - ply) so engine prefers faster mates
+- NODE_LIMIT raised 50k → 100k: engine reaches
+  depth 6 consistently, avoids horizon blunders
 
 ### Why NNUE was abandoned:
 - 768→256→1 architecture plateaus at ~86cp RMSE
@@ -450,41 +475,48 @@ LOG_LEVEL=DEBUG
 
 ## Next Session Roadmap (in priority order):
 
-### Completed this session (April 12, 2026):
-- ✅ Fix Fool's Mate bug (quiescence checkmate detection)
-- ✅ Fix "mode: neural" cosmetic log → now shows "rust" or "classical"
-- ✅ Verify opening book works with Rust engine (confirmed, both colors)
-
-### Next up:
-1. Transposition table in Rust engine (NEXT)
-   - Zobrist hashing + 1M entry TT
-   - EXACT/LOWER/UPPER flag entries
-   - TT move ordering (try TT best move first)
-   - Expected: significant strength + speed improvement
-
-2. History heuristic in Rust engine
-   - Currently only killer moves
-   - Add history table for better move ordering
-
-3. Aspiration windows in Rust engine
+### Quick wins (1-2 sessions):
+1. Aspiration windows in Rust engine
    - Currently missing from Rust search
    - Port from Python search.py
+   - Narrow alpha-beta window around expected score
+   - Reduces nodes searched significantly
 
+2. Tune TAL_AGGRESSION constant
+   - Currently TAL_AGGRESSION = 1.5
+   - Try 1.2, 1.8, 2.0 and validate which plays best
+   - Play 50 games at each setting vs baseline
+
+3. Wire Syzygy tablebases into Rust engine
+   - Currently only Python engine uses tablebases
+   - Rust engine should probe Syzygy for <=6 pieces
+   - Use syzygy crate or implement probe logic
+
+### Medium term (2-3 sessions):
 4. Iterative deepening with time management
-   - Currently fixed node budget (5000 nodes)
-   - Add "go wtime btime" support
+   - Currently uses fixed node budget (100k nodes)
+   - Add proper time control: "go wtime btime"
    - Search deeper when time allows
    - This alone could add 100-200 ELO
 
-5. Tune TAL_AGGRESSION constant
-   - Currently 1.5
-   - Try 1.2, 1.8, 2.0 vs baseline
-   - 50 games each
+5. Check extension
+   - When in check, extend search by 1 ply
+   - Prevents missing tactical sequences involving checks
+
+6. Futility pruning
+   - Skip moves that can't improve alpha at low depths
+   - Faster search, more depth at same node budget
 
 ### Longer term:
-- NNUE v2 (see NNUE v2 Plan section)
-- MCTS (Phase D)
-- Opening explorer UI
+7. NNUE v2 (if returning to neural approach):
+   - Need: 768→256x2→32→32→1 architecture
+   - Need: depth-8 gensfen-style data generation
+   - Need: 50M+ positions
+   - Only attempt after items 1-6 are done
+
+8. MCTS (Phase D):
+   - Target: 1800+ ELO
+   - Only after NNUE v2 succeeds
 
 ### Known issues:
 - Rust engine NNUE loads but doesn't help (86cp RMSE)
@@ -498,4 +530,4 @@ LOG_LEVEL=DEBUG
 4. Start frontend: npm run dev
 5. Confirm: "Rust engine loaded" in uvicorn log
 6. Play a game to verify engine works
-7. Start with transposition table implementation
+7. Then proceed with roadmap item 1 (aspiration windows)
