@@ -690,7 +690,7 @@ fn store_killer(killers: &mut Killers, ply: usize, mv: &Move) {
 // ---------------------------------------------------------------------------
 
 /// Search captures only until the position is quiet.
-fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::Network>, nodes: &Cell<u64>, node_limit: u64) -> i32 {
+fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Option<&nnue::Network>, nodes: &Cell<u64>, node_limit: u64) -> i32 {
     nodes.set(nodes.get() + 1);
 
     let all_moves = generate_moves(board);
@@ -698,7 +698,7 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::N
     // Detect checkmate / stalemate before stand-pat (must not be masked by beta cutoff)
     if all_moves.is_empty() {
         if is_in_check(board) {
-            return -(CHECKMATE);
+            return -(CHECKMATE - ply as i32);
         }
         return 0;
     }
@@ -746,7 +746,7 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, network: Option<&nnue::N
             break;
         }
         let new_board = make_move(board, mv);
-        let score = -quiescence(&new_board, -beta, -alpha, network, nodes, node_limit);
+        let score = -quiescence(&new_board, -beta, -alpha, ply + 1, network, nodes, node_limit);
         if score >= beta {
             return beta;
         }
@@ -791,7 +791,7 @@ fn ab_search(
     }
 
     if depth == 0 {
-        return quiescence(board, alpha, beta, network, nodes, node_limit);
+        return quiescence(board, alpha, beta, ply, network, nodes, node_limit);
     }
 
     // --- TT probe ---

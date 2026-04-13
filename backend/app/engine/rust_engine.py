@@ -17,7 +17,7 @@ _ENGINE_PATH = os.path.normpath(
     os.path.join(_SCRIPT_DIR, "..", "..", "..", "engine", "target", "release", "pyro.exe")
 )
 
-NODE_LIMIT = 50000
+NODE_LIMIT = 100000
 
 
 class RustEngine:
