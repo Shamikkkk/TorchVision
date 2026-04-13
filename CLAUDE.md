@@ -531,3 +531,217 @@ LOG_LEVEL=DEBUG
 5. Confirm: "Rust engine loaded" in uvicorn log
 6. Play a game to verify engine works
 7. Then proceed with roadmap item 1 (aspiration windows)
+
+---
+
+## Phase C.2 — Rust Engine Polish (next serious attempt)
+
+### Goal: reach 1600+ ELO equivalent
+
+### Item 1: Aspiration Windows
+In engine/src/search.rs, in best_move_nodes():
+- After first depth-1 search gives score S,
+  search subsequent depths with narrow window:
+  alpha = S - ASPIRATION_DELTA (default 50cp)
+  beta  = S + ASPIRATION_DELTA
+- If search fails low (score <= alpha):
+  re-search with alpha = -INF
+- If search fails high (score >= beta):
+  re-search with beta = +INF
+- Reduces nodes searched significantly on stable positions
+- Reference: Python search.py already has this
+
+### Item 2: Check Extension
+In engine/src/search.rs, in ab_search():
+- When the side to move is IN CHECK:
+  extend search by 1 ply (depth += 1)
+- Only extend once per line (track with flag)
+- Prevents missing tactical sequences involving checks
+- Implementation:
+  let extension = if in_check { 1 } else { 0 };
+  recurse with depth - 1 + extension
+
+### Item 3: Futility Pruning
+In engine/src/search.rs, in ab_search():
+- At depth 1 and depth 2, if static eval + margin
+  is still below alpha, skip quiet moves entirely
+- Margins: depth 1 = 100cp, depth 2 = 300cp
+- Never prune when in check
+- Never prune when eval indicates zugzwang risk
+- Implementation:
+  if depth <= 2 && !in_check {
+    let margin = depth as i32 * 150;
+    if static_eval + margin <= alpha {
+      skip quiet moves (search only captures)
+    }
+  }
+
+### Item 4: Syzygy Tablebases in Rust Engine
+- Use the shakmaty-syzygy crate (Rust)
+- Probe for positions with <=6 pieces
+- Return WDL result immediately (like Python tablebase)
+- Tablebase files location:
+  backend/data/syzygy/ (~1GB, 290 files)
+- Add --syzygy-path flag to UCI engine
+- Python backend should pass path at startup
+
+### Item 5: Time Management
+Replace fixed node budget with proper time control:
+- Parse "go wtime <ms> btime <ms>" UCI command
+- Allocate time: use_time = total_time / 30
+  (simple: assume ~30 moves remaining)
+- Search until time expires (use std::time::Instant)
+- Fall back to node limit if no time given
+- This alone could add 100-200 ELO
+
+### Item 6: TAL_AGGRESSION Tuning
+Currently TAL_AGGRESSION = 1.5 in search.rs
+- Run automated match: 50 games each at 1.2, 1.5, 1.8, 2.0
+- Use validate_nnue_rust.py framework as template
+- Create backend/scripts/tune_aggression.py:
+  - Two engine instances with different TAL values
+  - Play 50 games each, report W/D/L
+  - Pick setting with highest score %
+- Expected best: somewhere between 1.5 and 2.0
+
+---
+
+## Phase D — NNUE v2 (when returning to neural)
+
+### Prerequisites:
+- Phase C.2 items 1-6 complete
+- Rust engine strong enough to generate quality data
+- Budget: ~1 week of compute time
+
+### Architecture (from nodchip's original Stockfish NNUE):
+Input:   768 features (piece × square × color)
+         NO king buckets — simple (piece, square) only
+Layer 1: 256 neurons × 2 perspectives (STM + NSTM)
+         = 512 concatenated
+Layer 2: 32 neurons (CReLU)   ← MISSING in v1
+Layer 3: 32 neurons (CReLU)   ← MISSING in v1
+Output:  1 scalar (centipawns)
+
+### Training procedure:
+Step 1 — Data generation (50M+ positions):
+- Add --depth 8 flag to generate_selfplay_rust.py
+- Use quiet position filter (skip tactical noise)
+- Generate 50M positions minimum
+- Format: FEN + depth-8 eval + game result
+
+Step 2 — Training with correct loss:
+Loss = MSE(sigmoid(output/600), target)
+where target = 0.5*sigmoid(eval/600) + 0.5*result
+(lambda=0.5 from nodchip's original)
+Scale: 600cp (not 400) — matches Stockfish convention
+
+Step 3 — Validate with SPRT (not val_loss):
+- Play 200 games: new NNUE vs previous best
+- PASS if score >= 52%
+- FAIL: stop, analyze, adjust
+- NEVER judge by val_loss alone
+
+Step 4 — Iterative improvement:
+- Once NNUE beats PST in SPRT:
+  generate new data WITH the new NNUE
+  retrain → better network
+- Repeat 3-5 iterations
+- Expected gain: +200-400 ELO over PST
+
+### Implementation files to change:
+backend/scripts/train_nnue_rust.py:
+- Add two hidden layers (32→32) to RustNNUE model
+- Change loss to nodchip's lambda formula
+- Add newbob_decay learning rate schedule
+
+engine/src/nnue.rs:
+- Add l2_weights: [i16; 32 * 32]
+- Add l2_bias:    [i16; 32]
+- Add l3_weights: [i16; 1 * 32]
+- Add l3_bias:    i16
+- Update forward() to pass through l2 and l3
+- Update binary format for new weight sizes
+
+backend/scripts/generate_selfplay_rust.py:
+- Add --depth flag (depth 8 not nodes 5000)
+- Add quiet position filter
+- Target: 50M positions
+
+### Why v1 failed (do not repeat):
+- Architecture too shallow (missing 32→32 layers)
+- Data too little (5M vs 50M+ needed)
+- Wrong loss metric (val_loss ≠ ELO)
+- Trained on PST self-play (circular, can't improve)
+- Used only 130 epochs, wrong scale (400 not 600)
+
+---
+
+## Phase E — MCTS (long term, after NNUE v2)
+
+### Goal: 1800+ ELO
+
+### Prerequisites:
+- NNUE v2 working and beating PST in SPRT
+- Value head producing calibrated win probabilities
+- Policy head producing move probabilities
+
+### Architecture:
+- Value head: NNUE output → win probability
+- Policy head: 768-dim input → 1968-dim move vector
+  (all possible from-to square pairs)
+- MCTS: 200+ simulations per move
+  UCB1 formula: Q(s,a) + C * P(s,a) / (1 + N(s,a))
+
+### Implementation plan:
+1. Add policy head to NNUE architecture
+2. Generate policy targets from engine's best moves
+3. Train jointly: value loss + policy loss
+4. Implement MCTS in Rust:
+   engine/src/mcts.rs
+   - Tree node: visits, value, policy prior, children
+   - Selection: UCB1
+   - Expansion: generate moves + policy priors
+   - Simulation: NNUE value head (no random rollout)
+   - Backprop: update Q values up the tree
+5. UCI integration: replace ab_search with mcts_search
+   when --mcts flag is passed
+
+---
+
+## Phase F — Product Polish (whenever)
+
+### Difficulty levels:
+- Beginner (nodes=500, depth 2): ~600 ELO
+- Intermediate (nodes=5000, depth 4): ~1000 ELO  
+- Advanced (nodes=50000, depth 6): ~1400 ELO
+- Expert (nodes=100000, depth 7): ~1600 ELO
+- Master (current full strength): ~1800+ ELO
+
+### Opening explorer UI:
+- ECO code detection (A00-E99)
+- Show opening name during game
+- Transposition detection
+- Line explorer (click to see variations)
+
+### Personality modes (Mittens-inspired):
+- Tal Mode: TAL_AGGRESSION=2.5, sacrifices material
+- Petrosian Mode: avoids trades, suffocates slowly
+- Fischer Mode: precise technique, converts advantages
+- Beginner Trap: appears weak, punishes mistakes
+
+### Deployment:
+- Docker container (FastAPI + Rust binary)
+- Frontend on Vercel/Netlify
+- Backend on Railway/Fly.io
+- Rate limiting per IP
+- Game history persistence (PostgreSQL)
+
+---
+
+## Engine Strength Estimates (ELO equivalents):
+
+Phase A complete:   ~1200-1400 ELO (Python Tal)
+Phase B complete:   ~1400-1600 ELO (Rust PST+Tal+TT)
+Phase C.2 complete: ~1600-1700 ELO (+ aspiration/pruning)
+Phase D complete:   ~1800-2000 ELO (+ NNUE v2)
+Phase E complete:   ~2000-2200 ELO (+ MCTS)
