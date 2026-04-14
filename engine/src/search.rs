@@ -819,6 +819,12 @@ fn ab_search(
 
     let in_check = is_in_check(board);
 
+    // --- Check Extension ---
+    // When the side to move is in check, extend search by 1 ply.
+    // This catches forced tactical sequences that would otherwise fall
+    // off the horizon. Extension bumps depth but not ply.
+    let depth = if in_check { depth + 1 } else { depth };
+
     // --- Null Move Pruning ---
     if allow_null && !in_check && depth >= 3 && board.occupied().count_ones() >= 10 {
         let null_board = board.make_null_move();
@@ -840,6 +846,31 @@ fn ab_search(
 
     order_moves(board, &mut moves, killers, ply, tt_move, history);
 
+    // --- Futility Pruning Setup ---
+    // At shallow depths, if static eval + margin is still below alpha,
+    // quiet moves are unlikely to raise the score enough to matter.
+    // Skip them, searching only captures, promotions, and checks.
+    //
+    // Gates:
+    //   - Not in check (quiet moves out of check can be survival-critical)
+    //   - Depth <= 2 (only shallow — deeper searches need full coverage)
+    //   - Alpha is not a mate score (don't skip moves while hunting mate)
+    //   - Static eval is not a mate score (don't trust margins in mate zones)
+    let futility_prune = !in_check
+        && depth <= 2
+        && alpha.abs() < CHECKMATE - 1000
+        && {
+            let static_eval = if let Some(net) = network {
+                let acc = nnue::Accumulator::from_board(net, board);
+                net.evaluate(&acc, board.side_to_move)
+            } else {
+                evaluate(board)
+            };
+            let margin: i32 = if depth == 1 { 100 } else { 300 };
+            static_eval.abs() < CHECKMATE - 1000
+                && static_eval + margin <= alpha
+        };
+
     let original_alpha = alpha;
     let mut best_mv: Option<(u8, u8)> = None;
 
@@ -856,6 +887,13 @@ fn ab_search(
 
         let new_board = make_move(board, mv);
         let is_capture = mv.flags & movegen::FLAG_CAPTURE != 0;
+        let is_promotion = mv.promotion.is_some();
+
+        // Futility pruning: skip quiet, non-promoting, non-checking moves.
+        if futility_prune && !is_capture && !is_promotion && !is_in_check(&new_board) {
+            continue;
+        }
+
         let is_killer = ply < MAX_DEPTH && killers[ply].iter().any(|k| {
             k.map_or(false, |(f, t)| f == mv.from_sq && t == mv.to_sq)
         });
@@ -966,11 +1004,14 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
     best
 }
 
-/// Iterative deepening search with a node limit.
+/// Iterative deepening search with a node limit and aspiration windows.
 /// Increases depth until the node budget is exhausted.
 /// Returns the best move + score from the last completed depth.
 /// TT persists across depths for move ordering benefit.
 pub fn best_move_nodes(board: &Board, node_limit: u64, network: Option<&nnue::Network>) -> Option<(Move, i32, u32)> {
+    const ASPIRATION_DELTA: i32 = 50;
+    const MATE_THRESHOLD: i32 = CHECKMATE - 1000;
+
     let moves = generate_moves(board);
     if moves.is_empty() {
         return None;
@@ -980,43 +1021,106 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, network: Option<&nnue::Ne
     let mut history: History = [[[0i32; 64]; 64]; 2];
     let root_hash = board.zobrist_hash();
     let mut best_overall: Option<(Move, i32, u32)> = None;
+    let mut prev_score: Option<i32> = None;
 
     for depth in 1..=MAX_DEPTH as u32 {
-        tt.next_gen(); // new generation — old scores used only for move ordering
-        let mut killers: Killers = [[None; 2]; MAX_DEPTH];
+        tt.next_gen();
+
+        // Decide aspiration window for this iteration.
+        // Depth 1 or after a mate score: use full window.
+        // Otherwise: center on previous score with +/- DELTA.
+        let (mut alpha_init, mut beta_init) = match prev_score {
+            Some(s) if depth > 1 && s.abs() < MATE_THRESHOLD => {
+                (s - ASPIRATION_DELTA, s + ASPIRATION_DELTA)
+            }
+            _ => (-INF, INF),
+        };
+
+        // Re-search loop: widen window on fail-low or fail-high.
         let nodes = Cell::new(0u64);
-        let mut ordered_moves = moves.clone();
+        let (iter_best, iter_completed) = loop {
+            let mut killers: Killers = [[None; 2]; MAX_DEPTH];
+            let mut ordered_moves = moves.clone();
 
-        // Use TT best move from previous depth for ordering (any generation)
-        let tt_move = tt.probe(root_hash).and_then(|e| e.best_move());
-        order_moves(board, &mut ordered_moves, &killers, 0, tt_move, &history);
+            let tt_move = tt.probe(root_hash).and_then(|e| e.best_move());
+            order_moves(board, &mut ordered_moves, &killers, 0, tt_move, &history);
 
-        let mut best: Option<(Move, i32)> = None;
-        let mut alpha = -INF;
-        let beta = INF;
-        let mut completed = true;
+            let mut best: Option<(Move, i32)> = None;
+            let mut alpha = alpha_init;
+            let beta = beta_init;
+            let mut completed = true;
+            let mut fail_high = false;
 
-        for mv in &ordered_moves {
-            let new_board = make_move(board, mv);
-            let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, &mut history, network, true, &nodes, node_limit, &mut tt);
-            if nodes.get() >= node_limit && best.is_none() {
-                completed = false;
-                break;
+            for mv in &ordered_moves {
+                let new_board = make_move(board, mv);
+                let score = -ab_search(
+                    &new_board, depth - 1, -beta, -alpha, 1,
+                    &mut killers, &mut history, network, true,
+                    &nodes, node_limit, &mut tt,
+                );
+
+                if nodes.get() >= node_limit && best.is_none() {
+                    completed = false;
+                    break;
+                }
+
+                // Fail-high at root: score == beta under fail-hard.
+                // Record the move, break, and re-search with wider beta.
+                if score >= beta {
+                    best = Some((mv.clone(), score));
+                    fail_high = true;
+                    break;
+                }
+
+                if score > alpha {
+                    alpha = score;
+                    best = Some((mv.clone(), score));
+                }
+
+                if nodes.get() >= node_limit {
+                    break;
+                }
             }
-            if score > alpha {
-                alpha = score;
-                best = Some((mv.clone(), score));
-            }
-            if nodes.get() >= node_limit {
-                break;
-            }
-        }
 
-        if let Some((mv, score)) = best {
-            best_overall = Some((mv, score, depth));
-        }
+            // Node budget exhausted mid-iteration — bail out of re-search loop.
+            if !completed {
+                break (best, false);
+            }
 
-        if !completed || nodes.get() >= node_limit {
+            // Fail-high: widen beta to INF and re-search.
+            if fail_high && beta_init < INF {
+                beta_init = INF;
+                continue;
+            }
+
+            // Fail-low: no move exceeded alpha_init. Widen alpha to -INF and re-search.
+            // Detected by: best is None OR best's score equals alpha_init (didn't improve).
+            let failed_low = match &best {
+                None => alpha_init > -INF,
+                Some((_, s)) => *s <= alpha_init && alpha_init > -INF,
+            };
+            if failed_low {
+                alpha_init = -INF;
+                continue;
+            }
+
+            // Clean completion within the window.
+            break (best, true);
+        };
+
+        if iter_completed {
+            if let Some((mv, score)) = iter_best {
+                best_overall = Some((mv, score, depth));
+                prev_score = Some(score);
+            }
+        } else {
+            // Budget exhausted mid-iteration. Only commit if we have no prior
+            // result at all (otherwise keep the last fully-searched depth).
+            if best_overall.is_none() {
+                if let Some((mv, score)) = iter_best {
+                    best_overall = Some((mv, score, depth));
+                }
+            }
             break;
         }
     }
