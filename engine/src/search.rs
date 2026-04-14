@@ -686,11 +686,24 @@ fn store_killer(killers: &mut Killers, ply: usize, mv: &Move) {
 }
 
 // ---------------------------------------------------------------------------
+// Time / node budget helpers
+// ---------------------------------------------------------------------------
+
+/// Returns true if the search deadline has passed.
+#[inline]
+fn time_up(deadline: Option<std::time::Instant>) -> bool {
+    match deadline {
+        Some(d) => std::time::Instant::now() >= d,
+        None => false,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Quiescence search
 // ---------------------------------------------------------------------------
 
 /// Search captures only until the position is quiet.
-fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Option<&nnue::Network>, nodes: &Cell<u64>, node_limit: u64) -> i32 {
+fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Option<&nnue::Network>, nodes: &Cell<u64>, node_limit: u64, deadline: Option<std::time::Instant>) -> i32 {
     nodes.set(nodes.get() + 1);
 
     let all_moves = generate_moves(board);
@@ -742,11 +755,11 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Opt
     });
 
     for mv in &captures {
-        if nodes.get() >= node_limit {
+        if nodes.get() >= node_limit || time_up(deadline) {
             break;
         }
         let new_board = make_move(board, mv);
-        let score = -quiescence(&new_board, -beta, -alpha, ply + 1, network, nodes, node_limit);
+        let score = -quiescence(&new_board, -beta, -alpha, ply + 1, network, nodes, node_limit, deadline);
         if score >= beta {
             return beta;
         }
@@ -768,7 +781,7 @@ pub fn alpha_beta(board: &Board, depth: u32, alpha: i32, beta: i32) -> i32 {
     let mut history: History = [[[0i32; 64]; 64]; 2];
     let nodes = Cell::new(0u64);
     let mut tt = TTable::new();
-    ab_search(board, depth, alpha, beta, 0, &mut killers, &mut history, None, true, &nodes, u64::MAX, &mut tt)
+    ab_search(board, depth, alpha, beta, 0, &mut killers, &mut history, None, true, &nodes, u64::MAX, None, &mut tt)
 }
 
 /// Recursive alpha-beta with move ordering, killer heuristic, history, NMP, LMR, and TT.
@@ -777,11 +790,12 @@ fn ab_search(
     ply: usize, killers: &mut Killers, history: &mut History,
     network: Option<&nnue::Network>,
     allow_null: bool, nodes: &Cell<u64>, node_limit: u64,
+    deadline: Option<std::time::Instant>,
     tt: &mut TTable,
 ) -> i32 {
     nodes.set(nodes.get() + 1);
 
-    if nodes.get() >= node_limit {
+    if nodes.get() >= node_limit || time_up(deadline) {
         return if let Some(net) = network {
             let acc = nnue::Accumulator::from_board(net, board);
             net.evaluate(&acc, board.side_to_move)
@@ -791,7 +805,7 @@ fn ab_search(
     }
 
     if depth == 0 {
-        return quiescence(board, alpha, beta, ply, network, nodes, node_limit);
+        return quiescence(board, alpha, beta, ply, network, nodes, node_limit, deadline);
     }
 
     // --- TT probe ---
@@ -829,7 +843,7 @@ fn ab_search(
     if allow_null && !in_check && depth >= 3 && board.occupied().count_ones() >= 10 {
         let null_board = board.make_null_move();
         let r = 2;
-        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, network, false, nodes, node_limit, tt);
+        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, network, false, nodes, node_limit, deadline, tt);
         if score >= beta {
             return beta;
         }
@@ -880,7 +894,7 @@ fn ab_search(
     let mut num_quiets = 0usize;
 
     for (move_index, mv) in moves.iter().enumerate() {
-        if nodes.get() >= node_limit {
+        if nodes.get() >= node_limit || time_up(deadline) {
             searched_all = false;
             break;
         }
@@ -907,14 +921,14 @@ fn ab_search(
 
         // --- Late Move Reductions ---
         if depth >= 3 && move_index > 3 && !is_capture && !is_killer && !in_check {
-            let reduced = -ab_search(&new_board, depth - 2, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, tt);
+            let reduced = -ab_search(&new_board, depth - 2, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, tt);
             if reduced > alpha {
-                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, tt);
+                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, tt);
             } else {
                 score = reduced;
             }
         } else {
-            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, tt);
+            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, tt);
         }
 
         if score >= beta {
@@ -994,7 +1008,7 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 
     for mv in moves {
         let new_board = make_move(board, &mv);
-        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, &mut history, network, true, &nodes, u64::MAX, &mut tt);
+        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, &mut history, network, true, &nodes, u64::MAX, None, &mut tt);
         if score > alpha {
             alpha = score;
             best = Some((mv, score));
@@ -1008,7 +1022,7 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 /// Increases depth until the node budget is exhausted.
 /// Returns the best move + score from the last completed depth.
 /// TT persists across depths for move ordering benefit.
-pub fn best_move_nodes(board: &Board, node_limit: u64, network: Option<&nnue::Network>) -> Option<(Move, i32, u32)> {
+pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::time::Instant>, network: Option<&nnue::Network>) -> Option<(Move, i32, u32)> {
     const ASPIRATION_DELTA: i32 = 50;
     const MATE_THRESHOLD: i32 = CHECKMATE - 1000;
 
@@ -1024,6 +1038,12 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, network: Option<&nnue::Ne
     let mut prev_score: Option<i32> = None;
 
     for depth in 1..=MAX_DEPTH as u32 {
+        // Soft check: don't start a new iteration if the deadline has
+        // already passed. The result from the previous depth stays in best_overall.
+        if time_up(deadline) {
+            break;
+        }
+
         tt.next_gen();
 
         // Decide aspiration window for this iteration.
@@ -1056,10 +1076,10 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, network: Option<&nnue::Ne
                 let score = -ab_search(
                     &new_board, depth - 1, -beta, -alpha, 1,
                     &mut killers, &mut history, network, true,
-                    &nodes, node_limit, &mut tt,
+                    &nodes, node_limit, deadline, &mut tt,
                 );
 
-                if nodes.get() >= node_limit && best.is_none() {
+                if (nodes.get() >= node_limit || time_up(deadline)) && best.is_none() {
                     completed = false;
                     break;
                 }
@@ -1077,7 +1097,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, network: Option<&nnue::Ne
                     best = Some((mv.clone(), score));
                 }
 
-                if nodes.get() >= node_limit {
+                if nodes.get() >= node_limit || time_up(deadline) {
                     break;
                 }
             }

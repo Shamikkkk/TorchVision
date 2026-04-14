@@ -81,21 +81,34 @@ fn main() {
                 engine.position = handle_position(&tokens);
             }
             "go" => {
-                if let Some(node_limit) = parse_go_nodes(&tokens) {
-                    if let Some((mv, score, depth)) = best_move_nodes(&engine.position, node_limit, engine.network.as_ref()) {
-                        println!("info depth {} score cp {}", depth, score);
-                        println!("bestmove {}", mv.to_uci());
+                let white_to_move = engine.position.side_to_move; // true = white
+
+                let result =
+                    if let Some(duration) = parse_go_deadline(&tokens, white_to_move) {
+                        // Time-based: unlimited nodes, hard deadline.
+                        let deadline = std::time::Instant::now() + duration;
+                        best_move_nodes(
+                            &engine.position, u64::MAX, Some(deadline),
+                            engine.network.as_ref(),
+                        )
+                    } else if let Some(node_limit) = parse_go_nodes(&tokens) {
+                        // Node-limited (existing behaviour).
+                        best_move_nodes(
+                            &engine.position, node_limit, None,
+                            engine.network.as_ref(),
+                        )
                     } else {
-                        println!("bestmove (none)");
-                    }
+                        // Fixed depth (existing behaviour).
+                        let depth = parse_go_depth(&tokens);
+                        best_move(&engine.position, depth, engine.network.as_ref())
+                            .map(|(mv, score)| (mv, score, depth))
+                    };
+
+                if let Some((mv, score, depth)) = result {
+                    println!("info depth {} score cp {}", depth, score);
+                    println!("bestmove {}", mv.to_uci());
                 } else {
-                    let depth = parse_go_depth(&tokens);
-                    if let Some((mv, score)) = best_move(&engine.position, depth, engine.network.as_ref()) {
-                        println!("info depth {} score cp {}", depth, score);
-                        println!("bestmove {}", mv.to_uci());
-                    } else {
-                        println!("bestmove (none)");
-                    }
+                    println!("bestmove (none)");
                 }
                 io::stdout().flush().ok();
             }
@@ -144,6 +157,38 @@ fn handle_position(tokens: &[&str]) -> Board {
     }
 
     board
+}
+
+/// Parse a u64 value for a named key in "go" tokens (e.g. "wtime", "btime").
+fn parse_go_u64(tokens: &[&str], key: &str) -> Option<u64> {
+    let idx = tokens.iter().position(|&t| t == key)?;
+    tokens.get(idx + 1)?.parse::<u64>().ok()
+}
+
+/// Compute a search duration from "go" tokens and the side to move.
+/// Returns Some(Duration) for movetime/wtime/btime, None if no time info.
+fn parse_go_deadline(tokens: &[&str], white_to_move: bool) -> Option<std::time::Duration> {
+    use std::time::Duration;
+
+    // movetime N: use N ms exactly, minus safety margin.
+    if let Some(mt) = parse_go_u64(tokens, "movetime") {
+        return Some(Duration::from_millis(mt.saturating_sub(50).max(1)));
+    }
+
+    // wtime/btime: compute allocation.
+    let (time_key, inc_key) = if white_to_move { ("wtime", "winc") } else { ("btime", "binc") };
+    let time_left = parse_go_u64(tokens, time_key)?;
+    let increment  = parse_go_u64(tokens, inc_key).unwrap_or(0);
+    let moves_to_go = parse_go_u64(tokens, "movestogo").unwrap_or(30);
+
+    // Allocation: (time / moves_to_go) + increment, capped at 25% of clock,
+    // minus 50ms safety, minimum 10ms.
+    let base      = time_left / moves_to_go.max(1);
+    let allocated = base + increment;
+    let ceiling   = time_left / 4;
+    let safe      = allocated.min(ceiling).saturating_sub(50).max(10);
+
+    Some(Duration::from_millis(safe))
 }
 
 /// Parse depth from "go depth N". Default to 4 if not specified.
