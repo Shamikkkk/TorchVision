@@ -217,8 +217,19 @@ class PyroEngine:
     # Public interface
     # ------------------------------------------------------------------
 
-    def best_move(self, fen: str) -> str:
-        """Return the best move in UCI notation for the given FEN."""
+    def best_move(
+        self,
+        fen: str,
+        wtime_ms: int | None = None,
+        btime_ms: int | None = None,
+    ) -> str:
+        """Return the best move in UCI notation for the given FEN.
+
+        wtime_ms / btime_ms: milliseconds remaining on each clock.  When both
+        are provided and the Rust engine is active, 'go wtime W btime B' is
+        sent so the engine manages its own time.  Tablebase, opening-book,
+        Python minimax, and Stockfish paths ignore these args.
+        """
         board = chess.Board(fen)
         legal = list(board.legal_moves)
         if not legal:
@@ -242,7 +253,9 @@ class PyroEngine:
         # Priority 1.5: Rust engine (fast, Tal-style PST)
         if self._rust_engine:
             try:
-                uci, score = self._rust_engine.best_move(fen)
+                uci, score = self._rust_engine.best_move(
+                    fen, wtime_ms=wtime_ms, btime_ms=btime_ms
+                )
                 if uci:
                     self.last_eval = score
                     return uci

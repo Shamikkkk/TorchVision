@@ -86,7 +86,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
 
     # If human is black, engine plays the first move immediately
     if human_color == "b":
-        engine_uci = await suggest_move(board.fen(), engine)
+        engine_uci = await suggest_move(board.fen(), engine, wtime_ms=white_ms, btime_ms=black_ms)
         _, board = apply_move(board, engine_uci)
         await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
 
@@ -115,7 +115,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                 await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
                 # Engine plays first if human is black
                 if human_color == "b":
-                    engine_uci = await suggest_move(board.fen(), engine)
+                    engine_uci = await suggest_move(board.fen(), engine, wtime_ms=white_ms, btime_ms=black_ms)
                     _, board = apply_move(board, engine_uci)
                     await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
                 continue
@@ -162,7 +162,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                 # the WebSocket — we log the error and keep the loop alive.
                 try:
                     logger.debug("Engine thinking (fen=%s)", board.fen())
-                    engine_uci = await suggest_move(board.fen(), engine)
+                    engine_uci = await suggest_move(board.fen(), engine, wtime_ms=white_ms, btime_ms=black_ms)
                     eval_after: float | None = engine.last_eval
                     logger.debug("Engine chose %s (eval=%s)", engine_uci, eval_after)
 
