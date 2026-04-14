@@ -6,14 +6,15 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 
 ---
 
-## Current State (as of April 14, 2026)
+## Current State (as of April 15, 2026)
 **Phase A (Python classical engine) — COMPLETE ✅**
 **Phase B (Rust engine + Tal bonuses) — COMPLETE ✅**
 **Phase C (NNUE) — ABANDONED ❌**
+**Phase C.2 (Rust engine polish) — MOSTLY COMPLETE ✅**
 **Game Analyzer — COMPLETE ✅**
 
 ### What's working right now:
-- Rust engine live via UCI subprocess
+- Rust engine live via UCI subprocess with full time management
 - Tal-style bonuses in Rust evaluate()
 - PeSTO PST tapered evaluation
 - NMP + LMR + killers + quiescence
@@ -22,31 +23,89 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 - Losing capture ordering (QxP searched after killers)
 - Fool's Mate fix (quiescence checkmate before stand-pat)
 - Mate distance preference (faster mates scored higher)
-- NODE_LIMIT = 100000 (depth 6+ consistently)
+- Aspiration windows (±50cp, widen on fail-low/fail-high, full
+  window at depth 1 and after mate scores)
+- Check extension (+1 ply when in check, via depth shadowing)
+- Futility pruning (depth 1-2, 100/300cp margins, skip quiet
+  non-check non-promotion moves below alpha margin)
+- UCI time management (go wtime/btime/winc/binc/movestogo and
+  go movetime supported, Instant-based deadline threaded through
+  search alongside node_limit, 50ms safety margin, 10ms floor,
+  25% clock ceiling per move, soft check at top of each ID
+  iteration, partial iterations discarded via iter_completed)
+- Python backend passes white_ms/btime_ms through suggest_move
+  chain (handler.py → suggest.py → model.py → rust_engine.py)
+  so live games use time-based search. Analyzer and REST
+  /api/suggest intentionally stay node-limited.
+- NODE_LIMIT = 100000 (fallback only when no clock values given)
 - Plays ruthless chess, very fast, few blunders
 - Python backend falls back to tal_style_eval if Rust binary missing
 
-### Recent fixes (this session):
-- Fool's Mate bug: quiescence checkmate detection
-  was masked by beta cutoff on stand-pat. Fixed by
-  moving generate_moves + checkmate check BEFORE 
-  stand-pat.
-- "mode: neural" log: fixed to show "rust" or 
-  "classical" correctly
-- TT fail-hard mismatch: TT_UPPER/LOWER returning
-  wrong scores (+INF propagation). Fixed: TT_UPPER
-  returns alpha, TT_LOWER returns beta. Also fixed
-  truncated search poisoning TT entries. Also fixed
-  TT_EXACT leaking scores outside window.
-- Losing capture ordering: QxP now scored below
-  killers (3000) instead of equal to PxQ (10000+)
-- History heuristic: tracks quiet moves that cause
-  beta cutoffs, uses gravity formula to prevent
-  unbounded growth
-- Mate distance: quiescence now uses 
-  -(CHECKMATE - ply) so engine prefers faster mates
-- NODE_LIMIT raised 50k → 100k: engine reaches
-  depth 6 consistently, avoids horizon blunders
+### Recent work (session of April 14, 2026):
+- Phase C.2 Items 1, 2, 3, 5 completed in one session.
+- Item 1 (Aspiration Windows): ±50cp window centered on previous
+  depth's score, widen-and-research on fail-low or fail-high,
+  full window at depth 1 and after mate scores (|score| > 
+  CHECKMATE-1000). Also fixed a pre-existing bug where partial
+  iterations (node budget exhausted mid-search) could overwrite
+  the last fully-completed depth's result in best_overall.
+  Startpos reaches depth 9 at 100k nodes (was 6).
+- Item 2 (Check Extension): +1 ply when side to move is in check,
+  via `let depth = if in_check { depth + 1 } else { depth };`
+  shadowing right after in_check is computed. Ply preserved.
+  Interacts cleanly with existing NMP/LMR in_check gates.
+  Startpos drops to depth 8 at 100k nodes (extension cost).
+- Item 3 (Futility Pruning): At depths 1-2, skip quiet 
+  non-promoting non-checking moves when static_eval + margin 
+  <= alpha. Margins 100/300 cp. Gated on !in_check, depth <= 2,
+  |alpha| < CHECKMATE-1000, |static_eval| < CHECKMATE-1000. 
+  Gives-check detection via is_in_check on the new_board. 
+  Quiet endgames jumped from depth ~8 to depth ~29 at 100k 
+  nodes. Startpos switched from e2e4 to d2d4 at higher depths 
+  as positional considerations start to dominate Tal bonuses.
+- Item 5 (Time Management, Rust side): parse_go_deadline() in
+  main.rs handles go movetime N and go wtime W btime B 
+  [winc Wi] [binc Bi] [movestogo N]. Allocation formula:
+  base = time/moves_to_go (default 30), allocated = base + inc,
+  capped at time/4, minus 50ms safety, minimum 10ms. Deadline
+  is Option<Instant> threaded through best_move_nodes, 
+  ab_search, and quiescence. time_up() helper checked at the 
+  same 5 sites as nodes.get() >= node_limit. Soft deadline 
+  check at top of each ID iteration. All pre-existing paths 
+  (go nodes, go depth) unchanged.
+- Item 5 (Time Management, Python side): wtime_ms and btime_ms
+  threaded as optional kwargs through rust_engine.py, model.py,
+  suggest.py, and handler.py. suggest.py uses functools.partial
+  for run_in_executor kwarg support. Three engine-move sites in
+  handler.py (lines 89, 118, 165) pass clock values. Analyzer
+  site (line 183) and REST /api/suggest fallback stay 
+  node-limited. End-to-end verified: 5-min clock from Python
+  test harness allocates 9.95s and reaches depth 12 from 
+  startpos. 100ms emergency clock returns a legal move in 11ms.
+- Item 4 (Syzygy in Rust) DEFERRED: Python backend already 
+  probes tablebases at ≤6 pieces before calling the Rust 
+  engine, so Rust-side Syzygy has near-zero impact on the 
+  live product. Will revisit only if we need Pyro to be 
+  self-contained for UCI tournaments or rating list submission.
+- Item 6 (TAL_AGGRESSION tuning) PENDING: Empirical tuning
+  requires a match-runner script (cutechess-cli or equivalent)
+  to play 50+ games at each candidate value. Naturally 
+  dovetails with ELO measurement work.
+
+### Observed strength estimate (rough):
+Unmeasured, but rough calibration against CCRL scales places
+Pyro somewhere in the 1600-1850 range after Phase C.2 Items
+1-3 and 5. Major uncertainty factors:
+- Never played a rated game; no SPRT or gauntlet data.
+- ELO scales diverge (CCRL vs FIDE vs lichess rapid).
+- 100k node cap limits pre-time-management strength; with
+  time management in live games the effective strength is
+  higher than fixed-node benchmarks suggest.
+Next step for real measurement: cutechess-cli gauntlet vs
+known-strength opponents (TSCP ~1700, Fairy-Max ~2000,
+Sungorus ~2200). Run 200+ games per opponent at 10s+0.1s
+time control. Do this AFTER Item 6 (TAL_AGGRESSION tuning)
+so the measurement reflects the tuned engine.
 
 ### Why NNUE was abandoned:
 - 768→256→1 architecture plateaus at ~86cp RMSE
@@ -522,6 +581,23 @@ LOG_LEVEL=DEBUG
 - Rust engine NNUE loads but doesn't help (86cp RMSE)
   → Could disable NNUE loading to save startup time
 - Premove smoothness (minor UI issue)
+- engine/target/ is tracked in git, causing every build to 
+  dirty the working tree. Should be in .gitignore. Small 
+  chore commit to fix: add target/ and .claude/ to 
+  .gitignore, then git rm --cached the already-tracked 
+  files. Not urgent.
+- hist_score at search.rs:914 is a dead variable (pre-existing
+  warning, not introduced this session). Leftover from an 
+  earlier draft of the move loop. Harmless.
+- On partial iterations where node budget is exhausted 
+  mid-search, the last root move searched may receive a 
+  near-static-eval result because ab_search returns static 
+  eval once the budget trips. This is a pre-existing issue 
+  that Item 5 (time management) partially addresses but 
+  doesn't fully fix — the cleanest fix is "only commit an 
+  iteration to best_overall if iter_completed is true", 
+  which we implemented. Edge cases with very constrained 
+  time may still exhibit this.
 
 ## Start of next session checklist:
 1. git pull (get latest)
@@ -529,16 +605,33 @@ LOG_LEVEL=DEBUG
 3. Start backend: uvicorn app.main:app --port 8000
 4. Start frontend: npm run dev
 5. Confirm: "Rust engine loaded" in uvicorn log
-6. Play a game to verify engine works
-7. Then proceed with roadmap item 1 (aspiration windows)
+6. Play a game to verify engine works — at move 1 with a 
+   5-minute clock, the engine should think for ~10 seconds, 
+   not respond instantly. If it responds instantly, time
+   management is not reaching the Rust engine — debug 
+   suggest_move → rust_engine.py chain.
+7. Phase C.2 Items 1-3 and 5 are complete. Remaining from 
+   Phase C.2:
+   - Item 4 (Syzygy in Rust): deferred, low ROI
+   - Item 6 (TAL_AGGRESSION tuning): pending, needs a 
+     match-runner script
+8. Likely next work: build a cutechess-cli gauntlet harness 
+   that serves double duty for (a) Item 6 empirical tuning 
+   and (b) real ELO measurement against known opponents. 
+   This unlocks both Item 6 AND a trustworthy strength 
+   number. Alternative: skip ahead to Phase D (NNUE v2) or 
+   frontend polish.
 
 ---
 
-## Phase C.2 — Rust Engine Polish (next serious attempt)
+## Phase C.2 — Rust Engine Polish (MOSTLY COMPLETE)
 
 ### Goal: reach 1600+ ELO equivalent
 
-### Item 1: Aspiration Windows
+### Status: Items 1, 2, 3, 5 complete. Item 4 deferred. 
+### Item 6 pending (empirical tuning).
+
+### Item 1: Aspiration Windows ✅ COMPLETE
 In engine/src/search.rs, in best_move_nodes():
 - After first depth-1 search gives score S,
   search subsequent depths with narrow window:
@@ -551,7 +644,7 @@ In engine/src/search.rs, in best_move_nodes():
 - Reduces nodes searched significantly on stable positions
 - Reference: Python search.py already has this
 
-### Item 2: Check Extension
+### Item 2: Check Extension ✅ COMPLETE
 In engine/src/search.rs, in ab_search():
 - When the side to move is IN CHECK:
   extend search by 1 ply (depth += 1)
@@ -561,7 +654,7 @@ In engine/src/search.rs, in ab_search():
   let extension = if in_check { 1 } else { 0 };
   recurse with depth - 1 + extension
 
-### Item 3: Futility Pruning
+### Item 3: Futility Pruning ✅ COMPLETE
 In engine/src/search.rs, in ab_search():
 - At depth 1 and depth 2, if static eval + margin
   is still below alpha, skip quiet moves entirely
@@ -576,7 +669,7 @@ In engine/src/search.rs, in ab_search():
     }
   }
 
-### Item 4: Syzygy Tablebases in Rust Engine
+### Item 4: Syzygy Tablebases in Rust Engine ⏭️ DEFERRED
 - Use the shakmaty-syzygy crate (Rust)
 - Probe for positions with <=6 pieces
 - Return WDL result immediately (like Python tablebase)
@@ -585,7 +678,17 @@ In engine/src/search.rs, in ab_search():
 - Add --syzygy-path flag to UCI engine
 - Python backend should pass path at startup
 
-### Item 5: Time Management
+NOTE (April 14, 2026): Deferred because the Python backend 
+already probes Syzygy tables at ≤6 pieces before calling the 
+Rust engine (see backend/app/engine/model.py:229 and 
+tablebase.py). Rust-side Syzygy would only matter if Pyro is 
+ever submitted to a UCI rating list or tournament where it 
+runs standalone without the Python backend above it. Crate 
+choice if revived: pyrrhic-rs (not shakmaty-syzygy) — takes
+raw bitboards via an EngineAdapter trait, so no FEN 
+serialization or parallel board representation needed.
+
+### Item 5: Time Management ✅ COMPLETE
 Replace fixed node budget with proper time control:
 - Parse "go wtime <ms> btime <ms>" UCI command
 - Allocate time: use_time = total_time / 30
@@ -594,7 +697,7 @@ Replace fixed node budget with proper time control:
 - Fall back to node limit if no time given
 - This alone could add 100-200 ELO
 
-### Item 6: TAL_AGGRESSION Tuning
+### Item 6: TAL_AGGRESSION Tuning ⏳ PENDING
 Currently TAL_AGGRESSION = 1.5 in search.rs
 - Run automated match: 50 games each at 1.2, 1.5, 1.8, 2.0
 - Use validate_nnue_rust.py framework as template
