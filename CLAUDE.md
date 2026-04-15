@@ -10,7 +10,7 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 **Phase A (Python classical engine) — COMPLETE ✅**
 **Phase B (Rust engine + Tal bonuses) — COMPLETE ✅**
 **Phase C (NNUE) — ABANDONED ❌**
-**Phase C.2 (Rust engine polish) — MOSTLY COMPLETE ✅**
+**Phase C.2 (Rust engine polish) — COMPLETE ✅**
 **Game Analyzer — COMPLETE ✅**
 
 ### What's working right now:
@@ -87,10 +87,14 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
   engine, so Rust-side Syzygy has near-zero impact on the 
   live product. Will revisit only if we need Pyro to be 
   self-contained for UCI tournaments or rating list submission.
-- Item 6 (TAL_AGGRESSION tuning) PENDING: Empirical tuning
-  requires a match-runner script (cutechess-cli or equivalent)
-  to play 50+ games at each candidate value. Naturally 
-  dovetails with ELO measurement work.
+- Item 6 (TAL_AGGRESSION tuning) TESTED: Built
+  backend/scripts/tune_aggression.py — two-binary A/B match
+  harness with python-chess game loop, random opening selection,
+  color swaps, full draw detection, and clean subprocess
+  shutdown. Ran TAL=1.5 vs TAL=2.0, 40 games at 50k nodes:
+  result 53.8% vs 46.2%, directional preference for 1.5 but
+  statistically weak (~1.3 sigma). Parameter appears
+  insensitive at this strength. Kept default at 1.5.
 
 ### Observed strength estimate (rough):
 Unmeasured, but rough calibration against CCRL scales places
@@ -104,8 +108,9 @@ Pyro somewhere in the 1600-1850 range after Phase C.2 Items
 Next step for real measurement: cutechess-cli gauntlet vs
 known-strength opponents (TSCP ~1700, Fairy-Max ~2000,
 Sungorus ~2200). Run 200+ games per opponent at 10s+0.1s
-time control. Do this AFTER Item 6 (TAL_AGGRESSION tuning)
-so the measurement reflects the tuned engine.
+time control. Item 6 tuning already tested — TAL_AGGRESSION
+is settled at 1.5 until engine strength increases enough
+to make eval-parameter tuning sensitive again.
 
 ### Why NNUE was abandoned:
 - 768→256→1 architecture plateaus at ~86cp RMSE
@@ -610,11 +615,10 @@ LOG_LEVEL=DEBUG
    not respond instantly. If it responds instantly, time
    management is not reaching the Rust engine — debug 
    suggest_move → rust_engine.py chain.
-7. Phase C.2 Items 1-3 and 5 are complete. Remaining from 
-   Phase C.2:
-   - Item 4 (Syzygy in Rust): deferred, low ROI
-   - Item 6 (TAL_AGGRESSION tuning): pending, needs a 
-     match-runner script
+7. Phase C.2 is effectively complete. Items 1-3, 5, and 6 
+   done. Item 4 (Syzygy in Rust) deferred permanently unless 
+   Pyro needs to run standalone for tournament/rating-list 
+   submission.
 8. Likely next work: build a cutechess-cli gauntlet harness 
    that serves double duty for (a) Item 6 empirical tuning 
    and (b) real ELO measurement against known opponents. 
@@ -697,15 +701,23 @@ Replace fixed node budget with proper time control:
 - Fall back to node limit if no time given
 - This alone could add 100-200 ELO
 
-### Item 6: TAL_AGGRESSION Tuning ⏳ PENDING
-Currently TAL_AGGRESSION = 1.5 in search.rs
-- Run automated match: 50 games each at 1.2, 1.5, 1.8, 2.0
-- Use validate_nnue_rust.py framework as template
-- Create backend/scripts/tune_aggression.py:
-  - Two engine instances with different TAL values
-  - Play 50 games each, report W/D/L
-  - Pick setting with highest score %
-- Expected best: somewhere between 1.5 and 2.0
+### Item 6: TAL_AGGRESSION Tuning ✅ TESTED (result: keep 1.5)
+Currently TAL_AGGRESSION = 1.5 in search.rs.
+
+A/B tested on April 15, 2026 via backend/scripts/tune_aggression.py:
+- 40 games at 50k nodes/move, seed=42
+- TAL=1.5 vs TAL=2.0, alternating colors, randomized openings
+- Result: 53.8% vs 46.2% (W18/D7/L15 from TAL=1.5 perspective)
+- Approximate +26 Elo for 1.5, 95% CI roughly ±65 Elo
+- Verdict: directional preference for 1.5, not statistically
+  conclusive at 40 games. Parameter appears relatively
+  INSENSITIVE at this strength — doubling the aggression from
+  1.5 to 2.0 produced at most a small Elo difference.
+- Conclusion: keep TAL_AGGRESSION = 1.5 as default. Further
+  tuning of this single parameter is low-ROI. Re-test only if
+  engine strength increases substantially (NNUE v2 or deeper
+  search) such that eval-function parameters become sensitive
+  again.
 
 ---
 

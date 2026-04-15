@@ -33,7 +33,8 @@
       "Bash(/c/Users/shami/OneDrive/Documents/torch/engine/target/release/pyro.exe --no-nnue)",
       "Bash(python3 -c ':*)",
       "Bash(where python:*)",
-      "Bash(grep -oP '\\\\.\\\\w+$')"
+      "Bash(grep -oP '\\\\.\\\\w+$')",
+      "Bash(ls:*)"
     ]
   }
 }
