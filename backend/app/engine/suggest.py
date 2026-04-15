@@ -9,12 +9,11 @@ async def suggest_move(
     engine: PyroEngine,
     wtime_ms: int | None = None,
     btime_ms: int | None = None,
+    movetime_ms: int | None = None,
 ) -> str:
     """Run engine inference off the event loop to avoid blocking FastAPI.
 
-    wtime_ms / btime_ms: when both are provided, forwarded to the Rust engine
-    so it can use time-based search (go wtime/btime).  Omit both to keep the
-    existing node-limited behaviour.
+    Priority: movetime_ms > wtime_ms/btime_ms > node limit.
     """
     loop = asyncio.get_event_loop()
     fn = functools.partial(
@@ -22,5 +21,6 @@ async def suggest_move(
         fen,
         wtime_ms=wtime_ms,
         btime_ms=btime_ms,
+        movetime_ms=movetime_ms,
     )
     return await loop.run_in_executor(None, fn)

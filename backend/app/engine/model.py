@@ -222,13 +222,13 @@ class PyroEngine:
         fen: str,
         wtime_ms: int | None = None,
         btime_ms: int | None = None,
+        movetime_ms: int | None = None,
     ) -> str:
         """Return the best move in UCI notation for the given FEN.
 
-        wtime_ms / btime_ms: milliseconds remaining on each clock.  When both
-        are provided and the Rust engine is active, 'go wtime W btime B' is
-        sent so the engine manages its own time.  Tablebase, opening-book,
-        Python minimax, and Stockfish paths ignore these args.
+        Priority: movetime_ms > wtime_ms/btime_ms > node limit.
+        Tablebase, opening-book, Python minimax, and Stockfish paths ignore
+        the time args.
         """
         board = chess.Board(fen)
         legal = list(board.legal_moves)
@@ -254,7 +254,7 @@ class PyroEngine:
         if self._rust_engine:
             try:
                 uci, score = self._rust_engine.best_move(
-                    fen, wtime_ms=wtime_ms, btime_ms=btime_ms
+                    fen, wtime_ms=wtime_ms, btime_ms=btime_ms, movetime_ms=movetime_ms
                 )
                 if uci:
                     self.last_eval = score

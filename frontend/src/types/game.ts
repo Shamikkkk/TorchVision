@@ -43,8 +43,11 @@ export interface MovePayload {
   uci: string
 }
 
+export type Difficulty = 'beginner' | 'intermediate' | 'advanced' | 'expert' | 'master'
+
 export interface NewGamePayload {
   type: 'new_game'
+  difficulty?: Difficulty
 }
 
 export interface ResignPayload {
@@ -80,7 +83,7 @@ export interface GameState {
   bestWas: BestWasMessage | null
   moveSymbols: Record<number, string>
   makeMove: (uci: string) => void
-  newGame: () => void
+  newGame: (difficulty?: Difficulty) => void
   resign: () => void
   flipBoard: () => void
 }

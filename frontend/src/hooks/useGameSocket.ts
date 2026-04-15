@@ -5,6 +5,7 @@ import { WsClient } from '../lib/wsClient'
 import type {
   BestWasMessage,
   CapturedPieces,
+  Difficulty,
   GameState,
   GameStatus,
   ServerMessage,
@@ -184,12 +185,12 @@ export function useGameSocket(): ExtendedGameState {
     wsRef.current?.send({ type: 'move', uci })
   }, [])
 
-  const newGame = useCallback(() => {
+  const newGame = useCallback((difficulty?: Difficulty) => {
     setEvalScore(null)
     setEvalMove(null)
     setBestWas(null)
     setMoveSymbols({})
-    wsRef.current?.send({ type: 'new_game' })
+    wsRef.current?.send({ type: 'new_game', difficulty })
   }, [])
 
   const resign = useCallback(() => {

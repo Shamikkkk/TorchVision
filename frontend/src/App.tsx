@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { detectOpening } from './lib/openings'
 import Board from './components/Board'
 import Clock from './components/Clock'
-import Controls from './components/Controls'
+import { Controls } from './components/Controls'
 import CapturedPiecesRow from './components/CapturedPieces'
 import EvalBar from './components/EvalBar'
 import EnginePanel from './components/EnginePanel'
@@ -66,6 +66,8 @@ export default function App() {
     humanColor,
     materialAdv,
     newGame,
+    resign,
+    flipBoard,
   } = game
 
   const prevStatus = useRef(status)
@@ -165,13 +167,12 @@ export default function App() {
                 side={bottomCaptures}
               />
 
-              <div className="h-5 flex items-center justify-center">
-                <span
-                  className="text-zinc-400 italic text-sm transition-opacity duration-500"
-                  style={{ opacity: openingName ? 1 : 0 }}
-                >
-                  {openingName ?? ''}
-                </span>
+              <div className="h-7 flex items-center justify-center">
+                {openingName && (
+                  <span className="text-zinc-300 italic text-sm">
+                    {openingName}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -182,7 +183,12 @@ export default function App() {
             >
               <MoveList history={history} moveSymbols={moveSymbols} />
               <EnginePanel evalMove={evalMove} evalScore={evalScore} bestWas={bestWas} />
-              <Controls game={game} />
+              <Controls
+                onNewGame={newGame}
+                onResign={resign}
+                onFlip={flipBoard}
+                gameInProgress={status === 'ongoing'}
+              />
             </div>
           </div>
 

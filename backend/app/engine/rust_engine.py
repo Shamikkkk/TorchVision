@@ -60,17 +60,18 @@ class RustEngine:
         fen: str,
         wtime_ms: int | None = None,
         btime_ms: int | None = None,
+        movetime_ms: int | None = None,
     ) -> tuple[str, int]:
         """Send position + go, return (uci_move, eval_cp).
 
-        If wtime_ms and btime_ms are both provided, sends 'go wtime W btime B'
-        so the Rust engine uses its own time-management logic.
-        Otherwise falls back to 'go nodes NODE_LIMIT' (unchanged behavior).
+        Priority: movetime_ms > wtime_ms/btime_ms > node limit.
 
         eval_cp is from side-to-move perspective.
         """
         self._send(f"position fen {fen}")
-        if wtime_ms is not None and btime_ms is not None:
+        if movetime_ms is not None:
+            self._send(f"go movetime {movetime_ms}")
+        elif wtime_ms is not None and btime_ms is not None:
             self._send(f"go wtime {wtime_ms} btime {btime_ms}")
         else:
             self._send(f"go nodes {NODE_LIMIT}")

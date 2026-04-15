@@ -44,6 +44,19 @@ def _state(
     return d
 
 
+_MOVETIME: dict[str, int | None] = {
+    "beginner":     100,
+    "intermediate": 500,
+    "advanced":     2000,
+    "expert":       5000,
+    "master":       None,  # use full clock
+}
+
+
+def _difficulty_movetime(d: str) -> int | None:
+    return _MOVETIME.get(d, None)
+
+
 async def ws_game_endpoint(websocket: WebSocket) -> None:
     await manager.connect(websocket)
     board = new_board()
@@ -55,6 +68,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
     game_over = False
     tick_task: asyncio.Task | None = None  # type: ignore[type-arg]
     human_color: str = random.choice(["w", "b"])
+    current_difficulty: str = "master"
 
     async def run_clock() -> None:
         nonlocal white_ms, black_ms, game_over
@@ -86,7 +100,11 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
 
     # If human is black, engine plays the first move immediately
     if human_color == "b":
-        engine_uci = await suggest_move(board.fen(), engine, wtime_ms=white_ms, btime_ms=black_ms)
+        _mt = _difficulty_movetime(current_difficulty)
+        if _mt is not None:
+            engine_uci = await suggest_move(board.fen(), engine, movetime_ms=_mt)
+        else:
+            engine_uci = await suggest_move(board.fen(), engine, wtime_ms=white_ms, btime_ms=black_ms)
         _, board = apply_move(board, engine_uci)
         await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
 
@@ -101,6 +119,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
             msg_type: str = data.get("type", "")
 
             if msg_type == "new_game":
+                current_difficulty = data.get("difficulty") or "master"
                 game_over = True
                 if tick_task and not tick_task.done():
                     tick_task.cancel()
@@ -115,7 +134,11 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                 await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
                 # Engine plays first if human is black
                 if human_color == "b":
-                    engine_uci = await suggest_move(board.fen(), engine, wtime_ms=white_ms, btime_ms=black_ms)
+                    _mt = _difficulty_movetime(current_difficulty)
+                    if _mt is not None:
+                        engine_uci = await suggest_move(board.fen(), engine, movetime_ms=_mt)
+                    else:
+                        engine_uci = await suggest_move(board.fen(), engine, wtime_ms=white_ms, btime_ms=black_ms)
                     _, board = apply_move(board, engine_uci)
                     await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
                 continue
@@ -162,7 +185,11 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                 # the WebSocket — we log the error and keep the loop alive.
                 try:
                     logger.debug("Engine thinking (fen=%s)", board.fen())
-                    engine_uci = await suggest_move(board.fen(), engine, wtime_ms=white_ms, btime_ms=black_ms)
+                    _mt = _difficulty_movetime(current_difficulty)
+                    if _mt is not None:
+                        engine_uci = await suggest_move(board.fen(), engine, movetime_ms=_mt)
+                    else:
+                        engine_uci = await suggest_move(board.fen(), engine, wtime_ms=white_ms, btime_ms=black_ms)
                     eval_after: float | None = engine.last_eval
                     logger.debug("Engine chose %s (eval=%s)", engine_uci, eval_after)
 
