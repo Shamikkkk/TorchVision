@@ -6,12 +6,46 @@ AI-assisted chess application ("Torch") with a React frontend and a FastAPI back
 
 ---
 
+## Current Goal (set April 15, 2026)
+
+Make Pyro a **scary tactical chess engine with a Mittens-style 
+personality** — not a silent strength-maxxing engine.
+
+Target: **2000-2200 CCRL strength** combined with **vicious 
+Tal-style tactical play** and a **theatrical, intimidating UX**. 
+Reaching 3000 Elo is explicitly NOT the goal. A 2200-rated 
+engine already crushes 95%+ of chess.com users; the differentiator 
+is *how it plays* and *how it feels to play against*, not raw 
+strength beyond that point.
+
+Strategic implications:
+- **NNUE v2 (Phase D) is DEFERRED indefinitely.** NNUE produces 
+  precise positional play (Magnus-style) which is the OPPOSITE 
+  of the desired Tal-style violence. The hand-crafted Tal eval 
+  is philosophically aligned with the goal in a way NNUE isn't.
+- **MCTS (Phase E) similarly deferred** — MCTS without a strong 
+  neural value head is weaker than alpha-beta + PeSTO+Tal.
+- **Phase G is the active development track.** See Phase G 
+  section below.
+- Some style choices may COST 20-50 Elo vs pure strength tuning. 
+  That's an acceptable trade. Mittens itself was deliberately 
+  throttled.
+
+Realistic timeline at ~1hr sessions, 2-3 sessions/week: 
+8-12 weeks to ship Phase G as a complete product.
+
+---
+
 ## Current State (as of April 15, 2026)
 **Phase A (Python classical engine) — COMPLETE ✅**
 **Phase B (Rust engine + Tal bonuses) — COMPLETE ✅**
 **Phase C (NNUE) — ABANDONED ❌**
 **Phase C.2 (Rust engine polish) — COMPLETE ✅**
+**Phase D (NNUE v2) — DEFERRED 🛑**
+**Phase E (MCTS) — DEFERRED 🛑**
+**Phase G (The Mittens Path) — ACTIVE 🔥**
 **Game Analyzer — COMPLETE ✅**
+**Frontend: difficulty levels + opening name — COMPLETE ✅**
 
 ### What's working right now:
 - Rust engine live via UCI subprocess with full time management
@@ -120,7 +154,14 @@ to make eval-parameter tuning sensitive again.
 - Would need: deeper architecture OR Bullet trainer
   with 100M+ positions in C++/Rust to beat PST
 
-## NNUE v2 Plan (next serious attempt)
+## NNUE v2 Plan (DEFERRED — see Current Goal section)
+
+NOTE (April 15, 2026): NNUE v2 is deferred indefinitely under 
+the Phase G strategic shift. NNUE produces precise positional 
+play which contradicts the goal of Tal-style tactical violence.
+The full plan below is preserved as a reference in case the 
+strategic direction changes — do not delete this section, but 
+do not work on it either.
 
 ### Key research findings:
 
@@ -615,16 +656,21 @@ LOG_LEVEL=DEBUG
    not respond instantly. If it responds instantly, time
    management is not reaching the Rust engine — debug 
    suggest_move → rust_engine.py chain.
-7. Phase C.2 is effectively complete. Items 1-3, 5, and 6 
-   done. Item 4 (Syzygy in Rust) deferred permanently unless 
-   Pyro needs to run standalone for tournament/rating-list 
-   submission.
-8. Likely next work: build a cutechess-cli gauntlet harness 
-   that serves double duty for (a) Item 6 empirical tuning 
-   and (b) real ELO measurement against known opponents. 
-   This unlocks both Item 6 AND a trustworthy strength 
-   number. Alternative: skip ahead to Phase D (NNUE v2) or 
-   frontend polish.
+7. Phase C.2 is complete. Phase D (NNUE v2) and Phase E (MCTS) 
+   are DEFERRED. The active track is Phase G — The Mittens Path. 
+   See Phase G section in this file for the full plan.
+
+8. The CURRENT GOAL is a scary tactical engine at 2000-2200 CCRL 
+   with a Mittens-style personality, NOT 3000 Elo. Treat any 
+   impulse to "just go for raw strength" as a temptation to 
+   dismiss — the user explicitly chose Phase G over Path A.
+
+9. Next session work: start with G1 (cutechess gauntlet) — this 
+   is the prerequisite for measuring everything else in Phase G. 
+   Without a real Elo number, none of the strength improvements 
+   in G2-G6 are validatable. The G7 + G10 quick wins (crank 
+   TAL_AGGRESSION + aggressive opening book) can fit alongside 
+   G1 in the same session if time permits.
 
 ---
 
@@ -721,7 +767,7 @@ A/B tested on April 15, 2026 via backend/scripts/tune_aggression.py:
 
 ---
 
-## Phase D — NNUE v2 (when returning to neural)
+## Phase D — NNUE v2 (DEFERRED — when returning to neural)
 
 ### Prerequisites:
 - Phase C.2 items 1-6 complete
@@ -791,7 +837,7 @@ backend/scripts/generate_selfplay_rust.py:
 
 ---
 
-## Phase E — MCTS (long term, after NNUE v2)
+## Phase E — MCTS (DEFERRED — only relevant if Phase D is revived)
 
 ### Goal: 1800+ ELO
 
@@ -820,6 +866,230 @@ backend/scripts/generate_selfplay_rust.py:
    - Backprop: update Q values up the tree
 5. UCI integration: replace ab_search with mcts_search
    when --mcts flag is passed
+
+---
+
+## Phase G — The Mittens Path (ACTIVE)
+
+Goal: Build a scary tactical chess engine with personality. 
+Three parallel tracks: strength, style, UX. Mittens itself 
+(Stockfish under the hood + sandbagging + taunts + creepy avatar) 
+is the spiritual reference, but Pyro will be honestly aggressive 
+rather than sandbagging — the style IS the strength.
+
+### Track 1: Strength improvements (target +250-500 Elo)
+
+These get Pyro from ~1750 to ~2000-2300 CCRL without touching 
+NNUE. Ordered by ROI per hour:
+
+G1. Cutechess gauntlet harness (1 session, MANDATORY FIRST)
+    - Install cutechess-cli (or build from source)
+    - Wrap Pyro + 2-3 reference engines (TSCP ~1700, 
+      Fairy-Max ~2000, Sungorus ~2200)
+    - Script: 200 games per opponent at 10s+0.1s time control
+    - Output: Pyro's actual CCRL-equivalent rating
+    - WITHOUT THIS: every change below is unmeasurable.
+      Skip at your peril.
+
+G2. Lazy SMP multithreading (1-2 sessions, +50-150 Elo)
+    - Currently single-threaded — major Elo left on the table
+    - Standard approach: N threads share the TT, each runs an 
+      independent search at slightly different depths
+    - Implementation: spawn threads in best_move_nodes, each 
+      calls ab_search with a shared Arc<TTable>
+    - Most modern engines do this. Free Elo from existing 
+      hardware.
+
+G3. Principal Variation Search (PVS) (1 session, +30-60 Elo)
+    - Refactor of ab_search: first move searched with full 
+      window, subsequent moves with null window, re-search 
+      only on fail-high
+    - Synergizes with aspiration windows already in place
+
+G4. Better move ordering (1-2 sessions, +50-100 Elo)
+    - SEE (Static Exchange Evaluation) for capture ordering — 
+      replace MVV-LVA's naive sorting with actual exchange math
+    - Counter-move heuristic: if opponent played X, the move 
+      that often refutes X gets ordered higher
+    - Continuation history: history scores per (prev_move, 
+      curr_move) pair instead of just curr_move
+
+G5. Singular extensions (1 session, +30-60 Elo)
+    - When a TT move is much better than alternatives at 
+      reduced depth, extend its search by 1 ply
+    - Particularly powerful for forcing tactical sequences — 
+      synergizes with the Tal aggression bias
+
+G6. SPSA tuning of all eval parameters (1 session setup + 
+    overnight runs, +50-100 Elo)
+    - Currently every magic number in tal_bonuses (king attack 
+      weight, pawn storm, early queen penalty, etc.) is guessed
+    - SPSA: Simultaneous Perturbation Stochastic Approximation, 
+      standard for engine eval tuning
+    - Use cutechess gauntlet from G1 as the fitness function
+    - Tune toward AGGRESSION (weight king attack heavily) — 
+      this is where strength and style merge
+
+### Track 2: Style improvements (intentional Tal-bias)
+
+Some of these REDUCE pure-Elo strength but increase the 
+"scary tactical" feel. That's the trade.
+
+G7. Crank TAL_AGGRESSION to 2.5+ (5 minutes)
+    - Previous A/B test (40 games at 1.5 vs 2.0) was 
+      inconclusive (~26 Elo for 1.5, CI ±65)
+    - For a personality engine, gameplay style trumps marginal 
+      Elo. Bump to 2.5 and let style win.
+    - May slightly weaken the engine. Acceptable.
+
+G8. Killer-instinct bonus (1 session)
+    - When opponent's king is exposed (few defenders, open 
+      files within 2 squares, missing castling rights), 
+      MULTIPLY king-attack scores by 1.5-2x
+    - Currently Tal bonuses fire constantly — we want them 
+      to SPIKE when blood is in the water
+    - Implementation in evaluate.rs: detect "king exposure" 
+      metric, scale king_attack term
+
+G9. Sacrifice-seeking in search (1 session)
+    - Add a "speculation bonus" to move ordering that 
+      slightly prefers SEE-negative captures (sacrifices)
+    - Currently SEE-negative captures get pruned or deferred 
+      — they should be EXPLORED in attacking positions
+    - Gate on: opponent king exposed, attacking material 
+      present near opponent king
+    - This is the difference between a positional engine 
+      and a Tal-style killer
+
+G10. Aggressive opening book (1 session)
+    - Replace the current Lichess opening data with a curated 
+      "scary openings only" book
+    - Whitelist: King's Gambit (C30-C39), Smith-Morra Gambit 
+      (B21), Latvian Gambit (C40), Albin Counter-Gambit 
+      (D08-D09), Vienna Game (C25-C29), Evans Gambit (C51-C52), 
+      Danish Gambit (C21), Scotch Gambit, Halloween Gambit
+    - Pyro announces its intent on move 1
+    - Implementation: filter the existing openings.ts entries 
+      OR build a new sharp-only book
+
+G11. Anti-quiet penalty (1 session)
+    - Add small eval penalty for closed pawn structures and 
+      low piece mobility
+    - Pushes Pyro to OPEN positions even when not strictly 
+      best
+    - Cost: 20-50 Elo. Worth it for style.
+
+### Track 3: UX / Personality (where Mittens magic actually lives)
+
+These don't affect engine strength at all but transform the 
+experience of playing against Pyro.
+
+G12. Persona (1 session)
+    - Avatar: a flame icon, or a small flame animation (SVG 
+      or CSS), placed where chess.com bots have their portrait
+    - Tagline displayed near the avatar: 
+      "Pyro — burns brightest when you're losing"
+    - Color scheme leans into orange/red accents instead of 
+      current purple
+
+G13. Taunting messages (1-2 sessions)
+    - After certain game events, Pyro speaks via a small 
+      chat bubble or message panel
+    - Triggers and example lines:
+      * After Pyro plays a brilliant move (eval swing > 200cp): 
+        "Did you see that coming?"
+      * After human blunder (cp_loss > 200): 
+        "I was hoping you'd play that."
+      * Approaching mate (mate score detected): 
+        "Three moves." (or "Two." "One.")
+      * Game start: "Try not to disappoint me."
+      * Pyro losing material (eval drops > 300cp): 
+        *silence* — never acknowledge weakness
+      * Game over (Pyro wins): 
+        "Better luck next time. (No, really.)"
+      * Game over (Pyro loses): 
+        "You earned that one. Once."
+    - Implementation: backend detects events, sends 
+      {"type": "pyro_says", "text": "..."} via WebSocket, 
+      frontend displays in a side panel or modal
+    - Vocabulary scales with difficulty level (Beginner = 
+      gentler, Master = ruthless)
+
+G14. Theatrical timing (1 session)
+    - When Pyro finds a brilliant move (mate score, large 
+      eval swing, sacrifice), PAUSE before playing even if 
+      search finished instantly
+    - When refuting a blunder, play FAST to telegraph 
+      confidence
+    - Implementation: backend computes "drama score" per 
+      move, applies artificial delay before sending the move 
+      to the frontend
+
+G15. Visual cues during attacks (1-2 sessions)
+    - When Pyro's king-attack score is high, dim the board 
+      edges or pulse them red
+    - Eval bar gets a flame icon when Pyro is winning by > 200cp
+    - Optionally: highlight Pyro's attacking pieces with a 
+      subtle red glow
+    - Pure CSS / Tailwind work in the frontend
+
+G16. Difficulty rebrand (5 minutes)
+    - Current: Beginner / Intermediate / Advanced / Expert / Master
+    - New names: Sleeping / Playful / Awake / Hunting / Feral
+    - Each level gets different avatar mood (sleeping = closed 
+      flame icon, feral = wild flame)
+    - Same time budgets, just different framing
+    - Each level uses different taunt vocabulary
+
+G17. Game-over screens (1 session)
+    - On player loss: dramatic dim transition, slow text reveal 
+      of Pyro's victory message
+    - On player win: grudging acknowledgment with subtle UI 
+      downgrade (Pyro avatar dims)
+    - On draw: Pyro is annoyed ("Acceptable. Barely.")
+
+### Recommended session ordering
+
+Sessions 1-2 (foundation):
+- G1: Cutechess gauntlet (mandatory baseline measurement)
+- G7: Crank TAL_AGGRESSION to 2.5 + G10: aggressive opening book
+  (immediate style shift, low-effort wins)
+
+Sessions 3-5 (strength + style alternating):
+- G2: Lazy SMP (biggest single-session strength win)
+- G8: Killer-instinct bonus
+- G12 + G16: Persona + difficulty rebrand
+- G3: PVS
+
+Sessions 6-8 (depth + theater):
+- G4: SEE + counter-move + continuation history
+- G13: Taunting messages
+- G14: Theatrical timing
+- G9: Sacrifice-seeking
+
+Sessions 9-12 (polish + tune):
+- G15: Visual cues during attacks
+- G17: Game-over screens
+- G6: SPSA tuning (run overnight, multiple iterations)
+- G5: Singular extensions
+- G11: Anti-quiet penalty (only if everything else feels 
+  not-aggressive-enough)
+
+Final session: ship it. Deploy, write a README, tweet about it 
+(if so inclined), call Phase G complete.
+
+Estimated total: 12-15 sessions of ~1 hour each, 
+~3-4 months at 2-3 sessions/week.
+
+### Success criteria for Phase G
+
+- Cutechess gauntlet shows Pyro at 2000+ CCRL
+- Playing against Master-difficulty Pyro feels SCARY 
+  (specifically: tactical surprises, sacrifices, fast mating 
+  attacks)
+- Pyro has a recognizable visual identity and voice
+- At least 3 friends/test users can describe Pyro's 
+  "personality" in their own words after one game
 
 ---
 
@@ -857,6 +1127,10 @@ backend/scripts/generate_selfplay_rust.py:
 
 Phase A complete:   ~1200-1400 ELO (Python Tal)
 Phase B complete:   ~1400-1600 ELO (Rust PST+Tal+TT)
-Phase C.2 complete: ~1600-1700 ELO (+ aspiration/pruning)
-Phase D complete:   ~1800-2000 ELO (+ NNUE v2)
-Phase E complete:   ~2000-2200 ELO (+ MCTS)
+Phase C.2 complete: ~1700-1850 ELO (+ aspiration/pruning/time mgmt)
+Phase G strength:   ~2000-2300 ELO (+ SMP, PVS, SEE, tuned eval)
+Phase D (DEFERRED): ~2200-2600 ELO (+ NNUE v2 if ever revived)
+Phase E (DEFERRED): ~2400-2800 ELO (+ MCTS if ever revived)
+
+Note: 3000+ Elo is NOT a current goal. See "Current Goal" section 
+at top of file.
