@@ -187,7 +187,7 @@ export default function App() {
                 onNewGame={newGame}
                 onResign={resign}
                 onFlip={flipBoard}
-                gameInProgress={status === 'ongoing'}
+                gameInProgress={status === 'ongoing' && history.length > 0}
               />
             </div>
           </div>
