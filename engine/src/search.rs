@@ -2,7 +2,7 @@ use crate::board::Board;
 use crate::movegen::{self, Move, generate_moves, is_in_check, make_move};
 use crate::nnue;
 
-use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
 const INF: i32 = 100_000;
 const CHECKMATE: i32 = 50_000;
@@ -17,13 +17,36 @@ const TT_EXACT: u8 = 0;
 const TT_LOWER: u8 = 1; // score is a lower bound (failed high)
 const TT_UPPER: u8 = 2; // score is an upper bound (failed low)
 
-#[derive(Clone, Copy)]
+/// Atomic storage slot for one TT entry (two independent AtomicU64s).
+///
+/// The pair is NOT updated atomically as a unit. We detect torn reads via an
+/// XOR checksum: hash_xor_data stores (real_hash XOR data). On probe:
+///   reconstructed = hash_xor_data XOR data
+/// If reconstructed == query_hash the entry is intact; otherwise we treat it
+/// as "not present" (covers both hash collisions and torn entries).
+/// This is the standard Lazy SMP TT pattern (Stockfish, Ethereal, Weiss, …).
+#[derive(Default)]
+pub struct TTSlot {
+    hash_xor_data: AtomicU64,
+    data: AtomicU64,
+}
+
+/// Plain TT entry used inside the search. Packed into TTSlot for storage.
+///
+/// Pack layout (64 bits total):
+///   bits  0-31: score    (i32 bit-pattern as u32; full range, no clamping)
+///   bits 32-39: depth    (u8)
+///   bits 40-41: flag     (2 bits: TT_EXACT/LOWER/UPPER)
+///   bits 42-49: gen      (u8, wrapping)
+///   bits 50-56: best_from (7 bits; 64 = no move)
+///   bits 57-63: best_to   (7 bits; 64 = no move)
+#[derive(Clone, Copy, Debug)]
 struct TTEntry {
     hash: u64,
     score: i32,
     depth: u8,
     flag: u8,
-    gen: u8, // iterative deepening generation
+    gen: u8,
     best_from: u8, // 64 = no move
     best_to: u8,
 }
@@ -41,47 +64,101 @@ impl TTEntry {
             None
         }
     }
+
+    fn pack_data(&self) -> u64 {
+        let score_bits = (self.score as u32) as u64;
+        let depth     = self.depth as u64;
+        let flag      = (self.flag & 0x03) as u64;
+        let gen       = self.gen as u64;
+        let best_from = (self.best_from & 0x7F) as u64;
+        let best_to   = (self.best_to   & 0x7F) as u64;
+        score_bits
+            | (depth     << 32)
+            | (flag      << 40)
+            | (gen       << 42)
+            | (best_from << 50)
+            | (best_to   << 57)
+    }
+
+    fn unpack_data(hash: u64, data: u64) -> TTEntry {
+        let score     = (data & 0xFFFF_FFFF) as u32 as i32;
+        let depth     = ((data >> 32) & 0xFF) as u8;
+        let flag      = ((data >> 40) & 0x03) as u8;
+        let gen       = ((data >> 42) & 0xFF) as u8;
+        let best_from = ((data >> 50) & 0x7F) as u8;
+        let best_to   = ((data >> 57) & 0x7F) as u8;
+        TTEntry { hash, score, depth, flag, gen, best_from, best_to }
+    }
 }
 
 pub struct TTable {
-    entries: Vec<TTEntry>,
-    gen: u8, // current generation
+    slots: Vec<TTSlot>,
+    gen: AtomicU8,
 }
 
 impl TTable {
     pub fn new() -> Self {
-        TTable {
-            entries: vec![TTEntry::EMPTY; TT_SIZE],
-            gen: 0,
+        let mut slots = Vec::with_capacity(TT_SIZE);
+        for _ in 0..TT_SIZE {
+            slots.push(TTSlot::default());
         }
+        TTable { slots, gen: AtomicU8::new(0) }
     }
 
-    /// Advance to the next iterative deepening generation.
-    fn next_gen(&mut self) {
-        self.gen = self.gen.wrapping_add(1);
+    pub fn gen(&self) -> u8 {
+        self.gen.load(Ordering::Relaxed)
     }
 
-    /// Probe the TT. Returns the entry only if the hash matches.
-    /// The caller decides whether to trust the score (check entry.gen).
-    fn probe(&self, hash: u64) -> Option<&TTEntry> {
-        let entry = &self.entries[hash as usize & (TT_SIZE - 1)];
-        if entry.hash == hash { Some(entry) } else { None }
+    /// Advance to the next iterative-deepening generation.
+    /// Takes &self so it can be called on a shared reference.
+    pub fn next_gen(&self) {
+        self.gen.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn store(&mut self, hash: u64, depth: u8, score: i32, flag: u8, best: Option<(u8, u8)>) {
-        let idx = hash as usize & (TT_SIZE - 1);
-        let old = &self.entries[idx];
-        // Replace if: empty, current gen with deeper/equal depth, or stale gen
-        if old.hash == 0 || old.gen != self.gen || depth >= old.depth {
-            self.entries[idx] = TTEntry {
-                hash,
-                score,
-                depth,
-                flag,
-                gen: self.gen,
-                best_from: best.map_or(64, |m| m.0),
-                best_to: best.map_or(64, |m| m.1),
+    /// Probe the TT. Returns an owned TTEntry if the hash matches and the
+    /// entry is not torn; None on hash miss, torn read, or empty slot.
+    pub fn probe(&self, hash: u64) -> Option<TTEntry> {
+        let slot = &self.slots[hash as usize & (TT_SIZE - 1)];
+        let stored_xor = slot.hash_xor_data.load(Ordering::Relaxed);
+        let data       = slot.data.load(Ordering::Relaxed);
+        if data == 0 {
+            return None; // empty slot
+        }
+        if (stored_xor ^ data) != hash {
+            return None; // hash miss or torn entry
+        }
+        Some(TTEntry::unpack_data(hash, data))
+    }
+
+    /// Store an entry. Takes &self — atomic writes, no &mut needed.
+    /// Safe to call concurrently (benign races: at worst two threads both
+    /// write; one wins and the other's write is simply overwritten).
+    pub fn store(&self, hash: u64, depth: u8, score: i32, flag: u8, best: Option<(u8, u8)>) {
+        let idx  = hash as usize & (TT_SIZE - 1);
+        let slot = &self.slots[idx];
+        let current_gen = self.gen.load(Ordering::Relaxed);
+
+        let existing_data = slot.data.load(Ordering::Relaxed);
+        let replace = if existing_data == 0 {
+            true // empty slot — always replace
+        } else {
+            let existing_gen   = ((existing_data >> 42) & 0xFF) as u8;
+            let existing_depth = ((existing_data >> 32) & 0xFF) as u8;
+            existing_gen != current_gen || existing_depth <= depth
+        };
+
+        if replace {
+            let (bf, bt) = best.unwrap_or((64, 64));
+            let entry = TTEntry {
+                hash, score, depth, flag, gen: current_gen,
+                best_from: bf, best_to: bt,
             };
+            let new_data = entry.pack_data();
+            let new_xor  = hash ^ new_data;
+            // Write data first; then xor. A reader catching us mid-write sees
+            // mismatched xor → correctly treated as a torn entry.
+            slot.data.store(new_data, Ordering::Relaxed);
+            slot.hash_xor_data.store(new_xor, Ordering::Relaxed);
         }
     }
 }
@@ -689,9 +766,12 @@ fn store_killer(killers: &mut Killers, ply: usize, mv: &Move) {
 // Time / node budget helpers
 // ---------------------------------------------------------------------------
 
-/// Returns true if the search deadline has passed.
+/// Returns true if the stop flag is set or the deadline has passed.
 #[inline]
-fn time_up(deadline: Option<std::time::Instant>) -> bool {
+fn time_up(deadline: Option<std::time::Instant>, stop: &AtomicBool) -> bool {
+    if stop.load(Ordering::Relaxed) {
+        return true;
+    }
     match deadline {
         Some(d) => std::time::Instant::now() >= d,
         None => false,
@@ -703,8 +783,8 @@ fn time_up(deadline: Option<std::time::Instant>) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Search captures only until the position is quiet.
-fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Option<&nnue::Network>, nodes: &Cell<u64>, node_limit: u64, deadline: Option<std::time::Instant>) -> i32 {
-    nodes.set(nodes.get() + 1);
+fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Option<&nnue::Network>, nodes: &AtomicU64, node_limit: u64, deadline: Option<std::time::Instant>, stop: &AtomicBool) -> i32 {
+    nodes.fetch_add(1, Ordering::Relaxed);
 
     let all_moves = generate_moves(board);
 
@@ -755,11 +835,11 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Opt
     });
 
     for mv in &captures {
-        if nodes.get() >= node_limit || time_up(deadline) {
+        if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, stop) {
             break;
         }
         let new_board = make_move(board, mv);
-        let score = -quiescence(&new_board, -beta, -alpha, ply + 1, network, nodes, node_limit, deadline);
+        let score = -quiescence(&new_board, -beta, -alpha, ply + 1, network, nodes, node_limit, deadline, stop);
         if score >= beta {
             return beta;
         }
@@ -779,9 +859,10 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Opt
 pub fn alpha_beta(board: &Board, depth: u32, alpha: i32, beta: i32) -> i32 {
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
     let mut history: History = [[[0i32; 64]; 64]; 2];
-    let nodes = Cell::new(0u64);
-    let mut tt = TTable::new();
-    ab_search(board, depth, alpha, beta, 0, &mut killers, &mut history, None, true, &nodes, u64::MAX, None, &mut tt)
+    let nodes = AtomicU64::new(0);
+    let tt = TTable::new();
+    let stop = AtomicBool::new(false);
+    ab_search(board, depth, alpha, beta, 0, &mut killers, &mut history, None, true, &nodes, u64::MAX, None, &stop, &tt)
 }
 
 /// Recursive alpha-beta with move ordering, killer heuristic, history, NMP, LMR, and TT.
@@ -789,13 +870,14 @@ fn ab_search(
     board: &Board, depth: u32, mut alpha: i32, beta: i32,
     ply: usize, killers: &mut Killers, history: &mut History,
     network: Option<&nnue::Network>,
-    allow_null: bool, nodes: &Cell<u64>, node_limit: u64,
+    allow_null: bool, nodes: &AtomicU64, node_limit: u64,
     deadline: Option<std::time::Instant>,
-    tt: &mut TTable,
+    stop: &AtomicBool,
+    tt: &TTable,
 ) -> i32 {
-    nodes.set(nodes.get() + 1);
+    nodes.fetch_add(1, Ordering::Relaxed);
 
-    if nodes.get() >= node_limit || time_up(deadline) {
+    if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, stop) {
         return if let Some(net) = network {
             let acc = nnue::Accumulator::from_board(net, board);
             net.evaluate(&acc, board.side_to_move)
@@ -805,7 +887,7 @@ fn ab_search(
     }
 
     if depth == 0 {
-        return quiescence(board, alpha, beta, ply, network, nodes, node_limit, deadline);
+        return quiescence(board, alpha, beta, ply, network, nodes, node_limit, deadline, stop);
     }
 
     // --- TT probe ---
@@ -816,7 +898,7 @@ fn ab_search(
         // Always use the best move for ordering (even from older generations)
         tt_move = entry.best_move();
         // Only trust scores from the current generation (same iterative deepening depth)
-        if entry.gen == tt.gen && entry.depth as u32 >= depth {
+        if entry.gen == tt.gen() && entry.depth as u32 >= depth {
             let tt_score = tt_score_probe(entry.score, ply);
             match entry.flag {
                 TT_EXACT => {
@@ -843,7 +925,7 @@ fn ab_search(
     if allow_null && !in_check && depth >= 3 && board.occupied().count_ones() >= 10 {
         let null_board = board.make_null_move();
         let r = 2;
-        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, network, false, nodes, node_limit, deadline, tt);
+        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, network, false, nodes, node_limit, deadline, stop, tt);
         if score >= beta {
             return beta;
         }
@@ -894,7 +976,7 @@ fn ab_search(
     let mut num_quiets = 0usize;
 
     for (move_index, mv) in moves.iter().enumerate() {
-        if nodes.get() >= node_limit || time_up(deadline) {
+        if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, stop) {
             searched_all = false;
             break;
         }
@@ -921,14 +1003,14 @@ fn ab_search(
 
         // --- Late Move Reductions ---
         if depth >= 3 && move_index > 3 && !is_capture && !is_killer && !in_check {
-            let reduced = -ab_search(&new_board, depth - 2, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, tt);
+            let reduced = -ab_search(&new_board, depth - 2, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
             if reduced > alpha {
-                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, tt);
+                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
             } else {
                 score = reduced;
             }
         } else {
-            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, tt);
+            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
         }
 
         if score >= beta {
@@ -994,8 +1076,9 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
     let mut history: History = [[[0i32; 64]; 64]; 2];
-    let nodes = Cell::new(0u64);
-    let mut tt = TTable::new();
+    let nodes = AtomicU64::new(0);
+    let tt = TTable::new();
+    let stop = AtomicBool::new(false);
 
     // Probe TT for root move ordering
     let root_hash = board.zobrist_hash();
@@ -1008,7 +1091,7 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 
     for mv in moves {
         let new_board = make_move(board, &mv);
-        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, &mut history, network, true, &nodes, u64::MAX, None, &mut tt);
+        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, &mut history, network, true, &nodes, u64::MAX, None, &stop, &tt);
         if score > alpha {
             alpha = score;
             best = Some((mv, score));
@@ -1031,16 +1114,17 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
         return None;
     }
 
-    let mut tt = TTable::new();
+    let tt = TTable::new();
     let mut history: History = [[[0i32; 64]; 64]; 2];
     let root_hash = board.zobrist_hash();
     let mut best_overall: Option<(Move, i32, u32)> = None;
     let mut prev_score: Option<i32> = None;
+    let stop = AtomicBool::new(false);
 
     for depth in 1..=MAX_DEPTH as u32 {
         // Soft check: don't start a new iteration if the deadline has
         // already passed. The result from the previous depth stays in best_overall.
-        if time_up(deadline) {
+        if time_up(deadline, &stop) {
             break;
         }
 
@@ -1057,7 +1141,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
         };
 
         // Re-search loop: widen window on fail-low or fail-high.
-        let nodes = Cell::new(0u64);
+        let nodes = AtomicU64::new(0);
         let (iter_best, iter_completed) = loop {
             let mut killers: Killers = [[None; 2]; MAX_DEPTH];
             let mut ordered_moves = moves.clone();
@@ -1076,10 +1160,10 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                 let score = -ab_search(
                     &new_board, depth - 1, -beta, -alpha, 1,
                     &mut killers, &mut history, network, true,
-                    &nodes, node_limit, deadline, &mut tt,
+                    &nodes, node_limit, deadline, &stop, &tt,
                 );
 
-                if (nodes.get() >= node_limit || time_up(deadline)) && best.is_none() {
+                if (nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop)) && best.is_none() {
                     completed = false;
                     break;
                 }
@@ -1097,7 +1181,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                     best = Some((mv.clone(), score));
                 }
 
-                if nodes.get() >= node_limit || time_up(deadline) {
+                if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop) {
                     break;
                 }
             }
