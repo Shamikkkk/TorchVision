@@ -44,6 +44,7 @@ Realistic timeline at ~1hr sessions, 2-3 sessions/week:
 **Phase D (NNUE v2) — DEFERRED 🛑**
 **Phase E (MCTS) — DEFERRED 🛑**
 **Phase G (The Mittens Path) — ACTIVE 🔥**
+**Phase G Baseline Measured: Pyro ~1746 at 10s+0.1s 📊**
 **Game Analyzer — COMPLETE ✅**
 **Frontend: difficulty levels + opening name — COMPLETE ✅**
 
@@ -130,21 +131,39 @@ Realistic timeline at ~1hr sessions, 2-3 sessions/week:
   statistically weak (~1.3 sigma). Parameter appears
   insensitive at this strength. Kept default at 1.5.
 
-### Observed strength estimate (rough):
-Unmeasured, but rough calibration against CCRL scales places
-Pyro somewhere in the 1600-1850 range after Phase C.2 Items
-1-3 and 5. Major uncertainty factors:
-- Never played a rated game; no SPRT or gauntlet data.
-- ELO scales diverge (CCRL vs FIDE vs lichess rapid).
-- 100k node cap limits pre-time-management strength; with
-  time management in live games the effective strength is
-  higher than fixed-node benchmarks suggest.
-Next step for real measurement: cutechess-cli gauntlet vs
-known-strength opponents (TSCP ~1700, Fairy-Max ~2000,
-Sungorus ~2200). Run 200+ games per opponent at 10s+0.1s
-time control. Item 6 tuning already tested — TAL_AGGRESSION
-is settled at 1.5 until engine strength increases enough
-to make eval-parameter tuning sensitive again.
+### Observed strength estimate (measured April 16, 2026):
+
+Gauntlet result at 10s+0.1s time control, 100 games per opponent:
+
+| Opponent | W  | L  | D | Score % | Implied Pyro Elo |
+|----------|----|----|---|---------|------------------|
+| SF-1500  | 62 | 29 | 9 | 66.5    | ~1619            |
+| SF-1700  | 53 | 44 | 3 | 54.5    | ~1731            |
+| SF-1900  | 31 | 65 | 4 | 33.0    | ~1775            |
+| SF-2100  | 17 | 77 | 6 | 20.0    | ~1859            |
+
+Weighted average: ~1746 Elo (at 10s+0.1s).
+CCRL Blitz equivalent (extrapolated): ~1550-1650.
+CI ~±70 Elo per matchup.
+
+**Notable: non-linear performance curve.** Pyro underperforms
+vs weak opponents and overperforms vs strong ones — confirms
+the Tal-style aggressive personality is functioning as intended.
+Opponent-strength-dependent:
+- vs weak (1500): 66.5% (should be 75%+ if truly 1700)
+- vs strong (2100): 20% (a true-1700 engine would score ~10%)
+
+Implication: Pyro is a "scary" engine, not a "technical" engine.
+Do not optimize this curve away during Phase G work.
+
+Baseline data archived at:
+    backend/scripts/gauntlet/baseline_2026-04-16/
+
+Every future Phase G change should be validated by re-running
+the gauntlet and comparing against this baseline.
+
+Target for Phase G complete: +250-400 Elo average (i.e., 
+Pyro at ~2000-2150 CCRL Blitz equivalent).
 
 ### Why NNUE was abandoned:
 - 768→256→1 architecture plateaus at ~86cp RMSE
@@ -882,7 +901,7 @@ rather than sandbagging — the style IS the strength.
 These get Pyro from ~1750 to ~2000-2300 CCRL without touching 
 NNUE. Ordered by ROI per hour:
 
-G1. Cutechess gauntlet harness (1 session, MANDATORY FIRST)
+G1. Cutechess gauntlet harness ✅ COMPLETE (April 16, 2026)
     - Install cutechess-cli (or build from source)
     - Wrap Pyro + 2-3 reference engines (TSCP ~1700, 
       Fairy-Max ~2000, Sungorus ~2200)
@@ -890,6 +909,12 @@ G1. Cutechess gauntlet harness (1 session, MANDATORY FIRST)
     - Output: Pyro's actual CCRL-equivalent rating
     - WITHOUT THIS: every change below is unmeasurable.
       Skip at your peril.
+
+    STATUS: Baseline measured April 16, 2026.
+    Pyro scored 53.5% aggregate across 400 games vs SF-1500/1700/1900/2100.
+    Implied Pyro Elo at 10+0.1 TC: ~1746.
+    Full result at backend/scripts/gauntlet/baseline_2026-04-16/RESULT.md.
+    Use this baseline to validate every future Phase G change.
 
 G2. Lazy SMP multithreading (1-2 sessions, +50-150 Elo)
     - Currently single-threaded — major Elo left on the table

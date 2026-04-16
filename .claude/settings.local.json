@@ -34,7 +34,18 @@
       "Bash(python3 -c ':*)",
       "Bash(where python:*)",
       "Bash(grep -oP '\\\\.\\\\w+$')",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(\"/c/Users/shami/Downloads/stockfish-windows-x86-64-avx2/stockfish/stockfish-windows-x86-64-avx2.exe\")",
+      "Bash(where cutechess-cli *)",
+      "Read(//c//**)",
+      "Read(//c/tools/**)",
+      "Bash(unzip -o cutechess.zip)",
+      "Bash(cp /c/tools/cutechess/cutechess-1.3.1-win64/cutechess-cli.exe /c/tools/cutechess/cutechess-cli.exe)",
+      "Bash(/c/tools/cutechess/cutechess-cli.exe --version)",
+      "Bash(./cutechess-cli.exe --version)",
+      "Bash(./cutechess-cli.exe -engine name=SF-strong cmd=C:/Users/shami/Downloads/stockfish-windows-x86-64-avx2/stockfish/stockfish-windows-x86-64-avx2.exe -engine name=SF-weak cmd=C:/Users/shami/Downloads/stockfish-windows-x86-64-avx2/stockfish/stockfish-windows-x86-64-avx2.exe option.UCI_LimitStrength=true option.UCI_Elo=1500 -each proto=uci tc=10+0.1 -rounds 1 -games 1)",
+      "Bash(chmod +x *)",
+      "Bash(./cutechess-cli.exe -engine name=Pyro cmd=C:/Users/shami/OneDrive/Documents/torch/engine/target/release/pyro.exe arg=--no-nnue -engine name=SF-1700 cmd=C:/Users/shami/Downloads/stockfish-windows-x86-64-avx2/stockfish/stockfish-windows-x86-64-avx2.exe option.UCI_LimitStrength=true option.UCI_Elo=1700 -each proto=uci tc=10+0.1 -rounds 5 -games 2 -repeat -recover)"
     ]
   }
 }
