@@ -44,7 +44,8 @@ Realistic timeline at ~1hr sessions, 2-3 sessions/week:
 **Phase D (NNUE v2) — DEFERRED 🛑**
 **Phase E (MCTS) — DEFERRED 🛑**
 **Phase G (The Mittens Path) — ACTIVE 🔥**
-**Phase G Baseline Measured: Pyro ~1746 at 10s+0.1s 📊**
+**Phase G baseline measured: ~1746 Elo at 10s+0.1s 📊**
+**Phase G progress: G1 done, G2 session 1/2 done ⚙️**
 **Game Analyzer — COMPLETE ✅**
 **Frontend: difficulty levels + opening name — COMPLETE ✅**
 
@@ -916,7 +917,23 @@ G1. Cutechess gauntlet harness ✅ COMPLETE (April 16, 2026)
     Full result at backend/scripts/gauntlet/baseline_2026-04-16/RESULT.md.
     Use this baseline to validate every future Phase G change.
 
-G2. Lazy SMP multithreading (1-2 sessions, +50-150 Elo)
+G2. Lazy SMP multithreading (2 sessions, +50-150 Elo)
+    Session 1 of 2 ✅ COMPLETE (April 16, 2026)
+
+    Session 1 delivered the data-structure refactor: TTable is now
+    thread-safe (Vec<TTSlot> with paired AtomicU64s, XOR-checksum
+    torn-entry detection, &self methods), node counter is AtomicU64,
+    stop flag (AtomicBool) is plumbed through ab_search/quiescence.
+    Engine is still single-threaded and plays identically to before
+    (all 4 smoke tests match pre-refactor output, 38/38 unit tests
+    pass). Session 2 will wrap TTable in Arc, spawn N worker threads,
+    add UCI Threads option, and re-run gauntlet for validation.
+
+    Expected impact: +50-150 Elo on 4-8 core hardware. Validation
+    plan: run 100-game gauntlet vs SF-1700 and SF-1900 with Threads=4
+    and compare against April 16 baseline (Pyro scored 54.5% vs
+    SF-1700 and 33.0% vs SF-1900 at single-threaded).
+
     - Currently single-threaded — major Elo left on the table
     - Standard approach: N threads share the TT, each runs an 
       independent search at slightly different depths
