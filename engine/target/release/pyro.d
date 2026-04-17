@@ -1,0 +1,1 @@
+C:\Users\shami\OneDrive\Documents\torch\engine\target\release\pyro.exe: C:\Users\shami\OneDrive\Documents\torch\engine\src\board.rs C:\Users\shami\OneDrive\Documents\torch\engine\src\main.rs C:\Users\shami\OneDrive\Documents\torch\engine\src\movegen.rs C:\Users\shami\OneDrive\Documents\torch\engine\src\nnue.rs C:\Users\shami\OneDrive\Documents\torch\engine\src\search.rs
