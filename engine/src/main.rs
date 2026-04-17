@@ -11,6 +11,7 @@ use std::io::{self, BufRead, Write};
 struct Engine {
     position: Board,
     network: Option<Network>,
+    num_threads: usize,
 }
 
 impl Engine {
@@ -29,6 +30,7 @@ impl Engine {
         Engine {
             position: Board::startpos(),
             network,
+            num_threads: 1,
         }
     }
 
@@ -67,6 +69,7 @@ fn main() {
             "uci" => {
                 println!("id name Pyro 0.1");
                 println!("id author Shamik");
+                println!("option name Threads type spin default 1 min 1 max 128");
                 println!("uciok");
                 io::stdout().flush().ok();
             }
@@ -89,13 +92,13 @@ fn main() {
                         let deadline = std::time::Instant::now() + duration;
                         best_move_nodes(
                             &engine.position, u64::MAX, Some(deadline),
-                            engine.network.as_ref(),
+                            engine.network.as_ref(), engine.num_threads,
                         )
                     } else if let Some(node_limit) = parse_go_nodes(&tokens) {
                         // Node-limited (existing behaviour).
                         best_move_nodes(
                             &engine.position, node_limit, None,
-                            engine.network.as_ref(),
+                            engine.network.as_ref(), engine.num_threads,
                         )
                     } else {
                         // Fixed depth (existing behaviour).
@@ -111,6 +114,19 @@ fn main() {
                     println!("bestmove (none)");
                 }
                 io::stdout().flush().ok();
+            }
+            "setoption" => {
+                // setoption name <Name> value <Value>
+                if tokens.len() >= 5 && tokens[1] == "name" && tokens[3] == "value" {
+                    match tokens[2].to_lowercase().as_str() {
+                        "threads" => {
+                            if let Ok(n) = tokens[4].parse::<usize>() {
+                                engine.num_threads = n.clamp(1, 128);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
             "quit" => {
                 break;

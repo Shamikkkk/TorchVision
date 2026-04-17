@@ -1101,11 +1101,69 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
     best
 }
 
+/// Worker thread for Lazy SMP. Runs a simplified iterative-deepening
+/// loop with no aspiration windows, warming the shared TTable.
+/// Exits when `stop` is set to true by the main thread.
+fn smp_worker(
+    board: &Board,
+    tt: &TTable,
+    stop: &AtomicBool,
+    deadline: Option<std::time::Instant>,
+    node_limit: u64,
+    network: Option<&nnue::Network>,
+    thread_id: usize,
+) {
+    let mut killers: Killers = [[None; 2]; MAX_DEPTH];
+    let mut history: History = [[[0i32; 64]; 64]; 2];
+    let nodes = AtomicU64::new(0);
+    let moves = generate_moves(board);
+    if moves.is_empty() {
+        return;
+    }
+
+    // Each worker starts at a slightly different depth to ensure
+    // diverse TT entries. Odd workers start at depth 2, even at 1.
+    let start_depth: u32 = if thread_id % 2 == 0 { 1 } else { 2 };
+
+    for depth in start_depth..=MAX_DEPTH as u32 {
+        if stop.load(Ordering::Relaxed) || time_up(deadline, stop) {
+            break;
+        }
+
+        let mut alpha = -INF;
+        let beta = INF;
+        killers = [[None; 2]; MAX_DEPTH];
+
+        let root_hash = board.zobrist_hash();
+        let tt_move = tt.probe(root_hash).and_then(|e| e.best_move());
+        let mut ordered_moves = moves.clone();
+        order_moves(board, &mut ordered_moves, &killers, 0, tt_move, &history);
+
+        for mv in &ordered_moves {
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
+            let new_board = make_move(board, mv);
+            let score = -ab_search(
+                &new_board, depth - 1, -beta, -alpha, 1,
+                &mut killers, &mut history, network, true,
+                &nodes, node_limit, deadline, stop, tt,
+            );
+            if score > alpha {
+                alpha = score;
+            }
+            if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, stop) {
+                break;
+            }
+        }
+    }
+}
+
 /// Iterative deepening search with a node limit and aspiration windows.
 /// Increases depth until the node budget is exhausted.
 /// Returns the best move + score from the last completed depth.
 /// TT persists across depths for move ordering benefit.
-pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::time::Instant>, network: Option<&nnue::Network>) -> Option<(Move, i32, u32)> {
+pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::time::Instant>, network: Option<&nnue::Network>, num_threads: usize) -> Option<(Move, i32, u32)> {
     const ASPIRATION_DELTA: i32 = 50;
     const MATE_THRESHOLD: i32 = CHECKMATE - 1000;
 
@@ -1115,119 +1173,141 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
     }
 
     let tt = TTable::new();
-    let mut history: History = [[[0i32; 64]; 64]; 2];
-    let root_hash = board.zobrist_hash();
-    let mut best_overall: Option<(Move, i32, u32)> = None;
-    let mut prev_score: Option<i32> = None;
     let stop = AtomicBool::new(false);
+    let mut best_overall: Option<(Move, i32, u32)> = None;
 
-    for depth in 1..=MAX_DEPTH as u32 {
-        // Soft check: don't start a new iteration if the deadline has
-        // already passed. The result from the previous depth stays in best_overall.
-        if time_up(deadline, &stop) {
-            break;
+    // thread::scope lets workers borrow board, tt, stop, network from
+    // this stack frame without requiring 'static lifetimes.
+    std::thread::scope(|s| {
+        // Spawn N-1 worker threads that warm the TT with independent
+        // searches at slightly offset depths. They don't return moves.
+        // Take explicit shared refs so only &-ptrs (Copy) are moved into
+        // each closure — avoids moving TTable/AtomicBool out of the frame.
+        let tt_ref   = &tt;
+        let stop_ref = &stop;
+        let num_workers = num_threads.saturating_sub(1);
+        for thread_id in 1..=num_workers {
+            s.spawn(move || {
+                smp_worker(board, tt_ref, stop_ref, deadline, node_limit, network, thread_id);
+            });
         }
 
-        tt.next_gen();
+        // ---- Main thread: full aspiration-window ID loop ----
+        let mut history: History = [[[0i32; 64]; 64]; 2];
+        let root_hash = board.zobrist_hash();
+        let mut prev_score: Option<i32> = None;
 
-        // Decide aspiration window for this iteration.
-        // Depth 1 or after a mate score: use full window.
-        // Otherwise: center on previous score with +/- DELTA.
-        let (mut alpha_init, mut beta_init) = match prev_score {
-            Some(s) if depth > 1 && s.abs() < MATE_THRESHOLD => {
-                (s - ASPIRATION_DELTA, s + ASPIRATION_DELTA)
-            }
-            _ => (-INF, INF),
-        };
-
-        // Re-search loop: widen window on fail-low or fail-high.
-        let nodes = AtomicU64::new(0);
-        let (iter_best, iter_completed) = loop {
-            let mut killers: Killers = [[None; 2]; MAX_DEPTH];
-            let mut ordered_moves = moves.clone();
-
-            let tt_move = tt.probe(root_hash).and_then(|e| e.best_move());
-            order_moves(board, &mut ordered_moves, &killers, 0, tt_move, &history);
-
-            let mut best: Option<(Move, i32)> = None;
-            let mut alpha = alpha_init;
-            let beta = beta_init;
-            let mut completed = true;
-            let mut fail_high = false;
-
-            for mv in &ordered_moves {
-                let new_board = make_move(board, mv);
-                let score = -ab_search(
-                    &new_board, depth - 1, -beta, -alpha, 1,
-                    &mut killers, &mut history, network, true,
-                    &nodes, node_limit, deadline, &stop, &tt,
-                );
-
-                if (nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop)) && best.is_none() {
-                    completed = false;
-                    break;
-                }
-
-                // Fail-high at root: score == beta under fail-hard.
-                // Record the move, break, and re-search with wider beta.
-                if score >= beta {
-                    best = Some((mv.clone(), score));
-                    fail_high = true;
-                    break;
-                }
-
-                if score > alpha {
-                    alpha = score;
-                    best = Some((mv.clone(), score));
-                }
-
-                if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop) {
-                    break;
-                }
+        for depth in 1..=MAX_DEPTH as u32 {
+            // Soft check: don't start a new iteration if the deadline has
+            // already passed. The result from the previous depth stays in best_overall.
+            if time_up(deadline, &stop) {
+                break;
             }
 
-            // Node budget exhausted mid-iteration — bail out of re-search loop.
-            if !completed {
-                break (best, false);
-            }
+            tt.next_gen();
 
-            // Fail-high: widen beta to INF and re-search.
-            if fail_high && beta_init < INF {
-                beta_init = INF;
-                continue;
-            }
-
-            // Fail-low: no move exceeded alpha_init. Widen alpha to -INF and re-search.
-            // Detected by: best is None OR best's score equals alpha_init (didn't improve).
-            let failed_low = match &best {
-                None => alpha_init > -INF,
-                Some((_, s)) => *s <= alpha_init && alpha_init > -INF,
+            // Decide aspiration window for this iteration.
+            // Depth 1 or after a mate score: use full window.
+            // Otherwise: center on previous score with +/- DELTA.
+            let (mut alpha_init, mut beta_init) = match prev_score {
+                Some(s) if depth > 1 && s.abs() < MATE_THRESHOLD => {
+                    (s - ASPIRATION_DELTA, s + ASPIRATION_DELTA)
+                }
+                _ => (-INF, INF),
             };
-            if failed_low {
-                alpha_init = -INF;
-                continue;
-            }
 
-            // Clean completion within the window.
-            break (best, true);
-        };
+            // Re-search loop: widen window on fail-low or fail-high.
+            let nodes = AtomicU64::new(0);
+            let (iter_best, iter_completed) = loop {
+                let mut killers: Killers = [[None; 2]; MAX_DEPTH];
+                let mut ordered_moves = moves.clone();
 
-        if iter_completed {
-            if let Some((mv, score)) = iter_best {
-                best_overall = Some((mv, score, depth));
-                prev_score = Some(score);
-            }
-        } else {
-            // Budget exhausted mid-iteration. Only commit if we have no prior
-            // result at all (otherwise keep the last fully-searched depth).
-            if best_overall.is_none() {
+                let tt_move = tt.probe(root_hash).and_then(|e| e.best_move());
+                order_moves(board, &mut ordered_moves, &killers, 0, tt_move, &history);
+
+                let mut best: Option<(Move, i32)> = None;
+                let mut alpha = alpha_init;
+                let beta = beta_init;
+                let mut completed = true;
+                let mut fail_high = false;
+
+                for mv in &ordered_moves {
+                    let new_board = make_move(board, mv);
+                    let score = -ab_search(
+                        &new_board, depth - 1, -beta, -alpha, 1,
+                        &mut killers, &mut history, network, true,
+                        &nodes, node_limit, deadline, &stop, &tt,
+                    );
+
+                    if (nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop)) && best.is_none() {
+                        completed = false;
+                        break;
+                    }
+
+                    // Fail-high at root: score == beta under fail-hard.
+                    // Record the move, break, and re-search with wider beta.
+                    if score >= beta {
+                        best = Some((mv.clone(), score));
+                        fail_high = true;
+                        break;
+                    }
+
+                    if score > alpha {
+                        alpha = score;
+                        best = Some((mv.clone(), score));
+                    }
+
+                    if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop) {
+                        break;
+                    }
+                }
+
+                // Node budget exhausted mid-iteration — bail out of re-search loop.
+                if !completed {
+                    break (best, false);
+                }
+
+                // Fail-high: widen beta to INF and re-search.
+                if fail_high && beta_init < INF {
+                    beta_init = INF;
+                    continue;
+                }
+
+                // Fail-low: no move exceeded alpha_init. Widen alpha to -INF and re-search.
+                // Detected by: best is None OR best's score equals alpha_init (didn't improve).
+                let failed_low = match &best {
+                    None => alpha_init > -INF,
+                    Some((_, s)) => *s <= alpha_init && alpha_init > -INF,
+                };
+                if failed_low {
+                    alpha_init = -INF;
+                    continue;
+                }
+
+                // Clean completion within the window.
+                break (best, true);
+            };
+
+            if iter_completed {
                 if let Some((mv, score)) = iter_best {
                     best_overall = Some((mv, score, depth));
+                    prev_score = Some(score);
                 }
+            } else {
+                // Budget exhausted mid-iteration. Only commit if we have no prior
+                // result at all (otherwise keep the last fully-searched depth).
+                if best_overall.is_none() {
+                    if let Some((mv, score)) = iter_best {
+                        best_overall = Some((mv, score, depth));
+                    }
+                }
+                break;
             }
-            break;
         }
-    }
+
+        // Signal workers to stop. The scope join point below waits for them.
+        stop.store(true, Ordering::Relaxed);
+    });
 
     best_overall
 }

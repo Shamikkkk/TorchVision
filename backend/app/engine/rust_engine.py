@@ -37,6 +37,7 @@ class RustEngine:
         )
         self._send("uci")
         self._wait_for("uciok")
+        self._send("setoption name Threads value 4")
         self._send("isready")
         self._wait_for("readyok")
         logger.info("Rust engine loaded (nodes=%d): %s", NODE_LIMIT, os.path.abspath(path))
