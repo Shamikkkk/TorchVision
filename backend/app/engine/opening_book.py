@@ -16,6 +16,7 @@ from pathlib import Path
 import chess
 import chess.pgn
 
+logging.getLogger("chess.pgn").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
 # backend/data/ relative to this file (app/engine/ → app/ → backend/)
