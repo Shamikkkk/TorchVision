@@ -47,7 +47,7 @@ Realistic timeline at ~1hr sessions, 2-3 sessions/week:
 **Phase E (MCTS) — DEFERRED 🛑**
 **Phase G (The Mittens Path) — ACTIVE 🔥**
 **Phase G baseline measured: ~1746 Elo at 10s+0.1s 📊**
-**Phase G progress: G1 done, G2 session 1/2 done, G7/G12/G16 done ⚙️**
+**Phase G progress: G1-G3, G5, G7, G10, G12-G13, G16-G17 done. G8 reverted. ⚙️**
 **Game Analyzer — COMPLETE ✅**
 **Frontend: difficulty levels + opening name — COMPLETE ✅**
 
@@ -82,6 +82,14 @@ Realistic timeline at ~1hr sessions, 2-3 sessions/week:
 - Frontend: 🔥 Pyro persona on engine's player row, tagline,
   orange flame header, "You vs 🔥 Pyro" subtitle
 - Difficulty levels renamed: Sleeping / Playful / Awake / Hunting / Feral
+- PVS (Principal Variation Search) — move 0 gets full window,
+  subsequent moves get null window with re-search on fail-high
+- Singular extensions — TT move extended +1 ply when no
+  alternative reaches within 50cp at half depth (depth >= 6)
+- Opening book cache — 31 GM PGN files parsed once, cached as
+  pickle, subsequent startups instant
+- Game-over modal — dramatic dark overlay with Pyro's taunt,
+  fade-in animation, fire-themed rematch button
 
 ### Observed strength estimate (measured April 16, 2026):
 
@@ -106,6 +114,12 @@ Implication: Pyro is a "scary" engine, not a "technical" engine.
 Do not optimize this curve away during Phase G work.
 
 Baseline data archived at: backend/scripts/gauntlet/baseline_2026-04-16/
+
+Post-PVS gauntlet (April 19, 2026, G8 reverted):
+vs SF-1700: 53.5% (51W/44L/5D) — flat vs baseline
+vs SF-1900: 38.0% (37W/61L/2D) — up from 33.0% (+35 Elo)
+Implied Pyro Elo: ~1770 (was ~1746, +24 Elo gain).
+G8 killer-instinct caused -95 Elo regression and was reverted.
 
 Target for Phase G complete: +250-400 Elo average (i.e., 
 Pyro at ~2000-2150 CCRL Blitz equivalent).
@@ -366,8 +380,11 @@ LOG_LEVEL=DEBUG
 6. Play a test game — Pyro should show 🔥 persona, mood
    selector, and opening name. At Feral difficulty, engine
    thinks ~10s per move on a 5-min clock.
-7. Active track: Phase G (The Mittens Path). See Phase G
-   section for full item list and recommended ordering.
+7. Phase G progress: G1-G3, G5, G7, G10, G12-G13, G16-G17 done.
+   G8 reverted. Remaining: G4 (SEE), G6 (SPSA), G9 (sacrifice-
+   seeking), G11 (anti-quiet), G15 (visual cues). Next high-
+   impact items: G4 (SEE, +50-100 Elo) or fix G8 with capped
+   additive approach.
 8. For historical context on completed work, see HISTORY.md.
 
 ---
@@ -403,7 +420,7 @@ G2. Lazy SMP multithreading (2 sessions, +50-150 Elo)
     Expected impact: +50-150 Elo on 4-8 core hardware.
     Validation plan: 100-game gauntlet vs SF-1700 and SF-1900 with Threads=4.
 
-G3. Principal Variation Search (PVS) (1 session, +30-60 Elo)
+G3. Principal Variation Search ✅ COMPLETE
     - Refactor ab_search: first move searched with full window, subsequent
       moves with null window, re-search only on fail-high
     - Synergizes with aspiration windows already in place
@@ -413,7 +430,7 @@ G4. Better move ordering (1-2 sessions, +50-100 Elo)
     - Counter-move heuristic: move that often refutes opponent's last move
     - Continuation history: history scores per (prev_move, curr_move) pair
 
-G5. Singular extensions (1 session, +30-60 Elo)
+G5. Singular extensions ✅ COMPLETE
     - When a TT move is much better than alternatives at reduced depth,
       extend its search by 1 ply
     - Particularly powerful for forcing tactical sequences
@@ -431,7 +448,7 @@ Some of these REDUCE pure-Elo strength but increase the
 G7. Crank TAL_AGGRESSION to 2.5 ✅ COMPLETE (April 18, 2026)
     Source changed in engine/src/search.rs. Rebuild after current gauntlet finishes.
 
-G8. Killer-instinct bonus (1 session)
+G8. Killer-instinct bonus ❌ REVERTED (caused -95 Elo regression; commented out, needs capped additive approach)
     - When opponent's king is exposed, MULTIPLY king-attack scores by 1.5-2x
     - Implementation in evaluate.rs: detect "king exposure" metric, scale king_attack term
 
@@ -439,7 +456,7 @@ G9. Sacrifice-seeking in search (1 session)
     - Add "speculation bonus" to move ordering that slightly prefers SEE-negative captures
     - Gate on: opponent king exposed, attacking material present near opponent king
 
-G10. Aggressive opening book (1 session)
+G10. Aggressive opening book ✅ COMPLETE (31 GMs, tactical double-weighted)
     - Whitelist: King's Gambit, Smith-Morra, Latvian Gambit, Albin Counter-Gambit,
       Vienna Game, Evans Gambit, Danish Gambit, Scotch Gambit, Halloween Gambit
     - Filter existing openings.ts OR build a new sharp-only book
@@ -479,7 +496,7 @@ G16. Difficulty rebrand ✅ COMPLETE (April 18, 2026)
     - Label updated in frontend/src/components/Controls.tsx
     - Section header renamed to "Pyro's Mood"
 
-G17. Game-over screens (1 session)
+G17. Game-over screens ✅ COMPLETE
     - Player loss: dramatic dim transition, slow text reveal of victory message
     - Player win: grudging acknowledgment, Pyro avatar dims
     - Draw: Pyro is annoyed ("Acceptable. Barely.")

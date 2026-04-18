@@ -232,6 +232,7 @@ export default function App() {
             moveCount={history.length}
             onRematch={newGame}
             onMenu={newGame}
+            pyroSays={pyroSays}
           />
         </>
       )}
