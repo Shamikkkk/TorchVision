@@ -9,7 +9,9 @@ The book is loaded once at module import so lookup is a pure dict hit.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import pickle
 import random
 from pathlib import Path
 
@@ -21,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 # backend/data/ relative to this file (app/engine/ → app/ → backend/)
 _DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+_CACHE_FILE = _DATA_DIR / "opening_book_cache.pkl"
 
 _PGN_FILES = [
     "Alekhine.pgn", "Anderssen.pgn", "Aronian.pgn", "Bronstein.pgn",
@@ -68,7 +71,32 @@ class OpeningBook:
         parts = board.fen().split()
         return " ".join(parts[:4])
 
+    def _cache_key(self) -> str:
+        """Hash of the PGN file list + modification times."""
+        h = hashlib.md5()
+        for name in sorted(_PGN_FILES_WEIGHTED):
+            path = _DATA_DIR / name
+            if path.exists():
+                h.update(name.encode())
+                h.update(str(path.stat().st_mtime).encode())
+        return h.hexdigest()
+
     def _load(self) -> None:
+        cache_key = self._cache_key()
+        if _CACHE_FILE.exists():
+            try:
+                with open(_CACHE_FILE, "rb") as f:
+                    cached = pickle.load(f)
+                if cached.get("key") == cache_key:
+                    self._book = cached["book"]
+                    logger.info(
+                        "Opening book loaded from cache — %d positions",
+                        len(self._book),
+                    )
+                    return
+            except Exception:
+                pass  # cache corrupt or stale, rebuild
+
         positions = 0
         total_moves = 0
         unique_files: set[str] = set()
@@ -103,6 +131,13 @@ class OpeningBook:
             "Opening book ready — %d positions, %d moves from %d PGN files (%d tactical double-weighted)",
             positions, total_moves, len(unique_files), len(_TACTICAL_PLAYERS),
         )
+
+        try:
+            with open(_CACHE_FILE, "wb") as f:
+                pickle.dump({"key": cache_key, "book": self._book}, f)
+            logger.info("Opening book cache saved to %s", _CACHE_FILE)
+        except Exception as exc:
+            logger.warning("Could not save opening book cache: %s", exc)
 
     # ------------------------------------------------------------------
     # Public interface

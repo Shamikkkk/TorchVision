@@ -967,6 +967,47 @@ fn ab_search(
         }
     }
 
+    // --- Singular Extension ---
+    // If the TT move is significantly better than all alternatives (tested
+    // by a reduced-depth search excluding it), extend its search by 1 ply.
+    let mut singular_extension: i32 = 0;
+    if let Some(tt_mv) = tt_move {
+        if let Some(entry) = tt.probe(hash) {
+            let tt_score_raw = tt_score_probe(entry.score, ply);
+            if entry.depth as u32 + 3 >= depth
+                && depth >= 6
+                && tt_score_raw.abs() < CHECKMATE - 1000
+                && entry.flag != TT_UPPER
+            {
+                let se_beta = tt_score_raw - 50;
+                let se_depth = depth / 2;
+                let se_moves = generate_moves(board);
+                let mut se_best = -INF;
+                'se: for mv in &se_moves {
+                    if mv.from_sq == tt_mv.0 && mv.to_sq == tt_mv.1 {
+                        continue;
+                    }
+                    let new_board = make_move(board, mv);
+                    let se_score = -ab_search(
+                        &new_board, se_depth.saturating_sub(1), -se_beta, -se_beta + 1,
+                        ply + 1, killers, history, network, false,
+                        nodes, node_limit, deadline, stop, tt,
+                    );
+                    if se_score >= se_beta {
+                        se_best = se_score;
+                        break 'se;
+                    }
+                    if se_score > se_best {
+                        se_best = se_score;
+                    }
+                }
+                if se_best < se_beta {
+                    singular_extension = 1;
+                }
+            }
+        }
+    }
+
     let mut moves = generate_moves(board);
 
     if moves.is_empty() {
@@ -1038,8 +1079,8 @@ fn ab_search(
         let score;
 
         if move_index == 0 {
-            // PV move: always search with full window and full depth.
-            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
+            // PV move: full window + full depth, plus singular extension if applicable.
+            score = -ab_search(&new_board, depth - 1 + singular_extension as u32, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
         } else {
             // Non-PV moves: null window first (cheap probe), re-search on fail-high.
             let null_score;
