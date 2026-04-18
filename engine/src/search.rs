@@ -362,7 +362,7 @@ const EG_KING_TABLE: [i32; 64] = [
 // Tal-style bonuses
 // ---------------------------------------------------------------------------
 
-const TAL_AGGRESSION: f32 = 1.5;
+const TAL_AGGRESSION: f32 = 2.5;
 
 /// File mask: all 8 squares on a given file (0=a .. 7=h).
 const fn file_mask(file: u8) -> u64 {

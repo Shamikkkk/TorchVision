@@ -9,11 +9,11 @@ type Props = {
 }
 
 const LEVELS: { id: Difficulty; label: string; sub: string }[] = [
-  { id: 'beginner',     label: 'Beginner',     sub: '0.1s/move' },
-  { id: 'intermediate', label: 'Intermediate', sub: '0.5s/move' },
-  { id: 'advanced',     label: 'Advanced',     sub: '2s/move'   },
-  { id: 'expert',       label: 'Expert',       sub: '5s/move'   },
-  { id: 'master',       label: 'Master',       sub: 'full clock'},
+  { id: 'beginner',     label: '😴 Sleeping', sub: '0.1s' },
+  { id: 'intermediate', label: '😺 Playful',  sub: '0.5s' },
+  { id: 'advanced',     label: '🔥 Awake',    sub: '2s'   },
+  { id: 'expert',       label: '🗡️ Hunting',  sub: '5s'   },
+  { id: 'master',       label: '💀 Feral',    sub: 'full' },
 ]
 
 const STORAGE_KEY = 'pyro.difficulty'
@@ -40,7 +40,7 @@ export function Controls({ onNewGame, onResign, onFlip, gameInProgress }: Props)
       {/* Difficulty picker */}
       <div className="space-y-1.5">
         <div className="text-xs uppercase tracking-wider text-zinc-500">
-          Difficulty
+          Pyro's Mood
         </div>
         <div className="grid grid-cols-1 gap-1">
           {LEVELS.map(level => {
