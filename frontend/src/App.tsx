@@ -79,6 +79,7 @@ export default function App() {
     boardFlipped,
     humanColor,
     materialAdv,
+    pyroSays,
     newGame,
     resign,
     flipBoard,
@@ -157,6 +158,13 @@ export default function App() {
                 side={topCaptures}
                 isEngine={topColor === engineColor}
               />
+              {topColor === engineColor && pyroSays && (
+                <div className="h-5 flex items-center -mt-0.5">
+                  <span className="text-orange-400/80 text-xs italic animate-pulse">
+                    &ldquo;{pyroSays}&rdquo;
+                  </span>
+                </div>
+              )}
 
               {clockStarted && (
                 <Clock
@@ -185,6 +193,13 @@ export default function App() {
                 side={bottomCaptures}
                 isEngine={bottomColor === engineColor}
               />
+              {bottomColor === engineColor && pyroSays && (
+                <div className="h-5 flex items-center -mt-0.5">
+                  <span className="text-orange-400/80 text-xs italic animate-pulse">
+                    &ldquo;{pyroSays}&rdquo;
+                  </span>
+                </div>
+              )}
 
               <div className="h-7 flex items-center justify-center">
                 {openingName && (

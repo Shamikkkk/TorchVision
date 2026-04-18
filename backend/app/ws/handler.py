@@ -57,6 +57,67 @@ def _difficulty_movetime(d: str) -> int | None:
     return _MOVETIME.get(d, None)
 
 
+# ---------------------------------------------------------------------------
+# Taunt lines
+# ---------------------------------------------------------------------------
+
+_TAUNT_BRILLIANT = [
+    "Did you see that coming?",
+    "I wouldn't have seen that either.",
+    "You're welcome for the lesson.",
+    "That one's going in the highlight reel.",
+]
+
+_TAUNT_BLUNDER = [
+    "I was hoping you'd play that.",
+    "Are you sure about that?",
+    "Interesting choice.",
+    "That's... one way to play it.",
+]
+
+_TAUNT_MATE_COUNTDOWN: dict[int, str] = {
+    3: "Three.",
+    2: "Two.",
+    1: "One.",
+}
+
+_TAUNT_GAME_START = [
+    "Try not to disappoint me.",
+    "Let's see what you've got.",
+    "I'll try to make this quick.",
+]
+
+_TAUNT_WIN = [
+    "Better luck next time.",
+    "Don't feel bad. I'm very good.",
+    "GG. (I'm being generous.)",
+]
+
+_TAUNT_LOSE = [
+    "...you earned that one.",
+    "I'll remember this.",
+    "Rematch. Now.",
+]
+
+_TAUNT_DRAW = [
+    "Acceptable. Barely.",
+    "I'll let you have this one.",
+    "A draw? How boring.",
+]
+
+
+async def _game_over_taunt(websocket: WebSocket, board: _chess.Board, human_color: str) -> None:
+    if board.is_checkmate():
+        loser = "w" if board.turn == _chess.WHITE else "b"
+        if loser == human_color:
+            text = random.choice(_TAUNT_WIN)
+        else:
+            text = random.choice(_TAUNT_LOSE)
+    else:
+        text = random.choice(_TAUNT_DRAW)
+    await manager.send(websocket, {"type": "pyro_says", "text": text})
+
+
 async def ws_game_endpoint(websocket: WebSocket) -> None:
     await manager.connect(websocket)
     board = new_board()
@@ -69,6 +130,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
     tick_task: asyncio.Task | None = None  # type: ignore[type-arg]
     human_color: str = random.choice(["w", "b"])
     current_difficulty: str = "master"
+    last_taunt_ply: int = 0
 
     async def run_clock() -> None:
         nonlocal white_ms, black_ms, game_over
@@ -107,6 +169,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
             engine_uci = await suggest_move(board.fen(), engine, wtime_ms=white_ms, btime_ms=black_ms)
         _, board = apply_move(board, engine_uci)
         await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
+        await manager.send(websocket, {"type": "pyro_says", "text": random.choice(_TAUNT_GAME_START)})
 
     try:
         while True:
@@ -130,6 +193,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                 black_ms = CLOCK_MS
                 clock_started = False
                 tick_task = None
+                last_taunt_ply = 0
                 human_color = random.choice(["w", "b"])
                 await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
                 # Engine plays first if human is black
@@ -141,6 +205,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                         engine_uci = await suggest_move(board.fen(), engine, wtime_ms=white_ms, btime_ms=black_ms)
                     _, board = apply_move(board, engine_uci)
                     await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
+                    await manager.send(websocket, {"type": "pyro_says", "text": random.choice(_TAUNT_GAME_START)})
                 continue
 
             if msg_type == "resign" and not board.is_game_over() and not resigned:
@@ -175,6 +240,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                     if tick_task and not tick_task.done():
                         tick_task.cancel()
                     await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
+                    await _game_over_taunt(websocket, board, human_color)
                     continue
 
                 # Send state immediately so the frontend sees the human's move
@@ -254,6 +320,16 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                         "symbol": symbol,
                     })
 
+                    # Blunder taunt (rate-limited)
+                    if cp_loss > 200:
+                        current_ply = len(board.move_stack)
+                        if current_ply - last_taunt_ply >= 4:
+                            await manager.send(websocket, {
+                                "type": "pyro_says",
+                                "text": random.choice(_TAUNT_BLUNDER),
+                            })
+                            last_taunt_ply = current_ply
+
                     ok_engine, board = apply_move(board, engine_uci)
                     if not ok_engine:
                         logger.error(
@@ -268,6 +344,27 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                             tick_task.cancel()
 
                     await manager.send(websocket, _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color))
+
+                    # Post-engine-move taunts
+                    if board.is_game_over():
+                        await _game_over_taunt(websocket, board, human_color)
+                    elif eval_after is not None and isinstance(eval_after, (int, float)):
+                        mate_dist = 50000 - abs(int(eval_after))
+                        if abs(int(eval_after)) > 49990 and mate_dist in _TAUNT_MATE_COUNTDOWN:
+                            # Mate countdown bypasses rate limiter
+                            await manager.send(websocket, {
+                                "type": "pyro_says",
+                                "text": _TAUNT_MATE_COUNTDOWN[mate_dist],
+                            })
+                        elif eval_after > 300:
+                            # Brilliant move taunt (rate-limited)
+                            current_ply = len(board.move_stack)
+                            if current_ply - last_taunt_ply >= 4:
+                                await manager.send(websocket, {
+                                    "type": "pyro_says",
+                                    "text": random.choice(_TAUNT_BRILLIANT),
+                                })
+                                last_taunt_ply = current_ply
 
                 except Exception:
                     logger.exception(

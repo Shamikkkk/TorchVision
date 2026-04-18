@@ -107,6 +107,8 @@ export function useGameSocket(): ExtendedGameState {
   const [evalMove, setEvalMove] = useState<string | null>(null)
   const [bestWas, setBestWas] = useState<BestWasMessage | null>(null)
   const [moveSymbols, setMoveSymbols] = useState<Record<number, string>>({})
+  const [pyroSays, setPyroSays] = useState<string | null>(null)
+  const pyroSaysTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const historyLenRef = useRef(0)
 
   const evalAbortRef = useRef<AbortController | null>(null)
@@ -170,6 +172,11 @@ export function useGameSocket(): ExtendedGameState {
           }
         }
       }
+      if (msg.type === 'pyro_says') {
+        if (pyroSaysTimerRef.current) clearTimeout(pyroSaysTimerRef.current)
+        setPyroSays(msg.text)
+        pyroSaysTimerRef.current = setTimeout(() => setPyroSays(null), 4000)
+      }
     },
     [fetchEval],
   )
@@ -190,6 +197,7 @@ export function useGameSocket(): ExtendedGameState {
     setEvalMove(null)
     setBestWas(null)
     setMoveSymbols({})
+    setPyroSays(null)
     wsRef.current?.send({ type: 'new_game', difficulty })
   }, [])
 
@@ -215,6 +223,7 @@ export function useGameSocket(): ExtendedGameState {
     evalMove,
     bestWas,
     moveSymbols,
+    pyroSays,
     makeMove,
     newGame,
     resign,

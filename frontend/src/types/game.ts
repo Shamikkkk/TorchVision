@@ -36,7 +36,12 @@ export interface BestWasMessage {
   symbol: string
 }
 
-export type ServerMessage = StateMessage | TickMessage | ErrorMessage | BestWasMessage
+export interface PyroSaysMessage {
+  type: 'pyro_says'
+  text: string
+}
+
+export type ServerMessage = StateMessage | TickMessage | ErrorMessage | BestWasMessage | PyroSaysMessage
 
 export interface MovePayload {
   type: 'move'
@@ -82,6 +87,7 @@ export interface GameState {
   evalMove: string | null
   bestWas: BestWasMessage | null
   moveSymbols: Record<number, string>
+  pyroSays: string | null
   makeMove: (uci: string) => void
   newGame: (difficulty?: Difficulty) => void
   resign: () => void
