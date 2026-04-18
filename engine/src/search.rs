@@ -434,6 +434,39 @@ fn tal_bonuses(board: &Board) -> i32 {
         bonus -= b_attack_sum * b_attackers;
     }
 
+    // --- Killer-Instinct: double the attack bonus when opponent king is exposed ---
+    // Exposed = fewer than 2 shield pawns on the two ranks in front of the king,
+    // OR king has walked to the center (ranks 3-6, indices 2-5).
+    let bk_file_i = (bk_sq % 8) as i32;
+    let bk_rank   = bk_sq / 8;
+    let mut bk_shield = 0i32;
+    for f in (bk_file_i - 1).max(0)..=(bk_file_i + 1).min(7) {
+        for &r in &[5u8, 6u8] {  // ranks 6-7: black's pawn shield
+            if board.black_pawns & (1u64 << (r * 8 + f as u8)) != 0 {
+                bk_shield += 1;
+            }
+        }
+    }
+    let bk_exposed = bk_shield <= 1 || (bk_rank >= 2 && bk_rank <= 5);
+    if bk_exposed && w_attackers >= 2 {
+        bonus += w_attack_sum * w_attackers;
+    }
+
+    let wk_file_i = (wk_sq % 8) as i32;
+    let wk_rank   = wk_sq / 8;
+    let mut wk_shield = 0i32;
+    for f in (wk_file_i - 1).max(0)..=(wk_file_i + 1).min(7) {
+        for &r in &[1u8, 2u8] {  // ranks 2-3: white's pawn shield
+            if board.white_pawns & (1u64 << (r * 8 + f as u8)) != 0 {
+                wk_shield += 1;
+            }
+        }
+    }
+    let wk_exposed = wk_shield <= 1 || (wk_rank >= 2 && wk_rank <= 5);
+    if wk_exposed && b_attackers >= 2 {
+        bonus -= b_attack_sum * b_attackers;
+    }
+
     // --- Pawn storm: pawns on rank 5/6 near enemy king file ---
     let bk_file = bk_sq % 8;
     let mut wp = board.white_pawns;
@@ -1001,16 +1034,27 @@ fn ab_search(
 
         let score;
 
-        // --- Late Move Reductions ---
-        if depth >= 3 && move_index > 3 && !is_capture && !is_killer && !in_check {
-            let reduced = -ab_search(&new_board, depth - 2, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
-            if reduced > alpha {
+        if move_index == 0 {
+            // PV move: always search with full window and full depth.
+            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
+        } else {
+            // Non-PV moves: null window first (cheap probe), re-search on fail-high.
+            let null_score;
+
+            // --- Late Move Reductions (applied on top of null window) ---
+            if depth >= 3 && move_index > 3 && !is_capture && !is_killer && !in_check {
+                null_score = -ab_search(&new_board, depth - 2, -alpha - 1, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
+            } else {
+                null_score = -ab_search(&new_board, depth - 1, -alpha - 1, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
+            }
+
+            // Fail-high on null window: this move might be genuinely better.
+            // Re-search at full depth + full window to get the real score.
+            if null_score > alpha && null_score < beta {
                 score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
             } else {
-                score = reduced;
+                score = null_score;
             }
-        } else {
-            score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
         }
 
         if score >= beta {

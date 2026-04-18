@@ -47,7 +47,8 @@
       "Bash(chmod +x *)",
       "Bash(./cutechess-cli.exe -engine name=Pyro cmd=C:/Users/shami/OneDrive/Documents/torch/engine/target/release/pyro.exe arg=--no-nnue -engine name=SF-1700 cmd=C:/Users/shami/Downloads/stockfish-windows-x86-64-avx2/stockfish/stockfish-windows-x86-64-avx2.exe option.UCI_LimitStrength=true option.UCI_Elo=1700 -each proto=uci tc=10+0.1 -rounds 5 -games 2 -repeat -recover)",
       "Bash(rustc --version)",
-      "Bash(powershell *)"
+      "Bash(powershell *)",
+      "Bash(wmic process *)"
     ]
   }
 }
