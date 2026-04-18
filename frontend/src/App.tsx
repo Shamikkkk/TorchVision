@@ -21,26 +21,40 @@ function PlayerRow({
   captured,
   materialAdv,
   side,
+  isEngine,
 }: {
   color: 'white' | 'black'
   captured: import('./types/game').CapturedPieces
   materialAdv: { white: number; black: number }
   side: 'white' | 'black'
+  isEngine: boolean
 }) {
   return (
-    <div className="flex items-center justify-between h-7">
+    <div className="flex items-center justify-between h-8">
       <div className="flex items-center gap-2">
-        <span
-          className={[
-            'w-3.5 h-3.5 rounded-full border shrink-0',
-            color === 'white'
-              ? 'bg-zinc-100 border-zinc-400'
-              : 'bg-zinc-900 border-zinc-500',
-          ].join(' ')}
-        />
-        <span className="text-sm font-semibold text-white">
-          {color === 'white' ? 'White' : 'Black'}
-        </span>
+        {isEngine ? (
+          <>
+            <span className="text-xl leading-none">🔥</span>
+            <span className="font-bold text-orange-400 tracking-wide text-sm">PYRO</span>
+            <span className="text-zinc-600 text-xs italic hidden sm:inline">
+              burns brightest when you're losing
+            </span>
+          </>
+        ) : (
+          <>
+            <span
+              className={[
+                'w-3.5 h-3.5 rounded-full border shrink-0',
+                color === 'white'
+                  ? 'bg-zinc-100 border-zinc-400'
+                  : 'bg-zinc-900 border-zinc-500',
+              ].join(' ')}
+            />
+            <span className="text-sm font-semibold text-zinc-300">
+              {color === 'white' ? 'White' : 'Black'}
+            </span>
+          </>
+        )}
       </div>
       <CapturedPiecesRow captured={captured} materialAdv={materialAdv} side={side} />
     </div>
@@ -87,18 +101,21 @@ export default function App() {
   const bottomColor: 'white' | 'black' = bottomSide === 'w' ? 'white' : 'black'
   const topCaptures: 'white' | 'black' = topSide === 'b' ? 'white' : 'black'
   const bottomCaptures: 'white' | 'black' = bottomSide === 'w' ? 'black' : 'white'
+  const engineColor: 'white' | 'black' = humanColor === 'w' ? 'black' : 'white'
 
   return (
     <div className="min-h-screen bg-zinc-900 text-white flex flex-col items-center p-6 gap-4">
       {/* Header: title + tab switcher */}
       <div className="flex flex-col items-center gap-3">
         <div className="flex items-center gap-3">
-          <p className="text-zinc-500 text-xs font-semibold uppercase tracking-widest select-none">
-            ♟ Pyro Chess
+          <p className="flex items-center gap-1.5 select-none">
+            <span className="text-orange-500 text-lg leading-none">🔥</span>
+            <span className="text-orange-400 text-xs font-bold uppercase tracking-widest">PYRO</span>
+            <span className="text-zinc-500 text-xs font-semibold uppercase tracking-widest">CHESS</span>
           </p>
           {activeTab === 'play' && (
             <span className="text-zinc-600 text-xs select-none">
-              Playing as {humanColor === 'w' ? 'White' : 'Black'}
+              You vs <span className="text-orange-400">🔥 Pyro</span>
             </span>
           )}
         </div>
@@ -138,13 +155,14 @@ export default function App() {
                 captured={capturedPieces}
                 materialAdv={materialAdv}
                 side={topCaptures}
+                isEngine={topColor === engineColor}
               />
 
               {clockStarted && (
                 <Clock
                   ms={topMs}
                   active={turn !== bottomSide}
-                  label={topColor === 'black' ? 'Black' : 'White'}
+                  label={topColor === engineColor ? 'Pyro' : (topColor === 'white' ? 'White' : 'Black')}
                 />
               )}
 
@@ -156,7 +174,7 @@ export default function App() {
                 <Clock
                   ms={bottomMs}
                   active={turn === bottomSide}
-                  label={bottomColor === 'white' ? 'White' : 'Black'}
+                  label={bottomColor === engineColor ? 'Pyro' : (bottomColor === 'white' ? 'White' : 'Black')}
                 />
               )}
 
@@ -165,6 +183,7 @@ export default function App() {
                 captured={capturedPieces}
                 materialAdv={materialAdv}
                 side={bottomCaptures}
+                isEngine={bottomColor === engineColor}
               />
 
               <div className="h-7 flex items-center justify-center">
