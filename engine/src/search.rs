@@ -434,14 +434,16 @@ fn tal_bonuses(board: &Board) -> i32 {
         bonus -= b_attack_sum * b_attackers;
     }
 
-    // --- Killer-Instinct: double the attack bonus when opponent king is exposed ---
-    // Exposed = fewer than 2 shield pawns on the two ranks in front of the king,
-    // OR king has walked to the center (ranks 3-6, indices 2-5).
+    /* G8 killer-instinct: REVERTED — bonus magnitude too large at TAL=2.5.
+       When bk_exposed fired with 2+ attackers, the doubled w_attack_sum*w_attackers
+       term stacked with TAL_AGGRESSION=2.5 could produce 400-800cp from king attack
+       alone, causing unsound material sacrifices. Revisit with capped/scaled bonus.
+
     let bk_file_i = (bk_sq % 8) as i32;
     let bk_rank   = bk_sq / 8;
     let mut bk_shield = 0i32;
     for f in (bk_file_i - 1).max(0)..=(bk_file_i + 1).min(7) {
-        for &r in &[5u8, 6u8] {  // ranks 6-7: black's pawn shield
+        for &r in &[5u8, 6u8] {
             if board.black_pawns & (1u64 << (r * 8 + f as u8)) != 0 {
                 bk_shield += 1;
             }
@@ -456,7 +458,7 @@ fn tal_bonuses(board: &Board) -> i32 {
     let wk_rank   = wk_sq / 8;
     let mut wk_shield = 0i32;
     for f in (wk_file_i - 1).max(0)..=(wk_file_i + 1).min(7) {
-        for &r in &[1u8, 2u8] {  // ranks 2-3: white's pawn shield
+        for &r in &[1u8, 2u8] {
             if board.white_pawns & (1u64 << (r * 8 + f as u8)) != 0 {
                 wk_shield += 1;
             }
@@ -466,6 +468,7 @@ fn tal_bonuses(board: &Board) -> i32 {
     if wk_exposed && b_attackers >= 2 {
         bonus -= b_attack_sum * b_attackers;
     }
+    */
 
     // --- Pawn storm: pawns on rank 5/6 near enemy king file ---
     let bk_file = bk_sq % 8;
