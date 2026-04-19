@@ -922,10 +922,10 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Opt
         alpha = stand_pat;
     }
 
-    // Collect and order captures by MVV-LVA
+    // Collect and order captures by MVV-LVA; prune SEE-negative captures
     let mut captures: Vec<Move> = all_moves
         .into_iter()
-        .filter(|m| m.flags & movegen::FLAG_CAPTURE != 0)
+        .filter(|m| m.flags & movegen::FLAG_CAPTURE != 0 && see(board, m) >= 0)
         .collect();
     captures.sort_unstable_by(|a, b| {
         let sa = {
