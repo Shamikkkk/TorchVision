@@ -134,11 +134,11 @@ fn sliding_attacks(sq: u8, occupied: u64, dirs: &[(i8, i8)]) -> u64 {
     attacks
 }
 
-fn bishop_attacks(sq: u8, occupied: u64) -> u64 {
+pub(crate) fn bishop_attacks(sq: u8, occupied: u64) -> u64 {
     sliding_attacks(sq, occupied, &BISHOP_DIRS)
 }
 
-fn rook_attacks(sq: u8, occupied: u64) -> u64 {
+pub(crate) fn rook_attacks(sq: u8, occupied: u64) -> u64 {
     sliding_attacks(sq, occupied, &ROOK_DIRS)
 }
 
@@ -199,6 +199,39 @@ pub fn is_square_attacked(board: &Board, sq: u8, by_white: bool) -> bool {
     false
 }
 
+/// Returns a bitboard of ALL pieces (both colors) attacking `sq` given the
+/// provided `occupied` mask. As SEE removes pieces from `occupied` each ply,
+/// sliding rays automatically discover X-ray attackers behind removed pieces.
+pub(crate) fn attackers_to(board: &Board, sq: u8, occupied: u64) -> u64 {
+    let sq_idx = sq as usize;
+    let sq_bb = 1u64 << sq;
+    let mut att = 0u64;
+
+    // Knights
+    att |= KNIGHT_ATTACKS[sq_idx] & (board.white_knights | board.black_knights) & occupied;
+
+    // Kings
+    att |= KING_ATTACKS[sq_idx] & (board.white_kings | board.black_kings) & occupied;
+
+    // White pawns: a white pawn at sq-7 or sq-9 attacks sq (mirrors is_square_attacked logic)
+    att |= (((sq_bb >> 7) & !FILE_A) | ((sq_bb >> 9) & !FILE_H)) & board.white_pawns & occupied;
+
+    // Black pawns: a black pawn at sq+7 or sq+9 attacks sq
+    att |= (((sq_bb << 7) & !FILE_H) | ((sq_bb << 9) & !FILE_A)) & board.black_pawns & occupied;
+
+    // Bishops + Queens (diagonal), using updated occupied for X-ray
+    let diag = (board.white_bishops | board.black_bishops
+              | board.white_queens  | board.black_queens) & occupied;
+    att |= bishop_attacks(sq, occupied) & diag;
+
+    // Rooks + Queens (orthogonal)
+    let orth = (board.white_rooks | board.black_rooks
+              | board.white_queens | board.black_queens) & occupied;
+    att |= rook_attacks(sq, occupied) & orth;
+
+    att
+}
+
 /// Returns true if the side to move is in check.
 pub fn is_in_check(board: &Board) -> bool {
     let is_white = board.side_to_move;
@@ -224,7 +257,7 @@ fn pop_lsb(bb: &mut u64) -> u8 {
 // Make move (apply a move to a board copy, for legality testing)
 // ---------------------------------------------------------------------------
 
-fn piece_type_at(board: &Board, sq: u8, is_white: bool) -> u8 {
+pub(crate) fn piece_type_at(board: &Board, sq: u8, is_white: bool) -> u8 {
     let bit = 1u64 << sq;
     if is_white {
         if board.white_pawns & bit != 0 { return PAWN; }
