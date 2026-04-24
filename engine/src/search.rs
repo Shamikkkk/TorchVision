@@ -720,84 +720,6 @@ fn update_history(history: &mut History, side: bool, from: u8, to: u8, bonus: i3
 }
 
 // ---------------------------------------------------------------------------
-// Static Exchange Evaluation
-// ---------------------------------------------------------------------------
-
-/// Find the square and piece type of the least valuable piece in `attackers`
-/// for the given side. `attackers` must be non-zero.
-fn least_valuable_attacker(board: &Board, attackers: u64, white: bool) -> (u8, u8) {
-    let bbs: [u64; 6] = if white {
-        [board.white_pawns, board.white_knights, board.white_bishops,
-         board.white_rooks, board.white_queens, board.white_kings]
-    } else {
-        [board.black_pawns, board.black_knights, board.black_bishops,
-         board.black_rooks, board.black_queens, board.black_kings]
-    };
-    for (piece_type, &bb) in bbs.iter().enumerate() {
-        let overlap = attackers & bb;
-        if overlap != 0 {
-            return (overlap.trailing_zeros() as u8, piece_type as u8);
-        }
-    }
-    (0, movegen::KING) // unreachable if attackers is non-zero
-}
-
-/// Static Exchange Evaluation. Returns the material balance of the capture
-/// sequence starting with `mv` (positive = mover wins material).
-/// En passant returns 0 (roughly even pawn trade, not worth the complexity).
-fn see(board: &Board, mv: &Move) -> i32 {
-    if mv.flags & movegen::FLAG_CAPTURE == 0 { return 0; }
-    if mv.flags & movegen::FLAG_EN_PASSANT != 0 { return 0; }
-
-    const SEE_VAL: [i32; 6] = [100, 320, 330, 500, 900, 20_000];
-
-    let target_sq = mv.to_sq;
-    let stm = board.side_to_move;
-
-    let victim_type   = movegen::piece_type_at(board, target_sq, !stm);
-    let attacker_type = movegen::piece_type_at(board, mv.from_sq, stm);
-
-    let mut gains = [0i32; 32];
-    gains[0] = SEE_VAL[victim_type as usize];
-
-    let mut occupied = board.occupied();
-    occupied ^= 1u64 << mv.from_sq; // initial attacker has left its square
-
-    let mut side = !stm;             // whose turn to recapture
-    let mut last_val = SEE_VAL[attacker_type as usize];
-    let mut d = 1usize;
-
-    loop {
-        if d >= 32 { break; }
-
-        let all_att = movegen::attackers_to(board, target_sq, occupied);
-        let side_att = all_att & (if side { board.white_pieces() } else { board.black_pieces() }) & occupied;
-        if side_att == 0 { break; }
-
-        let (lva_sq, lva_type) = least_valuable_attacker(board, side_att, side);
-        if lva_sq >= 64 { break; } // safety: attacker set had no matching piece bitboard
-        gains[d] = last_val - gains[d - 1];
-
-        // Alpha-beta pruning on the exchange tree
-        if std::cmp::max(-gains[d - 1], gains[d]) < 0 { break; }
-
-        occupied ^= 1u64 << lva_sq;
-        last_val = SEE_VAL[lva_type as usize];
-        side = !side;
-        d += 1;
-    }
-
-    // Negamax backwards through gains
-    let mut i = d - 1;
-    while i > 0 {
-        gains[i - 1] = -std::cmp::max(-gains[i - 1], gains[i]);
-        i -= 1;
-    }
-
-    gains[0]
-}
-
-// ---------------------------------------------------------------------------
 // Move ordering
 // ---------------------------------------------------------------------------
 
@@ -834,8 +756,8 @@ fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize, tt_move: 
             piece_val_on(board, mv.to_sq, !board.side_to_move)
         };
         let attacker = piece_val_on(board, mv.from_sq, board.side_to_move);
-        // SEE-negative captures go below killers; SEE-positive above
-        if see(board, mv) < 0 {
+        // Losing captures (heuristic: attacker worth much more than victim) go below killers
+        if victim < attacker - 200 {
             return 3_000 + victim - attacker / 10;
         }
         return 10_000 + victim - attacker / 10;
@@ -926,7 +848,7 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Opt
     // Collect and order captures by MVV-LVA; prune SEE-negative captures
     let mut captures: Vec<Move> = all_moves
         .into_iter()
-        .filter(|m| m.flags & movegen::FLAG_CAPTURE != 0 && see(board, m) >= 0)
+        .filter(|m| m.flags & movegen::FLAG_CAPTURE != 0)
         .collect();
     captures.sort_unstable_by(|a, b| {
         let sa = {
@@ -1004,6 +926,12 @@ fn ab_search(
         return quiescence(board, alpha, beta, ply, network, nodes, node_limit, deadline, stop);
     }
 
+    // Hard ply cap: prevents stack overflow from unlimited check extensions
+    // in perpetual-check positions. Any position at this depth is quiesced.
+    if ply >= 2 * MAX_DEPTH {
+        return quiescence(board, alpha, beta, ply, network, nodes, node_limit, deadline, stop);
+    }
+
     // --- TT probe ---
     let hash = board.zobrist_hash();
     let mut tt_move: Option<(u8, u8)> = None;
@@ -1033,7 +961,8 @@ fn ab_search(
     // When the side to move is in check, extend search by 1 ply.
     // This catches forced tactical sequences that would otherwise fall
     // off the horizon. Extension bumps depth but not ply.
-    let depth = if in_check { depth + 1 } else { depth };
+    // Capped at ply < MAX_DEPTH to prevent unbounded extension in check chains.
+    let depth = if in_check && ply < MAX_DEPTH { depth + 1 } else { depth };
 
     // --- Null Move Pruning ---
     if allow_null && !in_check && depth >= 3 && board.occupied().count_ones() >= 10 {
