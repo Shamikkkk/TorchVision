@@ -46,8 +46,8 @@ Realistic timeline at ~1hr sessions, 2-3 sessions/week:
 **Phase D (NNUE v2) — DEFERRED 🛑**
 **Phase E (MCTS) — DEFERRED 🛑**
 **Phase G (The Mittens Path) — ACTIVE 🔥**
-**Phase G baseline measured: ~1746 Elo at 10s+0.1s 📊**
-**Phase G progress: G1-G3, G5, G7, G10, G12-G13, G16-G17 done. G8 reverted. ⚙️**
+**Phase G progress: ~1770+ Elo (measured Apr 19). SEE gauntlet pending.**
+G1-G5, G7, G10, G12-G13, G16-G17 done. G8 reverted. G4 (SEE) re-added after ply-cap fix.
 **Game Analyzer — COMPLETE ✅**
 **Frontend: difficulty levels + opening name — COMPLETE ✅**
 
@@ -59,8 +59,14 @@ Realistic timeline at ~1hr sessions, 2-3 sessions/week:
 - NMP + LMR + killers + quiescence
 - Transposition table (Zobrist hashing, 1M entries)
 - History heuristic (gravity formula, malus for searched quiets)
-- Losing capture ordering (QxP searched after killers)
+- SEE (Static Exchange Evaluation) — captures scored by full
+  exchange simulation; SEE-negative captures deprioritized below
+  killers in move ordering and pruned entirely in quiescence search.
+  Gains +1 search depth at same node budget (depth 9 → 10 at 100k).
 - Fool's Mate fix (quiescence checkmate before stand-pat)
+- Check extension ply cap — hard cap at ply >= 2*MAX_DEPTH prevents
+  stack overflow from perpetual-check infinite recursion. Extension
+  guard also stops new extensions after ply >= MAX_DEPTH.
 - Mate distance preference (faster mates scored higher)
 - Aspiration windows (±50cp, widen on fail-low/fail-high, full
   window at depth 1 and after mate scores)
@@ -120,6 +126,11 @@ vs SF-1700: 53.5% (51W/44L/5D) — flat vs baseline
 vs SF-1900: 38.0% (37W/61L/2D) — up from 33.0% (+35 Elo)
 Implied Pyro Elo: ~1770 (was ~1746, +24 Elo gain).
 G8 killer-instinct caused -95 Elo regression and was reverted.
+
+Post-SEE gauntlet (April 25, 2026, ply-cap fix applied):
+Running overnight — 100 games each vs SF-1700 and SF-1900.
+Check see_clean_gauntlet.log for results.
+Expected: 0 disconnects, 60%+ vs SF-1700, 42%+ vs SF-1900.
 
 Target for Phase G complete: +250-400 Elo average (i.e., 
 Pyro at ~2000-2150 CCRL Blitz equivalent).
@@ -380,11 +391,12 @@ LOG_LEVEL=DEBUG
 6. Play a test game — Pyro should show 🔥 persona, mood
    selector, and opening name. At Feral difficulty, engine
    thinks ~10s per move on a 5-min clock.
-7. Phase G progress: G1-G3, G5, G7, G10, G12-G13, G16-G17 done.
-   G8 reverted. Remaining: G4 (SEE), G6 (SPSA), G9 (sacrifice-
-   seeking), G11 (anti-quiet), G15 (visual cues). Next high-
-   impact items: G4 (SEE, +50-100 Elo) or fix G8 with capped
-   additive approach.
+7. Phase G progress: G1-G5, G7, G10, G12-G13, G16-G17 done.
+   G8 reverted (caused -95 Elo). Check extension ply cap fixed.
+   Remaining strength items: G8 redo (capped additive), G6 (SPSA).
+   Remaining style items: G9, G11, G15.
+   Major pending: UI redesign to match Obsidian Ember design spec
+   (uploaded design-spec/ — estimated 5 sessions).
 8. For historical context on completed work, see HISTORY.md.
 
 ---
@@ -425,15 +437,25 @@ G3. Principal Variation Search ✅ COMPLETE
       moves with null window, re-search only on fail-high
     - Synergizes with aspiration windows already in place
 
-G4. Better move ordering (1-2 sessions, +50-100 Elo)
-    - SEE (Static Exchange Evaluation) for capture ordering — replace MVV-LVA
-    - Counter-move heuristic: move that often refutes opponent's last move
-    - Continuation history: history scores per (prev_move, curr_move) pair
+G4. SEE (Static Exchange Evaluation) ✅ COMPLETE (April 25, 2026)
+    Full exchange simulation (see() + least_valuable_attacker() + 
+    attackers_to()). Wired into score_move (losing capture ordering)
+    and quiescence (SEE-negative prune). +1 depth at same node budget.
+    Disconnects in initial gauntlet were caused by check extension
+    stack overflow (ply cap fix), not SEE itself.
 
 G5. Singular extensions ✅ COMPLETE
     - When a TT move is much better than alternatives at reduced depth,
       extend its search by 1 ply
     - Particularly powerful for forcing tactical sequences
+
+**Bug fix: Check extension stack overflow (April 25, 2026)**
+    Unbounded check extension caused infinite recursion in perpetual-
+    check positions → stack overflow → process crash. Fixed with two
+    guards: hard ply cap (ply >= 2*MAX_DEPTH → drop to qsearch) and
+    extension guard (no new extensions after ply >= MAX_DEPTH). This
+    bug existed since Phase C.2 and was the real cause of all gauntlet
+    disconnects (25-42% crash rate), not SEE.
 
 G6. SPSA tuning of all eval parameters (1 session setup + overnight runs, +50-100 Elo)
     - Tune every magic number in tal_bonuses via SPSA
@@ -501,27 +523,36 @@ G17. Game-over screens ✅ COMPLETE
     - Player win: grudging acknowledgment, Pyro avatar dims
     - Draw: Pyro is annoyed ("Acceptable. Barely.")
 
-### Recommended session ordering
+### Phase G — remaining priorities (in order):
 
-Next up (G2 session 2 + G3):
-- G2 session 2: Arc<TTable>, spawn threads, UCI Threads option, gauntlet validation
-- G3: PVS
+1. **UI Redesign (Obsidian Ember)** — 5-session project
+   Design spec uploaded to design-spec/. Lobby screen, redesigned
+   Play screen (attack glow, threat meter, engine telemetry),
+   cinematic game-over, post-mortem analyze screen. Requires:
+   Google Fonts (Instrument Serif, JetBrains Mono), routing,
+   backend king_attack_cp in WebSocket payload.
 
-Then style + strength alternating:
-- G8: Killer-instinct bonus
-- G4: SEE + counter-move + continuation history
-- G13: Taunting messages
-- G14: Theatrical timing
-- G9: Sacrifice-seeking + G10: Aggressive opening book
+2. **G8 redo** — capped additive king-exposure bonus
+   Original G8 doubled the quadratic attack term → -95 Elo.
+   New approach: add min(50cp, attack/2) when king exposed,
+   instead of multiplying. Expected: +20-40 Elo if detection
+   is correct and bonus is conservative.
 
-Polish + tune:
-- G15: Visual cues during attacks
-- G17: Game-over screens
-- G6: SPSA tuning (run overnight)
-- G5: Singular extensions
-- G11: Anti-quiet penalty (only if not aggressive enough)
+3. **G6 (SPSA tuning)** — automated parameter optimization
+   Requires infrastructure: perturbation framework, fitness
+   function (game score), hundreds of iterations. 2-3 session
+   project. Targets: TAL_AGGRESSION, futility margins, LMR
+   thresholds, aspiration delta, NMP reduction.
 
-Final session: ship it.
+4. **G9 (Sacrifice-seeking)** — search bonus for material-down
+   positions with compensation (development lead, king exposure).
+   Style item, may cost Elo.
+
+5. **G11 (Anti-quiet)** — penalize positions where nothing is
+   happening. Style item, may cost Elo.
+
+6. **G15 (Visual attack cues)** — red glow on board when Pyro's
+   eval is very high. Included in UI redesign spec.
 
 Estimated total: 12-15 sessions of ~1 hour each, ~3-4 months at 2-3 sessions/week.
 
