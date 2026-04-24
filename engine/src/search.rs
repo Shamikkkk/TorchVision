@@ -775,6 +775,7 @@ fn see(board: &Board, mv: &Move) -> i32 {
         if side_att == 0 { break; }
 
         let (lva_sq, lva_type) = least_valuable_attacker(board, side_att, side);
+        if lva_sq >= 64 { break; } // safety: attacker set had no matching piece bitboard
         gains[d] = last_val - gains[d - 1];
 
         // Alpha-beta pruning on the exchange tree

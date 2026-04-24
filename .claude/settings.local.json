@@ -50,7 +50,10 @@
       "Bash(powershell *)",
       "Bash(wmic process *)",
       "Bash(taskkill *)",
-      "Bash(./cutechess-cli.exe -engine name=Pyro-noG8 cmd=C:/Users/shami/OneDrive/Documents/torch/engine/target/release/pyro.exe arg=--no-nnue option.Threads=4 -engine name=SF-1700 cmd=C:/Users/shami/Downloads/stockfish-windows-x86-64-avx2/stockfish/stockfish-windows-x86-64-avx2.exe option.UCI_LimitStrength=true option.UCI_Elo=1700 -each proto=uci tc=10+0.1 -rounds 10 -games 2 -repeat -recover)"
+      "Bash(./cutechess-cli.exe -engine name=Pyro-noG8 cmd=C:/Users/shami/OneDrive/Documents/torch/engine/target/release/pyro.exe arg=--no-nnue option.Threads=4 -engine name=SF-1700 cmd=C:/Users/shami/Downloads/stockfish-windows-x86-64-avx2/stockfish/stockfish-windows-x86-64-avx2.exe option.UCI_LimitStrength=true option.UCI_Elo=1700 -each proto=uci tc=10+0.1 -rounds 10 -games 2 -repeat -recover)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(grep -o '[0-9]\\\\+\\\\. [^ ]* {[^}]*, [A-Za-z]* disconnects}' /c/Users/shami/OneDrive/Documents/torch/backend/scripts/gauntlet/results/pyro_see_vs_sf1700.pgn)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

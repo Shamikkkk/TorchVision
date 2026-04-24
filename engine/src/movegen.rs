@@ -203,6 +203,7 @@ pub fn is_square_attacked(board: &Board, sq: u8, by_white: bool) -> bool {
 /// provided `occupied` mask. As SEE removes pieces from `occupied` each ply,
 /// sliding rays automatically discover X-ray attackers behind removed pieces.
 pub(crate) fn attackers_to(board: &Board, sq: u8, occupied: u64) -> u64 {
+    if sq >= 64 { return 0; }
     let sq_idx = sq as usize;
     let sq_bb = 1u64 << sq;
     let mut att = 0u64;
@@ -214,10 +215,14 @@ pub(crate) fn attackers_to(board: &Board, sq: u8, occupied: u64) -> u64 {
     att |= KING_ATTACKS[sq_idx] & (board.white_kings | board.black_kings) & occupied;
 
     // White pawns: a white pawn at sq-7 or sq-9 attacks sq (mirrors is_square_attacked logic)
+    // Right shifts on u64 are always safe (truncate toward 0).
     att |= (((sq_bb >> 7) & !FILE_A) | ((sq_bb >> 9) & !FILE_H)) & board.white_pawns & occupied;
 
-    // Black pawns: a black pawn at sq+7 or sq+9 attacks sq
-    att |= (((sq_bb << 7) & !FILE_H) | ((sq_bb << 9) & !FILE_A)) & board.black_pawns & occupied;
+    // Black pawns: a black pawn at sq+7 or sq+9 attacks sq.
+    // Use wrapping_shl to avoid debug-mode panic when sq >= 57/55 (no black pawn can be above
+    // rank 8 anyway, so the shift would produce 0 after the FILE mask in those cases).
+    att |= ((sq_bb.wrapping_shl(7) & !FILE_H) | (sq_bb.wrapping_shl(9) & !FILE_A))
+        & board.black_pawns & occupied;
 
     // Bishops + Queens (diagonal), using updated occupied for X-ray
     let diag = (board.white_bishops | board.black_bishops
@@ -258,6 +263,7 @@ fn pop_lsb(bb: &mut u64) -> u8 {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn piece_type_at(board: &Board, sq: u8, is_white: bool) -> u8 {
+    if sq >= 64 { return KING; }
     let bit = 1u64 << sq;
     if is_white {
         if board.white_pawns & bit != 0 { return PAWN; }
