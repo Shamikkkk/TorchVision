@@ -7,14 +7,28 @@ import CapturedPiecesRow from './components/CapturedPieces'
 import EvalBar from './components/EvalBar'
 import EnginePanel from './components/EnginePanel'
 import GameOverModal from './components/GameOverModal'
+import LobbyScreen from './components/LobbyScreen'
 import MoveList from './components/MoveList'
 import AnalyzerPanel from './components/analyzer/AnalyzerPanel'
 import { useGameSocket } from './hooks/useGameSocket'
 import { playGameEnd } from './lib/sounds'
+import type { Difficulty } from './types/game'
 
 const BOARD_SIZE = 520
 
 type Tab = 'play' | 'analyze'
+
+const STORAGE_KEY = 'pyro.difficulty'
+
+function loadDifficulty(): Difficulty {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored && ['beginner', 'intermediate', 'advanced', 'expert', 'master'].includes(stored)) {
+      return stored as Difficulty
+    }
+  } catch {}
+  return 'master'
+}
 
 function PlayerRow({
   captured,
@@ -54,6 +68,9 @@ function PlayerRow({
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('play')
+  const [showLobby, setShowLobby] = useState(true)
+  const [difficulty, setDifficulty] = useState<Difficulty>(loadDifficulty)
+
   const game = useGameSocket()
   const {
     status,
@@ -76,12 +93,32 @@ export default function App() {
     flipBoard,
   } = game
 
+  // Persist difficulty to localStorage whenever it changes
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, difficulty) } catch {}
+  }, [difficulty])
+
   const prevStatus = useRef(status)
   useEffect(() => {
     if (prevStatus.current === 'ongoing' && status !== 'ongoing') playGameEnd()
     prevStatus.current = status
   }, [status])
 
+  // ── LOBBY ──────────────────────────────────────────────────────────────
+  if (showLobby) {
+    return (
+      <LobbyScreen
+        currentMood={difficulty}
+        onMoodChange={setDifficulty}
+        onStart={() => {
+          setShowLobby(false)
+          newGame(difficulty)
+        }}
+      />
+    )
+  }
+
+  // ── PLAY / ANALYZE ─────────────────────────────────────────────────────
   const clockStarted = white_ms < 300_000 || black_ms < 300_000
   const openingName = history.length <= 30 ? detectOpening(history) : null
 
@@ -100,10 +137,13 @@ export default function App() {
       {/* ── Top header bar ──────────────────────────────────────────────── */}
       <div className="flex items-center justify-between px-8 py-3.5 border-b border-pyro-border-subtle">
         <div className="flex items-center gap-5">
-          <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowLobby(true)}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+          >
             <span className="text-xl animate-pyro-flicker">🔥</span>
             <span className="font-display text-lg text-ember-500 italic">Pyro</span>
-          </div>
+          </button>
           <span className="text-pyro-text-faint text-xs">·</span>
           <span className="text-xs text-pyro-text-dim tracking-widest uppercase">
             You vs <span className="text-ember-500 font-semibold">Pyro</span>
@@ -211,7 +251,9 @@ export default function App() {
                 <MoveList history={history} moveSymbols={moveSymbols} />
                 <EnginePanel evalMove={evalMove} evalScore={evalScore} bestWas={bestWas} />
                 <Controls
-                  onNewGame={newGame}
+                  difficulty={difficulty}
+                  onDifficultyChange={setDifficulty}
+                  onNewGame={() => newGame(difficulty)}
                   onResign={resign}
                   onFlip={flipBoard}
                   gameInProgress={status === 'ongoing' && history.length > 0}
@@ -223,8 +265,9 @@ export default function App() {
               status={status}
               winner={winner}
               moveCount={history.length}
-              onRematch={newGame}
-              onMenu={newGame}
+              humanColor={humanColor}
+              onRematch={() => newGame(difficulty)}
+              onMenu={() => setShowLobby(true)}
               pyroSays={pyroSays}
             />
           </>

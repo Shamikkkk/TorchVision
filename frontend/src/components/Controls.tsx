@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
 import type { Difficulty } from '../types/game'
 
 type Props = {
-  onNewGame: (difficulty: Difficulty) => void
+  difficulty: Difficulty
+  onDifficultyChange: (d: Difficulty) => void
+  onNewGame: () => void
   onResign: () => void
   onFlip: () => void
   gameInProgress: boolean
@@ -16,25 +17,14 @@ const LEVELS: { id: Difficulty; label: string; sub: string }[] = [
   { id: 'master',       label: '💀 Feral',    sub: 'full' },
 ]
 
-const STORAGE_KEY = 'pyro.difficulty'
-
-function loadDifficulty(): Difficulty {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored && LEVELS.some(l => l.id === stored)) {
-      return stored as Difficulty
-    }
-  } catch {}
-  return 'master'
-}
-
-export function Controls({ onNewGame, onResign, onFlip, gameInProgress }: Props) {
-  const [difficulty, setDifficulty] = useState<Difficulty>(loadDifficulty)
-
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, difficulty) } catch {}
-  }, [difficulty])
-
+export function Controls({
+  difficulty,
+  onDifficultyChange,
+  onNewGame,
+  onResign,
+  onFlip,
+  gameInProgress,
+}: Props) {
   return (
     <div className="space-y-3">
       {/* Difficulty picker */}
@@ -50,7 +40,7 @@ export function Controls({ onNewGame, onResign, onFlip, gameInProgress }: Props)
                 key={level.id}
                 type="button"
                 disabled={gameInProgress}
-                onClick={() => setDifficulty(level.id)}
+                onClick={() => onDifficultyChange(level.id)}
                 className={[
                   'flex items-center justify-between px-3 py-1.5 rounded border text-sm transition',
                   selected
@@ -70,7 +60,7 @@ export function Controls({ onNewGame, onResign, onFlip, gameInProgress }: Props)
       {/* Action buttons */}
       <button
         type="button"
-        onClick={() => onNewGame(difficulty)}
+        onClick={onNewGame}
         className="w-full px-4 py-2 rounded bg-ember-500 hover:bg-ember-400 text-pyro-bg font-bold tracking-widest uppercase text-sm transition-colors"
       >
         ⚐ New Game
