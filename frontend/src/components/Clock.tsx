@@ -13,19 +13,38 @@ function format(ms: number): string {
 
 export default function Clock({ ms, active, label }: Props) {
   const low = ms < 30_000
+  const isPyro = label === 'Pyro'
   return (
     <div
       className={[
-        'flex items-center justify-between px-3 py-2 rounded-lg text-sm font-mono font-semibold transition-colors',
+        'flex items-center justify-between px-3 py-2 rounded-lg border transition-colors',
         active
           ? low
-            ? 'bg-red-900 text-red-200'
-            : 'bg-zinc-700 text-white'
-          : 'bg-zinc-800 text-zinc-400',
+            ? 'bg-pyro-surface border-red-800/50'
+            : 'bg-pyro-surface border-pyro-border-accent'
+          : 'bg-pyro-bg border-pyro-border',
       ].join(' ')}
     >
-      <span className="text-xs font-sans font-normal text-zinc-400">{label}</span>
-      <span className={low && active ? 'text-red-300' : ''}>{format(ms)}</span>
+      <span
+        className={[
+          'text-xs font-sans font-medium',
+          isPyro ? 'text-ember-400' : 'text-pyro-text-dim',
+        ].join(' ')}
+      >
+        {label}
+      </span>
+      <span
+        className={[
+          'font-mono font-semibold text-sm',
+          low && active
+            ? 'text-red-500 animate-pyro-pulse'
+            : active
+              ? 'text-pyro-text'
+              : 'text-pyro-text-muted',
+        ].join(' ')}
+      >
+        {format(ms)}
+      </span>
     </div>
   )
 }

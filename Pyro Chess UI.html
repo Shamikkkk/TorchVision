@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Pyro — Chess Engine UI</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #0a0605; color: #e8d8b8; font-family: Inter, system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+
+  @keyframes pyroFlicker {
+    0%, 100% { opacity: 1; }
+    48% { opacity: 0.92; }
+    50% { opacity: 0.78; }
+    52% { opacity: 0.95; }
+    72% { opacity: 0.88; }
+    74% { opacity: 0.95; }
+  }
+  @keyframes pyroFlickerHot {
+    0%, 100% { opacity: 1; filter: brightness(1); }
+    10% { opacity: 0.85; filter: brightness(1.3); }
+    12% { opacity: 1; filter: brightness(0.9); }
+    38% { opacity: 0.7; filter: brightness(1.4); }
+    40% { opacity: 1; filter: brightness(1); }
+    62% { opacity: 0.9; filter: brightness(1.2); }
+    84% { opacity: 0.8; filter: brightness(1.3); }
+  }
+  @keyframes pyroPulse {
+    0%, 100% { opacity: 0.7; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.05); }
+  }
+  @keyframes pyroTauntIn {
+    0% { opacity: 0; transform: translateX(-8px) scale(0.95); }
+    100% { opacity: 1; transform: translateX(0) scale(1); }
+  }
+  @keyframes pyroFadeUp {
+    0% { opacity: 0; transform: translateY(12px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+
+  button:hover { filter: brightness(1.15); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="pieces.jsx"></script>
+<script type="text/babel" src="board.jsx"></script>
+<script type="text/babel" src="chrome.jsx"></script>
+<script type="text/babel" src="screen-lobby.jsx"></script>
+<script type="text/babel" src="screen-play.jsx"></script>
+<script type="text/babel" src="screen-analyze.jsx"></script>
+<script type="text/babel" src="screen-gameover.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+const PyroCanvas = window.DesignCanvas;
+const PyroSec = window.DCSection;
+const PyroArt = window.DCArtboard;
+
+function App() {
+  return (
+    <PyroCanvas title="🔥 pyro — chess engine UI">
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* PRIMARY DIRECTION: Obsidian Ember                            */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      <PyroSec id="direction-1" title="01 — OBSIDIAN EMBER  ·  primary direction">
+        <PyroArt id="lobby-ember" label="Lobby / Home" width={1280} height={820}>
+          <LobbyScreen palette="ember" />
+        </PyroArt>
+        <PyroArt id="play-quiet-ember" label="Play — opening (quiet)" width={1280} height={820}>
+          <PlayScreen palette="ember" state="quiet" mood="awake" />
+        </PyroArt>
+        <PyroArt id="play-attack-ember" label="Play — mid-attack (pulsing)" width={1280} height={820}>
+          <PlayScreen palette="ember" state="attack" mood="hunting" />
+        </PyroArt>
+        <PyroArt id="play-mate-ember" label="Play — mate threat (screen dims)" width={1280} height={820}>
+          <PlayScreen palette="ember" state="mate-threat" mood="feral" />
+        </PyroArt>
+        <PyroArt id="gameover-loss-ember" label="Game Over — you lost" width={1280} height={820}>
+          <GameOverScreen palette="ember" outcome="loss" />
+        </PyroArt>
+        <PyroArt id="gameover-win-ember" label="Game Over — you won" width={1280} height={820}>
+          <GameOverScreen palette="ember" outcome="win" />
+        </PyroArt>
+        <PyroArt id="gameover-draw-ember" label="Game Over — draw" width={1280} height={820}>
+          <GameOverScreen palette="ember" outcome="draw" />
+        </PyroArt>
+        <PyroArt id="analyze-ember" label="Analyze — post-mortem" width={1280} height={820}>
+          <AnalyzeScreen palette="ember" />
+        </PyroArt>
+      </PyroSec>
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* ALT A: Cold Threat — steel/slate, cool threat-blue accent    */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      <PyroSec id="direction-2" title="02 — COLD THREAT  ·  alt palette (slate + threat-blue)">
+        <PyroArt id="lobby-cold" label="Lobby" width={1280} height={820}>
+          <LobbyScreen palette="cold" />
+        </PyroArt>
+        <PyroArt id="play-cold" label="Play — mid-attack" width={1280} height={820}>
+          <PlayScreen palette="cold" state="attack" mood="hunting" />
+        </PyroArt>
+        <PyroArt id="gameover-cold" label="Game Over — you lost" width={1280} height={820}>
+          <GameOverScreen palette="cold" outcome="loss" />
+        </PyroArt>
+      </PyroSec>
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* ALT B: Scoresheet — monochrome parchment / editorial         */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      <PyroSec id="direction-3" title="03 — SCORESHEET  ·  alt palette (parchment + ink)">
+        <PyroArt id="lobby-paper" label="Lobby" width={1280} height={820}>
+          <LobbyScreen palette="paper" />
+        </PyroArt>
+        <PyroArt id="play-paper" label="Play — mid-attack" width={1280} height={820}>
+          <PlayScreen palette="paper" state="attack" mood="hunting" />
+        </PyroArt>
+        <PyroArt id="gameover-paper" label="Game Over — you lost" width={1280} height={820}>
+          <GameOverScreen palette="paper" outcome="loss" />
+        </PyroArt>
+      </PyroSec>
+
+    </PyroCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -38,8 +38,8 @@ export function Controls({ onNewGame, onResign, onFlip, gameInProgress }: Props)
   return (
     <div className="space-y-3">
       {/* Difficulty picker */}
-      <div className="space-y-1.5">
-        <div className="text-xs uppercase tracking-wider text-zinc-500">
+      <div className="space-y-1.5 bg-pyro-surface/40 border border-pyro-border-accent rounded p-2.5">
+        <div className="text-xs font-semibold tracking-[0.18em] uppercase text-pyro-text-muted mb-2">
           Pyro's Mood
         </div>
         <div className="grid grid-cols-1 gap-1">
@@ -51,13 +51,13 @@ export function Controls({ onNewGame, onResign, onFlip, gameInProgress }: Props)
                 type="button"
                 disabled={gameInProgress}
                 onClick={() => setDifficulty(level.id)}
-                className={
-                  'flex items-center justify-between px-3 py-1.5 rounded text-sm transition ' +
-                  (selected
-                    ? 'bg-violet-600 text-white'
-                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700') +
-                  (gameInProgress ? ' opacity-50 cursor-not-allowed' : '')
-                }
+                className={[
+                  'flex items-center justify-between px-3 py-1.5 rounded border text-sm transition',
+                  selected
+                    ? 'bg-ember-500/10 border-ember-500/35 text-ember-400'
+                    : 'bg-transparent border-white/5 text-pyro-text-dim hover:text-pyro-text hover:border-white/10',
+                  gameInProgress ? 'opacity-50 cursor-not-allowed' : '',
+                ].join(' ')}
               >
                 <span>{level.label}</span>
                 <span className="text-xs opacity-70">{level.sub}</span>
@@ -71,7 +71,7 @@ export function Controls({ onNewGame, onResign, onFlip, gameInProgress }: Props)
       <button
         type="button"
         onClick={() => onNewGame(difficulty)}
-        className="w-full px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium"
+        className="w-full px-4 py-2 rounded bg-ember-500 hover:bg-ember-400 text-pyro-bg font-bold tracking-widest uppercase text-sm transition-colors"
       >
         ⚐ New Game
       </button>
@@ -80,14 +80,14 @@ export function Controls({ onNewGame, onResign, onFlip, gameInProgress }: Props)
           type="button"
           onClick={onResign}
           disabled={!gameInProgress}
-          className="px-4 py-2 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 disabled:opacity-50"
+          className="px-4 py-2 rounded bg-white/4 hover:bg-white/8 text-pyro-text border border-white/8 disabled:opacity-50 text-sm transition-colors"
         >
           ⚑ Resign
         </button>
         <button
           type="button"
           onClick={onFlip}
-          className="px-4 py-2 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+          className="px-4 py-2 rounded bg-white/4 hover:bg-white/8 text-pyro-text border border-white/8 text-sm transition-colors"
         >
           ⇄ Flip
         </button>

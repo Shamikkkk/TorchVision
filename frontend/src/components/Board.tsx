@@ -9,8 +9,8 @@ interface Props {
   game: GameState
 }
 
-const LIGHT = '#EEDAB4'
-const DARK = '#B58863'
+const LIGHT = '#e8d4a8'
+const DARK = '#8b6240'
 const LAST_MOVE_COLOR = 'rgba(246,246,105,0.5)'
 const SELECTED_COLOR = 'rgba(32,178,170,0.5)'
 const HIGHLIGHT_COLOR = 'rgba(255, 170, 0, 0.8)'

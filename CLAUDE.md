@@ -526,6 +526,12 @@ G17. Game-over screens ✅ COMPLETE
 ### Phase G — remaining priorities (in order):
 
 1. **UI Redesign (Obsidian Ember)** — 5-session project
+   Phase 1 COMPLETE: design tokens, Google Fonts, Tailwind
+   config, CSS animations. Phase 2 COMPLETE: Play screen
+   restyled (App.tsx, Clock, Controls, MoveList, PlayerRow,
+   board colors). Remaining: Phase 3 (game-over + lobby),
+   Phase 4 (analyze screen), Phase 5 (backend king_attack_cp
+   + dynamic wiring).
    Design spec uploaded to design-spec/. Lobby screen, redesigned
    Play screen (attack glow, threat meter, engine telemetry),
    cinematic game-over, post-mortem analyze screen. Requires:

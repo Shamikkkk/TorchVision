@@ -17,13 +17,11 @@ const BOARD_SIZE = 520
 type Tab = 'play' | 'analyze'
 
 function PlayerRow({
-  color,
   captured,
   materialAdv,
   side,
   isEngine,
 }: {
-  color: 'white' | 'black'
   captured: import('./types/game').CapturedPieces
   materialAdv: { white: number; black: number }
   side: 'white' | 'black'
@@ -31,28 +29,21 @@ function PlayerRow({
 }) {
   return (
     <div className="flex items-center justify-between h-8">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2.5">
         {isEngine ? (
           <>
-            <span className="text-xl leading-none">🔥</span>
-            <span className="font-bold text-orange-400 tracking-wide text-sm">PYRO</span>
-            <span className="text-zinc-600 text-xs italic hidden sm:inline">
+            <span className="text-lg animate-pyro-flicker">🔥</span>
+            <span className="font-display text-sm text-ember-500 italic font-semibold">
+              Pyro
+            </span>
+            <span className="text-pyro-text-faint text-xs italic hidden sm:inline font-display">
               burns brightest when you're losing
             </span>
           </>
         ) : (
           <>
-            <span
-              className={[
-                'w-3.5 h-3.5 rounded-full border shrink-0',
-                color === 'white'
-                  ? 'bg-zinc-100 border-zinc-400'
-                  : 'bg-zinc-900 border-zinc-500',
-              ].join(' ')}
-            />
-            <span className="text-sm font-semibold text-zinc-300">
-              {color === 'white' ? 'White' : 'Black'}
-            </span>
+            <span className="w-3 h-3 rounded-full bg-pyro-cream border border-pyro-border shrink-0" />
+            <span className="text-sm font-medium text-pyro-text">You</span>
           </>
         )}
       </div>
@@ -105,144 +96,147 @@ export default function App() {
   const engineColor: 'white' | 'black' = humanColor === 'w' ? 'black' : 'white'
 
   return (
-    <div className="min-h-screen bg-zinc-900 text-white flex flex-col items-center p-6 gap-4">
-      {/* Header: title + tab switcher */}
-      <div className="flex flex-col items-center gap-3">
-        <div className="flex items-center gap-3">
-          <p className="flex items-center gap-1.5 select-none">
-            <span className="text-orange-500 text-lg leading-none">🔥</span>
-            <span className="text-orange-400 text-xs font-bold uppercase tracking-widest">PYRO</span>
-            <span className="text-zinc-500 text-xs font-semibold uppercase tracking-widest">CHESS</span>
-          </p>
-          {activeTab === 'play' && (
-            <span className="text-zinc-600 text-xs select-none">
-              You vs <span className="text-orange-400">🔥 Pyro</span>
-            </span>
-          )}
+    <div className="min-h-screen bg-pyro-bg text-pyro-text font-sans flex flex-col">
+      {/* ── Top header bar ──────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between px-8 py-3.5 border-b border-pyro-border-subtle">
+        <div className="flex items-center gap-5">
+          <div className="flex items-center gap-2">
+            <span className="text-xl animate-pyro-flicker">🔥</span>
+            <span className="font-display text-lg text-ember-500 italic">Pyro</span>
+          </div>
+          <span className="text-pyro-text-faint text-xs">·</span>
+          <span className="text-xs text-pyro-text-dim tracking-widest uppercase">
+            You vs <span className="text-ember-500 font-semibold">Pyro</span>
+          </span>
         </div>
 
         {/* Tab switcher */}
-        <div className="flex gap-1 rounded-lg bg-zinc-800 p-0.5">
-          {(['play', 'analyze'] as Tab[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={[
-                'px-4 py-1.5 rounded-md text-sm font-medium transition-colors',
-                activeTab === tab
-                  ? 'bg-zinc-700 text-white'
-                  : 'text-zinc-500 hover:text-zinc-300',
-              ].join(' ')}
-            >
-              {tab === 'play' ? '♟ Play' : '🔍 Analyze'}
-            </button>
-          ))}
+        <div className="flex gap-6 text-xs tracking-widest uppercase">
+          {(['play', 'analyze'] as Tab[]).map((tab) =>
+            activeTab === tab ? (
+              <span
+                key={tab}
+                className="text-pyro-text font-semibold border-b-2 border-ember-500 pb-0.5"
+              >
+                {tab === 'play' ? 'Play' : 'Analyze'}
+              </span>
+            ) : (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className="text-pyro-text-dim hover:text-pyro-text transition-colors"
+              >
+                {tab === 'play' ? 'Play' : 'Analyze'}
+              </button>
+            ),
+          )}
         </div>
       </div>
 
-      {/* ── PLAY TAB ─────────────────────────────────────────────────────── */}
-      {activeTab === 'play' && (
-        <>
-          <div className="flex gap-4 items-start">
-            {/* Eval bar */}
-            <div className="flex" style={{ height: BOARD_SIZE + 120 }}>
-              <EvalBar score={evalScore} boardFlipped={boardFlipped} />
-            </div>
-
-            {/* Board column */}
-            <div className="flex flex-col gap-1.5" style={{ width: BOARD_SIZE }}>
-              <PlayerRow
-                color={topColor}
-                captured={capturedPieces}
-                materialAdv={materialAdv}
-                side={topCaptures}
-                isEngine={topColor === engineColor}
-              />
-              {topColor === engineColor && pyroSays && (
-                <div className="h-5 flex items-center -mt-0.5">
-                  <span className="text-orange-400/80 text-xs italic animate-pulse">
-                    &ldquo;{pyroSays}&rdquo;
-                  </span>
-                </div>
-              )}
-
-              {clockStarted && (
-                <Clock
-                  ms={topMs}
-                  active={turn !== bottomSide}
-                  label={topColor === engineColor ? 'Pyro' : (topColor === 'white' ? 'White' : 'Black')}
-                />
-              )}
-
-              <div style={{ width: BOARD_SIZE, height: BOARD_SIZE }} className="rounded-sm overflow-hidden">
-                <Board game={game} />
+      {/* ── Content ─────────────────────────────────────────────────────── */}
+      <div className="flex flex-col items-center p-6 gap-4">
+        {/* ── PLAY TAB ─────────────────────────────────────────────────── */}
+        {activeTab === 'play' && (
+          <>
+            <div className="flex gap-4 items-start">
+              {/* Eval bar */}
+              <div className="flex" style={{ height: BOARD_SIZE + 120 }}>
+                <EvalBar score={evalScore} boardFlipped={boardFlipped} />
               </div>
 
-              {clockStarted && (
-                <Clock
-                  ms={bottomMs}
-                  active={turn === bottomSide}
-                  label={bottomColor === engineColor ? 'Pyro' : (bottomColor === 'white' ? 'White' : 'Black')}
+              {/* Board column */}
+              <div className="flex flex-col gap-1.5" style={{ width: BOARD_SIZE }}>
+                <PlayerRow
+                  captured={capturedPieces}
+                  materialAdv={materialAdv}
+                  side={topCaptures}
+                  isEngine={topColor === engineColor}
                 />
-              )}
-
-              <PlayerRow
-                color={bottomColor}
-                captured={capturedPieces}
-                materialAdv={materialAdv}
-                side={bottomCaptures}
-                isEngine={bottomColor === engineColor}
-              />
-              {bottomColor === engineColor && pyroSays && (
-                <div className="h-5 flex items-center -mt-0.5">
-                  <span className="text-orange-400/80 text-xs italic animate-pulse">
-                    &ldquo;{pyroSays}&rdquo;
-                  </span>
-                </div>
-              )}
-
-              <div className="h-7 flex items-center justify-center">
-                {openingName && (
-                  <span className="text-zinc-300 italic text-sm">
-                    {openingName}
-                  </span>
+                {topColor === engineColor && pyroSays && (
+                  <div className="h-5 flex items-center -mt-0.5">
+                    <span className="text-pyro-taunt text-xs italic animate-pyro-taunt-in">
+                      &ldquo;{pyroSays}&rdquo;
+                    </span>
+                  </div>
                 )}
+
+                {clockStarted && (
+                  <Clock
+                    ms={topMs}
+                    active={turn !== bottomSide}
+                    label={topColor === engineColor ? 'Pyro' : topColor === 'white' ? 'White' : 'Black'}
+                  />
+                )}
+
+                <div style={{ width: BOARD_SIZE, height: BOARD_SIZE }} className="rounded-sm overflow-hidden">
+                  <Board game={game} />
+                </div>
+
+                {clockStarted && (
+                  <Clock
+                    ms={bottomMs}
+                    active={turn === bottomSide}
+                    label={bottomColor === engineColor ? 'Pyro' : bottomColor === 'white' ? 'White' : 'Black'}
+                  />
+                )}
+
+                <PlayerRow
+                  captured={capturedPieces}
+                  materialAdv={materialAdv}
+                  side={bottomCaptures}
+                  isEngine={bottomColor === engineColor}
+                />
+                {bottomColor === engineColor && pyroSays && (
+                  <div className="h-5 flex items-center -mt-0.5">
+                    <span className="text-pyro-taunt text-xs italic animate-pyro-taunt-in">
+                      &ldquo;{pyroSays}&rdquo;
+                    </span>
+                  </div>
+                )}
+
+                <div className="h-7 flex items-center justify-center">
+                  {openingName && (
+                    <span className="text-xs text-pyro-text-dim italic font-display text-center">
+                      {openingName}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Right panel */}
+              <div
+                className="flex flex-col gap-3 rounded-xl border border-pyro-border-accent bg-pyro-surface/40 p-4"
+                style={{ width: 280 }}
+              >
+                <MoveList history={history} moveSymbols={moveSymbols} />
+                <EnginePanel evalMove={evalMove} evalScore={evalScore} bestWas={bestWas} />
+                <Controls
+                  onNewGame={newGame}
+                  onResign={resign}
+                  onFlip={flipBoard}
+                  gameInProgress={status === 'ongoing' && history.length > 0}
+                />
               </div>
             </div>
 
-            {/* Right panel */}
-            <div
-              className="flex flex-col gap-3 rounded-2xl border border-zinc-700/50 bg-zinc-900 p-4"
-              style={{ width: 280 }}
-            >
-              <MoveList history={history} moveSymbols={moveSymbols} />
-              <EnginePanel evalMove={evalMove} evalScore={evalScore} bestWas={bestWas} />
-              <Controls
-                onNewGame={newGame}
-                onResign={resign}
-                onFlip={flipBoard}
-                gameInProgress={status === 'ongoing' && history.length > 0}
-              />
-            </div>
+            <GameOverModal
+              status={status}
+              winner={winner}
+              moveCount={history.length}
+              onRematch={newGame}
+              onMenu={newGame}
+              pyroSays={pyroSays}
+            />
+          </>
+        )}
+
+        {/* ── ANALYZE TAB ──────────────────────────────────────────────── */}
+        {activeTab === 'analyze' && (
+          <div className="w-full max-w-5xl">
+            <AnalyzerPanel />
           </div>
-
-          <GameOverModal
-            status={status}
-            winner={winner}
-            moveCount={history.length}
-            onRematch={newGame}
-            onMenu={newGame}
-            pyroSays={pyroSays}
-          />
-        </>
-      )}
-
-      {/* ── ANALYZE TAB ──────────────────────────────────────────────────── */}
-      {activeTab === 'analyze' && (
-        <div className="w-full max-w-5xl">
-          <AnalyzerPanel />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }
