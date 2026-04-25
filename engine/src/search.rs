@@ -1093,11 +1093,26 @@ fn ab_search(
     // --- Null Move Pruning ---
     if allow_null && !in_check && depth >= 3 && board.occupied().count_ones() >= 10 {
         let null_board = board.make_null_move();
-        let r = TUNE_NMP_REDUCTION.load(Ordering::Relaxed) as u32;
+        let base_r = TUNE_NMP_REDUCTION.load(Ordering::Relaxed) as u32;
+        let r = base_r + depth / 6;
         let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, counter_moves, None, network, false, nodes, node_limit, deadline, stop, tt);
         if score >= beta {
             return beta;
         }
+    }
+
+    // --- Internal Iterative Deepening (IID) ---
+    // No TT move at a meaningful depth means poor move ordering for this node.
+    // A quick shallow search populates the TT so the real search tries the
+    // best candidate first. allow_null=false prevents null-move recursion.
+    if tt_move.is_none() && depth >= 4 && !in_check {
+        ab_search(
+            board, depth - 2, alpha, beta, ply,
+            killers, history, counter_moves, prev_move,
+            network, false,
+            nodes, node_limit, deadline, stop, tt,
+        );
+        tt_move = tt.probe(hash).and_then(|e| e.best_move());
     }
 
     // --- Singular Extension ---
@@ -1212,6 +1227,22 @@ fn ab_search(
         } else {
             0
         };
+
+        // --- Late Move Pruning (LMP) ---
+        // At shallow depths, quiet non-killer moves beyond a move-count threshold
+        // are almost never best. Skip them entirely to save nodes.
+        // Thresholds: depth 1 → skip after 4, depth 2 → 7, depth 3 → 12.
+        // Never prune moves that give check — those can be the only win.
+        if depth <= 3
+            && !in_check
+            && !is_capture
+            && mv.promotion.is_none()
+            && !is_killer
+            && !is_in_check(&new_board)
+            && move_index >= (3 + depth * depth) as usize
+        {
+            continue;
+        }
 
         let score;
 
