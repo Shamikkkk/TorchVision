@@ -707,6 +707,12 @@ type Killers = [[Option<(u8, u8)>; 2]; MAX_DEPTH];
 // Tracks which quiet moves cause beta cutoffs across the search tree.
 type History = [[[i32; 64]; 64]; 2];
 
+// Countermove table: [side_to_move][previous_move_to_sq] = refuting move.
+// When a quiet move causes a beta cutoff in response to the opponent's last
+// move, that quiet move is stored here and tried early next time the same
+// destination square is targeted.
+type CounterMoves = [[Option<(u8, u8)>; 64]; 2];
+
 const HISTORY_MAX: i32 = 4_000; // cap to keep scores below killer priority
 
 /// Update history score with gravity: bonus decays existing values toward zero,
@@ -819,7 +825,7 @@ fn piece_val_on(board: &Board, sq: u8, is_white: bool) -> i32 {
 }
 
 /// Score a move for ordering. Higher = searched first.
-fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize, tt_move: Option<(u8, u8)>, history: &History) -> i32 {
+fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize, tt_move: Option<(u8, u8)>, history: &History, counter_moves: &CounterMoves, prev_move: Option<(u8, u8)>) -> i32 {
     // TT best move: highest priority
     if let Some((from, to)) = tt_move {
         if mv.from_sq == from && mv.to_sq == to {
@@ -849,15 +855,23 @@ fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize, tt_move: 
             }
         }
     }
+    // Countermove heuristic: refutation of the opponent's last move (between killers and history)
+    if let Some((_, pt)) = prev_move {
+        if let Some((cf, ct)) = counter_moves[board.side_to_move as usize][pt as usize] {
+            if mv.from_sq == cf && mv.to_sq == ct {
+                return 4_500;
+            }
+        }
+    }
     // History heuristic: differentiate quiet moves
     history[board.side_to_move as usize][mv.from_sq as usize][mv.to_sq as usize]
 }
 
-/// Sort moves in-place: TT move → captures (MVV-LVA) → killers → history → quiet.
-fn order_moves(board: &Board, moves: &mut [Move], killers: &Killers, ply: usize, tt_move: Option<(u8, u8)>, history: &History) {
+/// Sort moves in-place: TT move → captures (MVV-LVA) → killers → countermove → history → quiet.
+fn order_moves(board: &Board, moves: &mut [Move], killers: &Killers, ply: usize, tt_move: Option<(u8, u8)>, history: &History, counter_moves: &CounterMoves, prev_move: Option<(u8, u8)>) {
     moves.sort_unstable_by(|a, b| {
-        score_move(board, b, killers, ply, tt_move, history)
-            .cmp(&score_move(board, a, killers, ply, tt_move, history))
+        score_move(board, b, killers, ply, tt_move, history, counter_moves, prev_move)
+            .cmp(&score_move(board, a, killers, ply, tt_move, history, counter_moves, prev_move))
     });
 }
 
@@ -972,16 +986,18 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Opt
 pub fn alpha_beta(board: &Board, depth: u32, alpha: i32, beta: i32) -> i32 {
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
     let mut history: History = [[[0i32; 64]; 64]; 2];
+    let mut counter_moves: CounterMoves = [[None; 64]; 2];
     let nodes = AtomicU64::new(0);
     let tt = TTable::new();
     let stop = AtomicBool::new(false);
-    ab_search(board, depth, alpha, beta, 0, &mut killers, &mut history, None, true, &nodes, u64::MAX, None, &stop, &tt)
+    ab_search(board, depth, alpha, beta, 0, &mut killers, &mut history, &mut counter_moves, None, None, true, &nodes, u64::MAX, None, &stop, &tt)
 }
 
 /// Recursive alpha-beta with move ordering, killer heuristic, history, NMP, LMR, and TT.
 fn ab_search(
     board: &Board, depth: u32, mut alpha: i32, beta: i32,
     ply: usize, killers: &mut Killers, history: &mut History,
+    counter_moves: &mut CounterMoves, prev_move: Option<(u8, u8)>,
     network: Option<&nnue::Network>,
     allow_null: bool, nodes: &AtomicU64, node_limit: u64,
     deadline: Option<std::time::Instant>,
@@ -1045,7 +1061,7 @@ fn ab_search(
     if allow_null && !in_check && depth >= 3 && board.occupied().count_ones() >= 10 {
         let null_board = board.make_null_move();
         let r = 2;
-        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, network, false, nodes, node_limit, deadline, stop, tt);
+        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, counter_moves, None, network, false, nodes, node_limit, deadline, stop, tt);
         if score >= beta {
             return beta;
         }
@@ -1074,7 +1090,7 @@ fn ab_search(
                     let new_board = make_move(board, mv);
                     let se_score = -ab_search(
                         &new_board, se_depth.saturating_sub(1), -se_beta, -se_beta + 1,
-                        ply + 1, killers, history, network, false,
+                        ply + 1, killers, history, counter_moves, None, network, false,
                         nodes, node_limit, deadline, stop, tt,
                     );
                     if se_score >= se_beta {
@@ -1101,7 +1117,7 @@ fn ab_search(
         return 0;
     }
 
-    order_moves(board, &mut moves, killers, ply, tt_move, history);
+    order_moves(board, &mut moves, killers, ply, tt_move, history, counter_moves, prev_move);
 
     // --- Futility Pruning Setup ---
     // At shallow depths, if static eval + margin is still below alpha,
@@ -1162,24 +1178,25 @@ fn ab_search(
 
         let score;
 
+        let mv_prev = Some((mv.from_sq, mv.to_sq));
         if move_index == 0 {
             // PV move: full window + full depth, plus singular extension if applicable.
-            score = -ab_search(&new_board, depth - 1 + singular_extension as u32, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
+            score = -ab_search(&new_board, depth - 1 + singular_extension as u32, -beta, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
         } else {
             // Non-PV moves: null window first (cheap probe), re-search on fail-high.
             let null_score;
 
             // --- Late Move Reductions (applied on top of null window) ---
             if depth >= 3 && move_index > 3 && !is_capture && !is_killer && !in_check {
-                null_score = -ab_search(&new_board, depth - 2, -alpha - 1, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
+                null_score = -ab_search(&new_board, depth - 2, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
             } else {
-                null_score = -ab_search(&new_board, depth - 1, -alpha - 1, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
+                null_score = -ab_search(&new_board, depth - 1, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
             }
 
             // Fail-high on null window: this move might be genuinely better.
             // Re-search at full depth + full window to get the real score.
             if null_score > alpha && null_score < beta {
-                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, network, true, nodes, node_limit, deadline, stop, tt);
+                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
             } else {
                 score = null_score;
             }
@@ -1188,6 +1205,10 @@ fn ab_search(
         if score >= beta {
             if !is_capture {
                 store_killer(killers, ply, mv);
+                // Countermove: record this quiet move as the refutation of the opponent's last move
+                if let Some((_, pt)) = prev_move {
+                    counter_moves[board.side_to_move as usize][pt as usize] = Some((mv.from_sq, mv.to_sq));
+                }
                 // History bonus for the move that caused cutoff
                 let bonus = (depth * depth) as i32;
                 update_history(history, board.side_to_move, mv.from_sq, mv.to_sq, bonus);
@@ -1248,6 +1269,7 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
     let mut history: History = [[[0i32; 64]; 64]; 2];
+    let mut counter_moves: CounterMoves = [[None; 64]; 2];
     let nodes = AtomicU64::new(0);
     let tt = TTable::new();
     let stop = AtomicBool::new(false);
@@ -1255,7 +1277,7 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
     // Probe TT for root move ordering
     let root_hash = board.zobrist_hash();
     let tt_move = tt.probe(root_hash).and_then(|e| e.best_move());
-    order_moves(board, &mut moves, &killers, 0, tt_move, &history);
+    order_moves(board, &mut moves, &killers, 0, tt_move, &history, &counter_moves, None);
 
     let mut best: Option<(Move, i32)> = None;
     let mut alpha = -INF;
@@ -1263,7 +1285,7 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 
     for mv in moves {
         let new_board = make_move(board, &mv);
-        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, &mut history, network, true, &nodes, u64::MAX, None, &stop, &tt);
+        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, true, &nodes, u64::MAX, None, &stop, &tt);
         if score > alpha {
             alpha = score;
             best = Some((mv, score));
@@ -1287,6 +1309,7 @@ fn smp_worker(
 ) {
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
     let mut history: History = [[[0i32; 64]; 64]; 2];
+    let mut counter_moves: CounterMoves = [[None; 64]; 2];
     let nodes = AtomicU64::new(0);
     let moves = generate_moves(board);
     if moves.is_empty() {
@@ -1309,7 +1332,7 @@ fn smp_worker(
         let root_hash = board.zobrist_hash();
         let tt_move = tt.probe(root_hash).and_then(|e| e.best_move());
         let mut ordered_moves = moves.clone();
-        order_moves(board, &mut ordered_moves, &killers, 0, tt_move, &history);
+        order_moves(board, &mut ordered_moves, &killers, 0, tt_move, &history, &counter_moves, None);
 
         for mv in &ordered_moves {
             if stop.load(Ordering::Relaxed) {
@@ -1318,7 +1341,7 @@ fn smp_worker(
             let new_board = make_move(board, mv);
             let score = -ab_search(
                 &new_board, depth - 1, -beta, -alpha, 1,
-                &mut killers, &mut history, network, true,
+                &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, true,
                 &nodes, node_limit, deadline, stop, tt,
             );
             if score > alpha {
@@ -1366,6 +1389,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
 
         // ---- Main thread: full aspiration-window ID loop ----
         let mut history: History = [[[0i32; 64]; 64]; 2];
+        let mut counter_moves: CounterMoves = [[None; 64]; 2];
         let root_hash = board.zobrist_hash();
         let mut prev_score: Option<i32> = None;
 
@@ -1395,7 +1419,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                 let mut ordered_moves = moves.clone();
 
                 let tt_move = tt.probe(root_hash).and_then(|e| e.best_move());
-                order_moves(board, &mut ordered_moves, &killers, 0, tt_move, &history);
+                order_moves(board, &mut ordered_moves, &killers, 0, tt_move, &history, &counter_moves, None);
 
                 let mut best: Option<(Move, i32)> = None;
                 let mut alpha = alpha_init;
@@ -1407,7 +1431,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                     let new_board = make_move(board, mv);
                     let score = -ab_search(
                         &new_board, depth - 1, -beta, -alpha, 1,
-                        &mut killers, &mut history, network, true,
+                        &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, true,
                         &nodes, node_limit, deadline, &stop, &tt,
                     );
 
