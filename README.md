@@ -96,10 +96,10 @@ Rust Engine (Pyro — bitboards, alpha-beta, PeSTO+Tal)
 
 ## Strength
 
-~1770 Elo at 10s+0.1s (measured April 2026, 100-game gauntlets
-vs Stockfish UCI_LimitStrength). Non-linear performance curve:
-plays up against strong opponents, down against weak ones —
-the Tal-style aggression working as intended.
+~1835 Elo at 10s+0.1s (measured April 2026, 200-game gauntlets
+vs Stockfish UCI_LimitStrength). 67% vs SF-1700 (LOS 100%),
+42.5% vs SF-1900. Non-linear performance curve: plays up against
+strong opponents — the Tal-style aggression working as intended.
 
 Target: 2000-2200 CCRL equivalent.
 

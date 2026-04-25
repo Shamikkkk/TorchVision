@@ -38,7 +38,7 @@ Realistic timeline at ~1hr sessions, 2-3 sessions/week:
 
 ---
 
-## Current State (as of April 18, 2026)
+## Current State (as of April 26, 2026)
 **Phase A (Python classical engine) — COMPLETE ✅**
 **Phase B (Rust engine + Tal bonuses) — COMPLETE ✅**
 **Phase C (NNUE) — ABANDONED ❌**
@@ -46,8 +46,10 @@ Realistic timeline at ~1hr sessions, 2-3 sessions/week:
 **Phase D (NNUE v2) — DEFERRED 🛑**
 **Phase E (MCTS) — DEFERRED 🛑**
 **Phase G (The Mittens Path) — ACTIVE 🔥**
-**Phase G progress: ~1770+ Elo (measured Apr 19). SEE gauntlet pending.**
-G1-G5, G7, G10, G12-G13, G16-G17 done. G8 reverted. G4 (SEE) re-added after ply-cap fix.
+**Phase G progress: ~1835 Elo (measured Apr 26). SPSA tuning running overnight.**
+G1-G5, G7-G8v2, G10, G12-G13, G16-G17 done. Countermove heuristic,
+depth-dependent NMP, LMP, IID added. UI overhaul complete (all 5 phases).
+10 UCI-tunable parameters. SPSA optimization in progress (200 iterations).
 **Game Analyzer — COMPLETE ✅**
 **Frontend: difficulty levels + opening name — COMPLETE ✅**
 
@@ -96,6 +98,19 @@ G1-G5, G7, G10, G12-G13, G16-G17 done. G8 reverted. G4 (SEE) re-added after ply-
   pickle, subsequent startups instant
 - Game-over modal — dramatic dark overlay with Pyro's taunt,
   fade-in animation, fire-themed rematch button
+- Countermove heuristic — tracks refuting move per [side][prev_to_sq],
+  priority 4500 in move ordering (between killers and history)
+- Depth-dependent NMP — R = base_r + depth/6 (R=3 at depth 6-11)
+- Late Move Pruning (LMP) — skip quiet non-killer non-checking moves
+  beyond 3+depth² at depth ≤ 3
+- Internal Iterative Deepening (IID) — depth-2 shallow search when
+  no TT move at depth ≥ 4, seeds move ordering
+- 10 UCI-tunable parameters via AtomicI32 statics (TAL_AGGRESSION,
+  futility margins, aspiration delta, NMP reduction, LMR move index,
+  singular ext margin, queen attack weight, castling bonus, early
+  queen penalty)
+- SPSA tuning driver (backend/scripts/spsa_tune.py) — automated
+  parameter optimization via cutechess-cli perturbation matches
 
 ### Observed strength estimate (measured April 16, 2026):
 
@@ -128,9 +143,15 @@ Implied Pyro Elo: ~1770 (was ~1746, +24 Elo gain).
 G8 killer-instinct caused -95 Elo regression and was reverted.
 
 Post-SEE gauntlet (April 25, 2026, ply-cap fix applied):
-Running overnight — 100 games each vs SF-1700 and SF-1900.
-Check see_clean_gauntlet.log for results.
-Expected: 0 disconnects, 60%+ vs SF-1700, 42%+ vs SF-1900.
+vs SF-1700: 63.0% (61W/35L/4D) — +92 Elo, LOS 99.6%
+vs SF-1900: 39.0% (37W/59L/4D) — up from 33.0%
+Implied Pyro Elo: ~1808
+
+Post-G8v2+CM gauntlet (April 26, 2026):
+vs SF-1700: 67.0% (65W/31L/4D) — +123 Elo, LOS 100%
+vs SF-1900: 42.5% (41W/56L/3D) — -53 Elo
+Implied Pyro Elo: ~1835 (best ever, +89 over baseline)
+Zero disconnects. Non-linear curve narrowing (gap 44→24 Elo).
 
 Target for Phase G complete: +250-400 Elo average (i.e., 
 Pyro at ~2000-2150 CCRL Blitz equivalent).
@@ -391,12 +412,10 @@ LOG_LEVEL=DEBUG
 6. Play a test game — Pyro should show 🔥 persona, mood
    selector, and opening name. At Feral difficulty, engine
    thinks ~10s per move on a 5-min clock.
-7. Phase G progress: G1-G5, G7, G10, G12-G13, G16-G17 done.
-   G8 reverted (caused -95 Elo). Check extension ply cap fixed.
-   Remaining strength items: G8 redo (capped additive), G6 (SPSA).
-   Remaining style items: G9, G11, G15.
-   Major pending: UI redesign to match Obsidian Ember design spec
-   (uploaded design-spec/ — estimated 5 sessions).
+7. Phase G progress: G1-G5, G7-G8v2, G10, G12-G13, G16-G17 done.
+   Countermove, NMP-depth, LMP, IID added. UI overhaul complete.
+   SPSA tuning infrastructure built. Current strength: ~1835 Elo.
+   Next: apply SPSA results, then G9/G11 style items, then deploy.
 8. For historical context on completed work, see HISTORY.md.
 
 ---
@@ -457,10 +476,23 @@ G5. Singular extensions ✅ COMPLETE
     bug existed since Phase C.2 and was the real cause of all gauntlet
     disconnects (25-42% crash rate), not SEE.
 
-G6. SPSA tuning of all eval parameters (1 session setup + overnight runs, +50-100 Elo)
-    - Tune every magic number in tal_bonuses via SPSA
-    - Use cutechess gauntlet as fitness function
-    - Tune toward AGGRESSION (weight king attack heavily)
+**Countermove heuristic ✅ COMPLETE (April 26, 2026)**
+    Tracks refuting move per [side][prev_move_to_sq]. Priority 4500.
+
+**Depth-dependent NMP ✅ COMPLETE (April 26, 2026)**
+    R = base_r + depth/6. R=3 at depth 6-11, R=4 at depth 12+.
+
+**Late Move Pruning (LMP) ✅ COMPLETE (April 26, 2026)**
+    Skip quiet non-killer non-checking moves beyond 3+depth² at depth ≤ 3.
+
+**Internal Iterative Deepening (IID) ✅ COMPLETE (April 26, 2026)**
+    Depth-2 shallow search when no TT move at depth ≥ 4.
+
+G6. SPSA tuning ✅ IN PROGRESS (April 26, 2026)
+    Session 1: 10 params made UCI-tunable via AtomicI32 statics.
+    Session 2: SPSA driver script written (spsa_tune.py).
+    Running overnight: 200 iterations × 20 games at 5+0.1.
+    Results in backend/scripts/spsa_results.json.
 
 ### Track 2: Style improvements (intentional Tal-bias)
 
@@ -470,9 +502,8 @@ Some of these REDUCE pure-Elo strength but increase the
 G7. Crank TAL_AGGRESSION to 2.5 ✅ COMPLETE (April 18, 2026)
     Source changed in engine/src/search.rs. Rebuild after current gauntlet finishes.
 
-G8. Killer-instinct bonus ❌ REVERTED (caused -95 Elo regression; commented out, needs capped additive approach)
-    - When opponent's king is exposed, MULTIPLY king-attack scores by 1.5-2x
-    - Implementation in evaluate.rs: detect "king exposure" metric, scale king_attack term
+G8. King-exposure bonus — v1 ❌ REVERTED, v2 ✅ COMPLETE (Apr 26)
+    v2: capped additive (max 50cp, AND-gated shield + attackers)
 
 G9. Sacrifice-seeking in search (1 session)
     - Add "speculation bonus" to move ordering that slightly prefers SEE-negative captures
@@ -525,41 +556,26 @@ G17. Game-over screens ✅ COMPLETE
 
 ### Phase G — remaining priorities (in order):
 
-1. **UI Redesign (Obsidian Ember)** — 5-session project
-   Phase 1 COMPLETE: design tokens, fonts, Tailwind config.
-   Phase 2 COMPLETE: Play screen restyled.
-   Phase 3 COMPLETE: Game-over cinematic takeover.
-   Phase 4 PARTIAL: Lobby screen complete. Analyze screen
-   deferred. Remaining: Phase 5 (analyze redesign + backend
-   king_attack_cp + dynamic wiring: attackGlow, check pulse,
-   mate vignette).
-   Design spec uploaded to design-spec/. Lobby screen, redesigned
-   Play screen (attack glow, threat meter, engine telemetry),
-   cinematic game-over, post-mortem analyze screen. Requires:
-   Google Fonts (Instrument Serif, JetBrains Mono), routing,
-   backend king_attack_cp in WebSocket payload.
+1. **UI Redesign (Obsidian Ember)** — ✅ COMPLETE (April 26, 2026)
+   All 5 phases done: design tokens, Play screen, game-over
+   takeover, Lobby screen, Analyze screen restyle, dynamic
+   effects (attackGlow, check pulse, mate vignette).
 
-2. **G8 redo** — capped additive king-exposure bonus
-   Original G8 doubled the quadratic attack term → -95 Elo.
-   New approach: add min(50cp, attack/2) when king exposed,
-   instead of multiplying. Expected: +20-40 Elo if detection
-   is correct and bonus is conservative.
+2. **Apply SPSA results** — read spsa_results.json, update
+   AtomicI32 defaults, gauntlet to confirm improvement.
+   Expected: +50-100 Elo.
 
-3. **G6 (SPSA tuning)** — automated parameter optimization
-   Requires infrastructure: perturbation framework, fitness
-   function (game score), hundreds of iterations. 2-3 session
-   project. Targets: TAL_AGGRESSION, futility margins, LMR
-   thresholds, aspiration delta, NMP reduction.
+3. **G8 v3 refinement** — if SPSA moves CASTLING_BONUS or
+   QUEEN_ATTACK_WT significantly, the king-exposure bonus
+   may need retuning.
 
-4. **G9 (Sacrifice-seeking)** — search bonus for material-down
-   positions with compensation (development lead, king exposure).
-   Style item, may cost Elo.
+4. **G9 (Sacrifice-seeking)** — speculation bonus for material-
+   down positions. Style item, may cost Elo.
 
-5. **G11 (Anti-quiet)** — penalize positions where nothing is
-   happening. Style item, may cost Elo.
+5. **G11 (Anti-quiet)** — penalize closed positions. Style item.
 
-6. **G15 (Visual attack cues)** — red glow on board when Pyro's
-   eval is very high. Included in UI redesign spec.
+6. **Deployment** — Docker, Vercel/Netlify frontend, Railway
+   backend, rate limiting, game persistence.
 
 Estimated total: 12-15 sessions of ~1 hour each, ~3-4 months at 2-3 sessions/week.
 
@@ -609,7 +625,7 @@ Estimated total: 12-15 sessions of ~1 hour each, ~3-4 months at 2-3 sessions/wee
 Phase A complete:   ~1200-1400 ELO (Python Tal)
 Phase B complete:   ~1400-1600 ELO (Rust PST+Tal+TT)
 Phase C.2 complete: ~1700-1850 ELO (+ aspiration/pruning/time mgmt)
-Phase G strength:   ~2000-2300 ELO (+ SMP, PVS, SEE, tuned eval)
+Phase G current:    ~1835 ELO (measured Apr 26, G8v2+CM+SEE+PVS+SMP)
 Phase D (DEFERRED): ~2200-2600 ELO (+ NNUE v2 if ever revived)
 Phase E (DEFERRED): ~2400-2800 ELO (+ MCTS if ever revived)
 
