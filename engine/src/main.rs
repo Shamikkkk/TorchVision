@@ -5,7 +5,7 @@ mod search;
 
 use board::Board;
 use nnue::Network;
-use search::{best_move, best_move_nodes, parse_uci_move};
+use search::{best_move, best_move_nodes, parse_uci_move, set_tune_param};
 use std::io::{self, BufRead, Write};
 
 struct Engine {
@@ -70,6 +70,16 @@ fn main() {
                 println!("id name Pyro 0.1");
                 println!("id author Shamik");
                 println!("option name Threads type spin default 1 min 1 max 128");
+                println!("option name TAL_AGGRESSION type spin default 25 min 10 max 50");
+                println!("option name FUTILITY_MARGIN_D1 type spin default 100 min 30 max 250");
+                println!("option name FUTILITY_MARGIN_D2 type spin default 300 min 100 max 600");
+                println!("option name ASPIRATION_DELTA type spin default 50 min 15 max 150");
+                println!("option name NMP_REDUCTION type spin default 2 min 1 max 4");
+                println!("option name LMR_MOVE_INDEX type spin default 3 min 1 max 8");
+                println!("option name SE_BETA_MARGIN type spin default 50 min 20 max 100");
+                println!("option name QUEEN_ATTACK_WT type spin default 40 min 15 max 80");
+                println!("option name CASTLING_BONUS type spin default 80 min 20 max 200");
+                println!("option name EARLY_QUEEN_PENALTY type spin default 60 min 15 max 120");
                 println!("uciok");
                 io::stdout().flush().ok();
             }
@@ -122,6 +132,14 @@ fn main() {
                         "threads" => {
                             if let Ok(n) = tokens[4].parse::<usize>() {
                                 engine.num_threads = n.clamp(1, 128);
+                            }
+                        }
+                        name @ ("tal_aggression" | "futility_margin_d1" | "futility_margin_d2" |
+                                "aspiration_delta" | "nmp_reduction" | "lmr_move_index" |
+                                "se_beta_margin" | "queen_attack_wt" | "castling_bonus" |
+                                "early_queen_penalty") => {
+                            if let Ok(v) = tokens[4].parse::<i32>() {
+                                set_tune_param(name, v);
                             }
                         }
                         _ => {}

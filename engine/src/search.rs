@@ -2,7 +2,38 @@ use crate::board::Board;
 use crate::movegen::{self, Move, generate_moves, is_in_check, make_move};
 use crate::nnue;
 
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicU8, Ordering};
+
+// =========================================================================
+// Tunable parameters — settable via UCI "setoption name X value Y"
+// =========================================================================
+static TUNE_TAL_AGGRESSION:      AtomicI32 = AtomicI32::new(25);  // ×10 scale (25 = 2.5)
+static TUNE_FUTILITY_MARGIN_D1:  AtomicI32 = AtomicI32::new(100);
+static TUNE_FUTILITY_MARGIN_D2:  AtomicI32 = AtomicI32::new(300);
+static TUNE_ASPIRATION_DELTA:    AtomicI32 = AtomicI32::new(50);
+static TUNE_NMP_REDUCTION:       AtomicI32 = AtomicI32::new(2);
+static TUNE_LMR_MOVE_INDEX:      AtomicI32 = AtomicI32::new(3);
+static TUNE_SE_BETA_MARGIN:      AtomicI32 = AtomicI32::new(50);
+static TUNE_QUEEN_ATTACK_WT:     AtomicI32 = AtomicI32::new(40);
+static TUNE_CASTLING_BONUS:      AtomicI32 = AtomicI32::new(80);
+static TUNE_EARLY_QUEEN_PENALTY: AtomicI32 = AtomicI32::new(60);
+
+/// Set a tunable search/eval parameter by name (called from UCI setoption handler).
+pub fn set_tune_param(name: &str, value: i32) {
+    match name {
+        "tal_aggression"      => TUNE_TAL_AGGRESSION.store(value, Ordering::Relaxed),
+        "futility_margin_d1"  => TUNE_FUTILITY_MARGIN_D1.store(value, Ordering::Relaxed),
+        "futility_margin_d2"  => TUNE_FUTILITY_MARGIN_D2.store(value, Ordering::Relaxed),
+        "aspiration_delta"    => TUNE_ASPIRATION_DELTA.store(value, Ordering::Relaxed),
+        "nmp_reduction"       => TUNE_NMP_REDUCTION.store(value, Ordering::Relaxed),
+        "lmr_move_index"      => TUNE_LMR_MOVE_INDEX.store(value, Ordering::Relaxed),
+        "se_beta_margin"      => TUNE_SE_BETA_MARGIN.store(value, Ordering::Relaxed),
+        "queen_attack_wt"     => TUNE_QUEEN_ATTACK_WT.store(value, Ordering::Relaxed),
+        "castling_bonus"      => TUNE_CASTLING_BONUS.store(value, Ordering::Relaxed),
+        "early_queen_penalty" => TUNE_EARLY_QUEEN_PENALTY.store(value, Ordering::Relaxed),
+        _ => {}
+    }
+}
 
 const INF: i32 = 100_000;
 const CHECKMATE: i32 = 50_000;
@@ -362,8 +393,6 @@ const EG_KING_TABLE: [i32; 64] = [
 // Tal-style bonuses
 // ---------------------------------------------------------------------------
 
-const TAL_AGGRESSION: f32 = 2.5;
-
 /// File mask: all 8 squares on a given file (0=a .. 7=h).
 const fn file_mask(file: u8) -> u64 {
     0x0101_0101_0101_0101u64 << file
@@ -401,11 +430,12 @@ fn tal_bonuses(board: &Board) -> i32 {
     let wk_zone = king_zone(wk_sq);
 
     // --- King attack: white pieces near black king ---
+    let queen_wt = TUNE_QUEEN_ATTACK_WT.load(Ordering::Relaxed);
     let mut w_attackers = 0i32;
     let mut w_attack_sum = 0i32;
     for &(bb, val) in &[
         (board.white_knights, 20), (board.white_bishops, 20),
-        (board.white_rooks, 25), (board.white_queens, 40),
+        (board.white_rooks, 25), (board.white_queens, queen_wt),
     ] {
         let near = (bb & bk_zone).count_ones() as i32;
         if near > 0 {
@@ -422,7 +452,7 @@ fn tal_bonuses(board: &Board) -> i32 {
     let mut b_attack_sum = 0i32;
     for &(bb, val) in &[
         (board.black_knights, 20), (board.black_bishops, 20),
-        (board.black_rooks, 25), (board.black_queens, 40),
+        (board.black_rooks, 25), (board.black_queens, queen_wt),
     ] {
         let near = (bb & wk_zone).count_ones() as i32;
         if near > 0 {
@@ -495,23 +525,25 @@ fn tal_bonuses(board: &Board) -> i32 {
         }
     }
 
-    // --- Castling bonus: +80cp if castling rights intact ---
+    // --- Castling bonus: +cp if castling rights intact ---
+    let castling_bonus = TUNE_CASTLING_BONUS.load(Ordering::Relaxed);
     if board.castling_rights & (crate::board::CASTLING_WK | crate::board::CASTLING_WQ) != 0 {
-        bonus += 80;
+        bonus += castling_bonus;
     }
     if board.castling_rights & (crate::board::CASTLING_BK | crate::board::CASTLING_BQ) != 0 {
-        bonus -= 80;
+        bonus -= castling_bonus;
     }
 
-    // --- Early queen penalty: -60cp if queen not on starting square before move 10 ---
+    // --- Early queen penalty: if queen not on starting square before move 10 ---
     if board.fullmove_number < 10 {
+        let eq_penalty = TUNE_EARLY_QUEEN_PENALTY.load(Ordering::Relaxed);
         // White queen starting square is d1 = index 3
         if board.white_queens != 0 && board.white_queens & (1u64 << 3) == 0 {
-            bonus -= 60;
+            bonus -= eq_penalty;
         }
         // Black queen starting square is d8 = index 59
         if board.black_queens != 0 && board.black_queens & (1u64 << 59) == 0 {
-            bonus += 60;
+            bonus += eq_penalty;
         }
     }
 
@@ -644,7 +676,8 @@ pub fn evaluate(board: &Board) -> i32 {
     let pst_score = (mg * mg_phase + eg * eg_phase) / MAX_PHASE;
 
     // Add Tal-style bonuses (white-relative, then flip for STM)
-    let tal = (tal_bonuses(board) as f32 * TAL_AGGRESSION) as i32;
+    let tal_agg = TUNE_TAL_AGGRESSION.load(Ordering::Relaxed) as f32 / 10.0;
+    let tal = (tal_bonuses(board) as f32 * tal_agg) as i32;
     let score = pst_score + tal;
 
     if board.side_to_move { score } else { -score }
@@ -1060,7 +1093,7 @@ fn ab_search(
     // --- Null Move Pruning ---
     if allow_null && !in_check && depth >= 3 && board.occupied().count_ones() >= 10 {
         let null_board = board.make_null_move();
-        let r = 2;
+        let r = TUNE_NMP_REDUCTION.load(Ordering::Relaxed) as u32;
         let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, counter_moves, None, network, false, nodes, node_limit, deadline, stop, tt);
         if score >= beta {
             return beta;
@@ -1079,7 +1112,7 @@ fn ab_search(
                 && tt_score_raw.abs() < CHECKMATE - 1000
                 && entry.flag != TT_UPPER
             {
-                let se_beta = tt_score_raw - 50;
+                let se_beta = tt_score_raw - TUNE_SE_BETA_MARGIN.load(Ordering::Relaxed);
                 let se_depth = depth / 2;
                 let se_moves = generate_moves(board);
                 let mut se_best = -INF;
@@ -1139,7 +1172,11 @@ fn ab_search(
             } else {
                 evaluate(board)
             };
-            let margin: i32 = if depth == 1 { 100 } else { 300 };
+            let margin: i32 = if depth == 1 {
+                TUNE_FUTILITY_MARGIN_D1.load(Ordering::Relaxed)
+            } else {
+                TUNE_FUTILITY_MARGIN_D2.load(Ordering::Relaxed)
+            };
             static_eval.abs() < CHECKMATE - 1000
                 && static_eval + margin <= alpha
         };
@@ -1187,7 +1224,7 @@ fn ab_search(
             let null_score;
 
             // --- Late Move Reductions (applied on top of null window) ---
-            if depth >= 3 && move_index > 3 && !is_capture && !is_killer && !in_check {
+            if depth >= 3 && move_index > TUNE_LMR_MOVE_INDEX.load(Ordering::Relaxed) as usize && !is_capture && !is_killer && !in_check {
                 null_score = -ab_search(&new_board, depth - 2, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
             } else {
                 null_score = -ab_search(&new_board, depth - 1, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
@@ -1359,7 +1396,7 @@ fn smp_worker(
 /// Returns the best move + score from the last completed depth.
 /// TT persists across depths for move ordering benefit.
 pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::time::Instant>, network: Option<&nnue::Network>, num_threads: usize) -> Option<(Move, i32, u32)> {
-    const ASPIRATION_DELTA: i32 = 50;
+    let asp_delta = TUNE_ASPIRATION_DELTA.load(Ordering::Relaxed);
     const MATE_THRESHOLD: i32 = CHECKMATE - 1000;
 
     let moves = generate_moves(board);
@@ -1407,7 +1444,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
             // Otherwise: center on previous score with +/- DELTA.
             let (mut alpha_init, mut beta_init) = match prev_score {
                 Some(s) if depth > 1 && s.abs() < MATE_THRESHOLD => {
-                    (s - ASPIRATION_DELTA, s + ASPIRATION_DELTA)
+                    (s - asp_delta, s + asp_delta)
                 }
                 _ => (-INF, INF),
             };
