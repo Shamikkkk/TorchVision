@@ -12,13 +12,19 @@ Requires cutechess-cli at CUTECHESS path below.
 """
 
 import argparse
+import io
 import json
 import math
 import os
 import random
 import re
 import subprocess
+import sys
 from pathlib import Path
+
+# Force UTF-8 output — Windows consoles default to cp1252 which can't
+# encode non-ASCII characters printed by this script.
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 # ─── Configuration ───────────────────────────────────────────────────
 
@@ -166,10 +172,10 @@ def run_spsa(iterations: int, resume_path: str = None):
 
         # ── Run match ────────────────────────────────────────────────
         print(f"\n=== SPSA iteration {k + 1}/{iterations} ===")
-        print(f"  θ+  TAL={theta_plus['TAL_AGGRESSION']:.1f}  "
+        print(f"  theta+  TAL={theta_plus['TAL_AGGRESSION']:.1f}  "
               f"FUT1={theta_plus['FUTILITY_MARGIN_D1']:.0f}  "
               f"ASP={theta_plus['ASPIRATION_DELTA']:.0f}")
-        print(f"  θ-  TAL={theta_minus['TAL_AGGRESSION']:.1f}  "
+        print(f"  theta-  TAL={theta_minus['TAL_AGGRESSION']:.1f}  "
               f"FUT1={theta_minus['FUTILITY_MARGIN_D1']:.0f}  "
               f"ASP={theta_minus['ASPIRATION_DELTA']:.0f}")
 
@@ -198,7 +204,7 @@ def run_spsa(iterations: int, resume_path: str = None):
             if param_info[name]["c_step"] == 1:
                 theta[name] = float(round(theta[name]))
 
-        print("  Updated θ: " + ", ".join(
+        print("  Updated theta: " + ", ".join(
             f"{n}={v:.1f}" for n, v in sorted(theta.items())
         ))
 
