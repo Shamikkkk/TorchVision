@@ -14,7 +14,7 @@ function resultBadge(result: string, username: string, white: string) {
 
   const label = draw ? '½-½' : result
   const cls = draw
-    ? 'bg-zinc-600 text-zinc-200'
+    ? 'bg-pyro-surface text-pyro-text-dim'
     : won
     ? 'bg-green-700 text-green-100'
     : 'bg-red-800 text-red-100'
@@ -37,12 +37,12 @@ export default function GameList({ games, username, onSelect, onBack }: Props) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-zinc-500 uppercase tracking-widest">
+        <span className="text-xs text-pyro-text-muted uppercase tracking-[0.18em] font-semibold">
           Recent games · {username}
         </span>
         <button
           onClick={onBack}
-          className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="text-xs text-pyro-text-dim hover:text-pyro-text transition-colors"
         >
           ← change user
         </button>
@@ -55,17 +55,17 @@ export default function GameList({ games, username, onSelect, onBack }: Props) {
           <button
             key={g.id}
             onClick={() => onSelect(g)}
-            className="w-full text-left rounded-lg border border-zinc-700/60 bg-zinc-800/50
-                       hover:bg-zinc-700/60 hover:border-zinc-600 transition-colors px-3 py-2.5"
+            className="w-full text-left rounded-lg border border-pyro-border-accent bg-pyro-surface/40
+                       hover:bg-pyro-surface/70 hover:border-ember-500/30 transition-colors px-3 py-2.5"
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm text-white font-medium truncate">vs {opponent}</span>
+              <span className="text-sm text-pyro-cream font-medium truncate">vs {opponent}</span>
               {resultBadge(g.result, username, g.white)}
             </div>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs text-zinc-500">{g.date}</span>
-              <span className="text-zinc-700">·</span>
-              <span className="text-xs text-zinc-500">{tcLabel(g.time_control)}</span>
+              <span className="text-xs text-pyro-text-dim">{g.date}</span>
+              <span className="text-pyro-text-faint">·</span>
+              <span className="text-xs text-pyro-text-dim">{tcLabel(g.time_control)}</span>
             </div>
           </button>
         )

@@ -122,6 +122,11 @@ export default function App() {
   const clockStarted = white_ms < 300_000 || black_ms < 300_000
   const openingName = history.length <= 30 ? detectOpening(history) : null
 
+  // Glow intensifies as Pyro's advantage grows (0 at 50cp, 1.0 at 300cp).
+  const pyroColor = humanColor === 'w' ? 'b' : 'w'
+  const pyroEval = pyroColor === 'w' ? (evalScore ?? 0) : -(evalScore ?? 0)
+  const attackGlow = Math.min(1, Math.max(0, (pyroEval - 50) / 250))
+
   const topSide = boardFlipped ? 'w' : 'b'
   const bottomSide = boardFlipped ? 'b' : 'w'
   const topMs = topSide === 'w' ? white_ms : black_ms
@@ -208,7 +213,17 @@ export default function App() {
                   />
                 )}
 
-                <div style={{ width: BOARD_SIZE, height: BOARD_SIZE }} className="rounded-sm overflow-hidden">
+                <div
+                  style={{
+                    width: BOARD_SIZE,
+                    height: BOARD_SIZE,
+                    boxShadow: attackGlow > 0.1
+                      ? `0 0 ${40 + attackGlow * 60}px ${attackGlow * 12}px rgba(255, 100, 40, ${0.25 + attackGlow * 0.45})`
+                      : 'none',
+                    transition: 'box-shadow 400ms ease-out',
+                  }}
+                  className="rounded-sm overflow-hidden"
+                >
                   <Board game={game} />
                 </div>
 
@@ -260,6 +275,15 @@ export default function App() {
                 />
               </div>
             </div>
+
+            {Math.abs(evalScore ?? 0) > 9000 && (
+              <div
+                className="pointer-events-none fixed inset-0 z-10"
+                style={{
+                  background: 'radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.5) 100%)',
+                }}
+              />
+            )}
 
             <GameOverModal
               status={status}

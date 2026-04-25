@@ -2,8 +2,8 @@ import { useMemo } from 'react'
 import { Chessboard } from 'react-chessboard'
 import type { AnalyzedMove } from '../../hooks/useAnalyzer'
 
-const LIGHT = '#EEDAB4'
-const DARK = '#B58863'
+const LIGHT = '#e8d4a8'
+const DARK = '#8b6240'
 const NOTATION_STYLE = { fontSize: '11px', fontWeight: '600', color: 'rgba(0,0,0,0.45)' }
 const DARK_SQ = { backgroundColor: DARK }
 const LIGHT_SQ = { backgroundColor: LIGHT }

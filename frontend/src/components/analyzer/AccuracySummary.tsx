@@ -29,10 +29,10 @@ export default function AccuracySummary({ summary }: Props) {
     <div className="space-y-2">
       {/* Accuracy */}
       <div className="flex items-end gap-2">
-        <span className={`text-3xl font-bold tabular-nums ${AccuracyColor(summary.accuracy)}`}>
+        <span className={`font-display text-3xl font-bold tabular-nums ${AccuracyColor(summary.accuracy)}`}>
           {summary.accuracy.toFixed(1)}%
         </span>
-        <span className="text-xs text-zinc-500 pb-1">
+        <span className="text-xs text-pyro-text-dim pb-1">
           accuracy · {playerMoves} moves analysed
         </span>
       </div>
@@ -45,11 +45,11 @@ export default function AccuracySummary({ summary }: Props) {
           return (
             <div
               key={key}
-              className="flex items-center gap-1.5 rounded-md bg-zinc-800/60 px-2 py-1"
+              className="flex items-center gap-1.5 rounded-md bg-pyro-surface/60 px-2 py-1"
             >
               <span className={`w-2 h-2 rounded-full shrink-0 ${color}`} />
-              <span className="font-mono text-xs text-zinc-400">{label}</span>
-              <span className="font-mono text-xs font-bold text-zinc-200 ml-auto">{count}</span>
+              <span className="font-mono text-xs text-pyro-text-dim">{label}</span>
+              <span className="font-mono text-xs font-bold text-pyro-text ml-auto">{count}</span>
             </div>
           )
         })}

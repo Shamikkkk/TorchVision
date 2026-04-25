@@ -18,7 +18,7 @@ const BADGE: Record<string, { bg: string; text: string; border: string; label: s
 export default function MoveClassification({ move }: Props) {
   if (!move) {
     return (
-      <div className="h-16 flex items-center justify-center text-xs text-zinc-600 italic">
+      <div className="h-16 flex items-center justify-center text-xs text-pyro-text-faint italic">
         Select a move to see analysis
       </div>
     )
@@ -46,11 +46,11 @@ export default function MoveClassification({ move }: Props) {
       {showComparison && (
         <div className="flex gap-4 mt-1.5 px-0.5">
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-zinc-500">Played</span>
-            <span className="font-mono text-sm text-zinc-300">{move.san}</span>
+            <span className="text-xs text-pyro-text-dim">Played</span>
+            <span className="font-mono text-sm text-pyro-text">{move.san}</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-zinc-500">Best</span>
+            <span className="text-xs text-pyro-text-dim">Best</span>
             <span className="font-mono text-sm text-green-400 font-semibold">{move.best_move}</span>
           </div>
         </div>

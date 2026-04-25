@@ -113,9 +113,33 @@ export default function Board({ game }: Props) {
     return sqs
   }, [premoveSq, premove])
 
+  const checkHighlight = useMemo(() => {
+    const sqs: Record<string, { background: string; animation: string }> = {}
+    try {
+      const chess = new Chess(fen)
+      if (chess.inCheck()) {
+        const board = chess.board()
+        const kingColor = chess.turn()
+        outer: for (let r = 0; r < 8; r++) {
+          for (let c = 0; c < 8; c++) {
+            const piece = board[r][c]
+            if (piece && piece.type === 'k' && piece.color === kingColor) {
+              sqs['abcdefgh'[c] + (8 - r)] = {
+                background: 'radial-gradient(circle, rgba(220, 60, 40, 0.65) 0%, transparent 70%)',
+                animation: 'pyroPulse 1.2s ease-in-out infinite',
+              }
+              break outer
+            }
+          }
+        }
+      }
+    } catch {}
+    return sqs
+  }, [fen])
+
   const customSquareStyles = useMemo(
-    () => ({ ...lastMoveSqs, ...selectedHighlight, ...legalDots, ...highlightedSquares, ...premoveHighlights }),
-    [lastMoveSqs, selectedHighlight, legalDots, highlightedSquares, premoveHighlights],
+    () => ({ ...lastMoveSqs, ...selectedHighlight, ...legalDots, ...highlightedSquares, ...premoveHighlights, ...checkHighlight }),
+    [lastMoveSqs, selectedHighlight, legalDots, highlightedSquares, premoveHighlights, checkHighlight],
   )
 
   function clearAnnotations() {

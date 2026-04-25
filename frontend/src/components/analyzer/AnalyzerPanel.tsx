@@ -20,7 +20,7 @@ const SYMBOL_COLORS: Record<string, string> = {
 
 function MoveSymbol({ symbol }: { symbol: string }) {
   if (!symbol) return null
-  return <span className={`text-xs font-bold shrink-0 ${SYMBOL_COLORS[symbol] ?? 'text-zinc-400'}`}>{symbol}</span>
+  return <span className={`text-xs font-bold shrink-0 ${SYMBOL_COLORS[symbol] ?? 'text-pyro-text-dim'}`}>{symbol}</span>
 }
 
 export default function AnalyzerPanel() {
@@ -57,11 +57,11 @@ export default function AnalyzerPanel() {
   if (state === 'idle') {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-12">
-        <p className="text-zinc-400 text-sm">Enter a chess.com username to analyse recent games</p>
+        <p className="text-pyro-text-dim text-sm">Enter a chess.com username to analyse recent games</p>
         <div className="flex gap-2">
           <input
-            className="rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm text-white
-                       placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 w-52"
+            className="rounded-lg bg-pyro-surface border border-pyro-border-accent px-3 py-2 text-sm text-pyro-text
+                       placeholder:text-pyro-text-faint focus:outline-none focus:border-ember-500 w-52"
             placeholder="chess.com username"
             value={username}
             onChange={e => setUsername(e.target.value)}
@@ -70,8 +70,8 @@ export default function AnalyzerPanel() {
           <button
             onClick={() => username.trim() && fetchGames(username.trim())}
             disabled={!username.trim()}
-            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40
-                       disabled:cursor-not-allowed text-sm font-semibold transition-colors"
+            className="px-4 py-2 rounded-lg bg-ember-600 hover:bg-ember-500 disabled:opacity-40
+                       disabled:cursor-not-allowed text-sm font-semibold text-pyro-cream transition-colors"
           >
             Fetch games
           </button>
@@ -85,8 +85,8 @@ export default function AnalyzerPanel() {
   if (state === 'loading_games') {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-16">
-        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-zinc-400 text-sm">Fetching games for <span className="text-white">{username}</span>…</p>
+        <div className="w-6 h-6 border-2 border-ember-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-pyro-text-dim text-sm">Fetching games for <span className="text-pyro-cream">{username}</span>…</p>
       </div>
     )
   }
@@ -112,16 +112,16 @@ export default function AnalyzerPanel() {
     const pct = total > 0 ? Math.round((done / total) * 100) : 0
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-16">
-        <p className="text-zinc-300 text-sm font-semibold">
+        <p className="text-pyro-text text-sm font-semibold">
           Analysing game… {done}/{total} moves
         </p>
-        <div className="w-64 h-2 bg-zinc-700 rounded-full overflow-hidden">
+        <div className="w-64 h-2 bg-pyro-surface rounded-full overflow-hidden">
           <div
-            className="h-full bg-blue-500 transition-all duration-300 rounded-full"
+            className="h-full bg-ember-500 transition-all duration-300 rounded-full"
             style={{ width: `${pct}%` }}
           />
         </div>
-        <p className="text-zinc-600 text-xs">Using Stockfish at depth 15</p>
+        <p className="text-pyro-text-faint text-xs">Using Stockfish at depth 15</p>
       </div>
     )
   }
@@ -144,7 +144,7 @@ export default function AnalyzerPanel() {
         <div className="flex items-center justify-between gap-2">
           <button
             onClick={backToGames}
-            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="text-xs text-pyro-text-dim hover:text-pyro-text transition-colors"
           >
             ← back to games
           </button>
@@ -165,8 +165,8 @@ export default function AnalyzerPanel() {
       {/* Right: accuracy + move list */}
       <div className="flex flex-col gap-3 min-w-0 flex-1" style={{ maxWidth: 300 }}>
         {summary && (
-          <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/30 p-3">
-            <div className="text-xs text-zinc-500 uppercase tracking-widest mb-2">
+          <div className="rounded-xl border border-pyro-border-accent bg-pyro-surface/40 p-3">
+            <div className="text-xs text-pyro-text-muted uppercase tracking-[0.18em] font-semibold mb-2">
               {selectedGame
                 ? `${selectedGame.white} vs ${selectedGame.black}`
                 : 'Game Summary'}
@@ -176,14 +176,14 @@ export default function AnalyzerPanel() {
         )}
 
         {/* Move list */}
-        <div className="rounded-xl border border-zinc-700/50 overflow-hidden">
-          <div className="px-3 py-2 text-xs font-semibold text-zinc-500 uppercase tracking-widest border-b border-zinc-700">
+        <div className="rounded-xl border border-pyro-border-accent overflow-hidden">
+          <div className="px-3 py-2 text-xs font-semibold text-pyro-text-muted uppercase tracking-[0.18em] border-b border-pyro-border-accent">
             Moves
           </div>
           <div ref={moveListRef} className="overflow-y-auto" style={{ maxHeight: 340 }}>
             {Array.from({ length: rowCount }, (_, i) => {
-              const wi = i * 2       // white move index
-              const bi = i * 2 + 1  // black move index
+              const wi = i * 2
+              const bi = i * 2 + 1
               const wm = moves[wi]
               const bm = moves[bi]
               const isEven = i % 2 === 0
@@ -191,12 +191,12 @@ export default function AnalyzerPanel() {
               return (
                 <div
                   key={i}
-                  className={`flex items-center gap-1 px-2 py-0.5 ${isEven ? 'bg-zinc-800' : 'bg-zinc-800/60'}`}
+                  className={`flex items-center gap-1 px-2 py-0.5 ${isEven ? 'bg-pyro-surface/30' : 'bg-transparent'}`}
                   ref={
                     wi === currentMoveIdx || bi === currentMoveIdx ? currentRowRef : undefined
                   }
                 >
-                  <span className="w-6 text-right text-xs text-zinc-600 font-mono select-none shrink-0">
+                  <span className="w-6 text-right text-xs text-pyro-text-faint font-mono select-none shrink-0">
                     {i + 1}.
                   </span>
                   <MoveCell move={wm} idx={wi} currentIdx={currentMoveIdx} onClick={setCurrentMoveIdx} />
@@ -218,8 +218,8 @@ function NavBtn({ onClick, label, title }: { onClick: () => void; label: string;
     <button
       onClick={onClick}
       title={title}
-      className="w-7 h-7 flex items-center justify-center rounded bg-zinc-800 hover:bg-zinc-700
-                 text-zinc-300 hover:text-white text-xs transition-colors border border-zinc-700"
+      className="w-7 h-7 flex items-center justify-center rounded bg-pyro-surface hover:bg-pyro-border
+                 text-pyro-text-dim hover:text-pyro-text text-xs transition-colors border border-pyro-border-accent"
     >
       {label}
     </button>
@@ -248,16 +248,16 @@ function MoveCell({
       className={[
         'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-mono text-xs transition-colors w-[110px] shrink-0',
         isCurrent
-          ? 'bg-blue-500 text-white'
+          ? 'bg-ember-500/15 text-ember-400'
           : isPlayer
-          ? 'text-zinc-200 hover:bg-zinc-600'
-          : 'text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300',
+          ? 'text-pyro-text hover:bg-pyro-surface'
+          : 'text-pyro-text-dim hover:bg-pyro-border hover:text-pyro-text',
       ].join(' ')}
     >
       <span className="truncate">{move.san}</span>
       <MoveSymbol symbol={move.symbol} />
       {move.cp_loss > 30 && !isCurrent && (
-        <span className="ml-auto text-zinc-600 text-xs font-normal tabular-nums">
+        <span className="ml-auto text-pyro-text-faint text-xs font-normal tabular-nums">
           -{move.cp_loss}
         </span>
       )}
