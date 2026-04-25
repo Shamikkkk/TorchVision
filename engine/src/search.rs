@@ -434,41 +434,40 @@ fn tal_bonuses(board: &Board) -> i32 {
         bonus -= b_attack_sum * b_attackers;
     }
 
-    /* G8 killer-instinct: REVERTED — bonus magnitude too large at TAL=2.5.
-       When bk_exposed fired with 2+ attackers, the doubled w_attack_sum*w_attackers
-       term stacked with TAL_AGGRESSION=2.5 could produce 400-800cp from king attack
-       alone, causing unsound material sacrifices. Revisit with capped/scaled bonus.
-
-    let bk_file_i = (bk_sq % 8) as i32;
-    let bk_rank   = bk_sq / 8;
-    let mut bk_shield = 0i32;
-    for f in (bk_file_i - 1).max(0)..=(bk_file_i + 1).min(7) {
-        for &r in &[5u8, 6u8] {
-            if board.black_pawns & (1u64 << (r * 8 + f as u8)) != 0 {
-                bk_shield += 1;
+    // --- King exposure bonus (G8 v2, capped additive) ---
+    // Requires BOTH weak pawn shield AND 2+ attackers near king.
+    // Capped at 50cp inside tal_bonuses → max 125cp after TAL_AGGRESSION=2.5.
+    {
+        // Black king exposure (white attacking)
+        let bk_file_i = (bk_sq % 8) as i32;
+        let mut bk_shield = 0i32;
+        for f in (bk_file_i - 1).max(0)..=(bk_file_i + 1).min(7) {
+            for &r in &[5u8, 6u8] {
+                if board.black_pawns & (1u64 << (r * 8 + f as u8)) != 0 {
+                    bk_shield += 1;
+                }
             }
         }
-    }
-    let bk_exposed = bk_shield <= 1 || (bk_rank >= 2 && bk_rank <= 5);
-    if bk_exposed && w_attackers >= 2 {
-        bonus += w_attack_sum * w_attackers;
-    }
+        if bk_shield <= 1 && w_attackers >= 2 {
+            let raw = w_attack_sum.min(100) / 2;
+            bonus += raw.min(50);
+        }
 
-    let wk_file_i = (wk_sq % 8) as i32;
-    let wk_rank   = wk_sq / 8;
-    let mut wk_shield = 0i32;
-    for f in (wk_file_i - 1).max(0)..=(wk_file_i + 1).min(7) {
-        for &r in &[1u8, 2u8] {
-            if board.white_pawns & (1u64 << (r * 8 + f as u8)) != 0 {
-                wk_shield += 1;
+        // White king exposure (black attacking)
+        let wk_file_i = (wk_sq % 8) as i32;
+        let mut wk_shield = 0i32;
+        for f in (wk_file_i - 1).max(0)..=(wk_file_i + 1).min(7) {
+            for &r in &[1u8, 2u8] {
+                if board.white_pawns & (1u64 << (r * 8 + f as u8)) != 0 {
+                    wk_shield += 1;
+                }
             }
         }
+        if wk_shield <= 1 && b_attackers >= 2 {
+            let raw = b_attack_sum.min(100) / 2;
+            bonus -= raw.min(50);
+        }
     }
-    let wk_exposed = wk_shield <= 1 || (wk_rank >= 2 && wk_rank <= 5);
-    if wk_exposed && b_attackers >= 2 {
-        bonus -= b_attack_sum * b_attackers;
-    }
-    */
 
     // --- Pawn storm: pawns on rank 5/6 near enemy king file ---
     let bk_file = bk_sq % 8;
