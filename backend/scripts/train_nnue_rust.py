@@ -6,14 +6,18 @@ Architecture: 768 -> 256x2 -> 1 (matches engine/src/nnue.rs)
   - Output: Linear(512, 1) -> raw centipawns
   - Activation: CReLU (clamp 0..1)
 
-Loss: MSE(output, target_cp)
-  target_cp = score_cp (STM-relative centipawns)
+Loss: WDL-blended sigmoid MSE
+  sigmoid_out = sigmoid(output / LOSS_SCALE)
+  eval_target = sigmoid(eval_cp / LOSS_SCALE)
+  wdl_target  = LAMBDA * eval_target + (1 - LAMBDA) * result_stm
+  loss = MSE(sigmoid_out, wdl_target)
 
 After training, quantizes weights and writes engine/pyro.nnue.
 
 Usage:
   cd backend && source venv/Scripts/activate
   python -m scripts.train_nnue_rust --plain data/selfplay_rust.plain
+  python -m scripts.train_nnue_rust --plain data/selfplay_d6.plain  # auto-detects pipe format
   python -m scripts.train_nnue_rust --csv data/lichess_positions.csv
 """
 
@@ -40,7 +44,10 @@ INPUT_SIZE = 768
 HIDDEN_SIZE = 256
 QA = 255
 QB = 64
-SCALE = 400.0
+SCALE = 600.0      # cosmetic / future use (matches nnue.rs SCALE)
+
+LOSS_SCALE = 400.0  # sigmoid scaling for WDL loss (standard convention)
+LAMBDA = 0.5        # blend coefficient: 0=pure result, 1=pure eval
 
 MAGIC = bytes([0x4E, 0x4E, 0x55, 0x45])  # "NNUE"
 VERSION = 1
@@ -87,8 +94,20 @@ def fen_to_features(fen) -> tuple[torch.Tensor, torch.Tensor]:
 # Data loading
 # ---------------------------------------------------------------------------
 
+EVAL_CLIP = 2000  # clamp eval_cp to [-2000, 2000]
+
+
 def parse_plain_file(path: str) -> list[dict]:
-    """Parse nnue-pytorch plain text format into list of position dicts."""
+    """Parse nnue-pytorch plain text format (6-line blocks) into position dicts.
+
+    Format:
+        fen <FEN>
+        move <uci>
+        score <cp>
+        ply <n>
+        result <-1|0|1>
+        e
+    """
     positions = []
     current = {}
 
@@ -111,12 +130,53 @@ def parse_plain_file(path: str) -> list[dict]:
             elif line.startswith("ply "):
                 current["ply"] = int(line[4:])
             elif line.startswith("result "):
-                current["result"] = int(line[7:])
+                # Legacy format: result is integer (-1, 0, 1) from white's perspective
+                result_int = int(line[7:])
+                current["result_white"] = (result_int + 1) / 2.0  # convert to [0, 0.5, 1.0]
 
     return positions
 
 
-EVAL_CLIP = 2000  # clamp eval_cp to [-2000, 2000]
+def parse_pipe_file(path: str) -> list[dict]:
+    """Parse pipe-separated format: FEN | eval_cp_stm | result_white.
+
+    eval_cp_stm  = centipawns from side-to-move perspective
+    result_white = 1.0 (white wins) / 0.5 (draw) / 0.0 (black wins)
+    """
+    positions = []
+
+    with open(path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("|")
+            if len(parts) != 3:
+                continue
+            fen = parts[0].strip()
+            try:
+                eval_stm = int(parts[1].strip())
+                result_white = float(parts[2].strip())
+            except ValueError:
+                continue
+
+            eval_stm = max(-EVAL_CLIP, min(EVAL_CLIP, eval_stm))
+
+            # Determine white-relative score from STM-relative eval
+            # FEN active color field is the 2nd token
+            active_color = fen.split()[1]
+            white_to_move = active_color == "w"
+            score_white = eval_stm if white_to_move else -eval_stm
+
+            positions.append({
+                "fen": fen,
+                "score": score_white,           # white-relative centipawns
+                "eval_stm": eval_stm,           # STM-relative (for direct use)
+                "result_white": result_white,
+                "white_to_move": white_to_move,
+            })
+
+    return positions
 
 
 def parse_csv_file(path: str) -> list[dict]:
@@ -129,6 +189,19 @@ def parse_csv_file(path: str) -> list[dict]:
             score = max(-EVAL_CLIP, min(EVAL_CLIP, score))
             positions.append({"fen": row["fen"], "score": int(score)})
     return positions
+
+
+def _detect_format(path: str) -> str:
+    """Peek at first non-empty line to detect pipe-separated vs legacy block format."""
+    with open(path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                if "|" in line:
+                    return "pipe"
+                else:
+                    return "plain"
+    return "plain"
 
 
 MAX_PIECES = 32  # max active features per perspective
@@ -167,23 +240,27 @@ class NNUEDataset(Dataset):
 
     def __init__(self, positions: list[dict]):
         n = len(positions)
-        # Store sparse indices (int16) and targets — ~0.3GB for 5M positions
+        # Store sparse indices (int16), eval targets, and WDL results
         self.stm_indices = np.zeros((n, MAX_PIECES), dtype=np.int16)
         self.nstm_indices = np.zeros((n, MAX_PIECES), dtype=np.int16)
-        self.targets = np.zeros(n, dtype=np.float32)
+        self.targets = np.zeros(n, dtype=np.float32)   # eval_cp from STM perspective
+        self.results = np.zeros(n, dtype=np.float32)   # result from STM perspective [0, 0.5, 1.0]
 
         for i, pos in enumerate(positions):
             w_idx, b_idx, white_to_move = fen_to_indices(pos["fen"])
-            score_cp = pos["score"]  # white-relative centipawns
 
             if white_to_move:
                 self.stm_indices[i] = w_idx
                 self.nstm_indices[i] = b_idx
-                self.targets[i] = score_cp  # already STM-relative
+                self.targets[i] = float(pos.get("eval_stm", pos["score"]))
+                result_white = pos.get("result_white", 0.5)
+                self.results[i] = float(result_white)  # white to move -> result_stm = result_white
             else:
                 self.stm_indices[i] = b_idx
                 self.nstm_indices[i] = w_idx
-                self.targets[i] = -score_cp  # flip for black STM
+                self.targets[i] = float(pos.get("eval_stm", -pos["score"]))
+                result_white = pos.get("result_white", 0.5)
+                self.results[i] = 1.0 - float(result_white)  # flip for black STM
 
             if (i + 1) % 500_000 == 0:
                 print(f"  Encoded {i+1:,}/{n:,} positions...", flush=True)
@@ -194,14 +271,13 @@ class NNUEDataset(Dataset):
         return len(self.targets)
 
     def __getitem__(self, idx):
-        # Return sparse indices + target — collate_fn builds dense tensors
         return (self.stm_indices[idx], self.nstm_indices[idx],
-                self.targets[idx])
+                self.targets[idx], self.results[idx])
 
 
 def collate_sparse(batch):
     """Custom collate: convert sparse indices to dense feature tensors (vectorized)."""
-    stm_idx, nstm_idx, targets = zip(*batch)
+    stm_idx, nstm_idx, targets, results = zip(*batch)
     bsz = len(batch)
 
     # Stack into (bsz, MAX_PIECES) arrays
@@ -211,6 +287,7 @@ def collate_sparse(batch):
     stm_feat = torch.zeros(bsz, INPUT_SIZE, dtype=torch.float32)
     nstm_feat = torch.zeros(bsz, INPUT_SIZE, dtype=torch.float32)
     tgt = torch.tensor(targets, dtype=torch.float32).unsqueeze(1)
+    res = torch.tensor(results, dtype=torch.float32).unsqueeze(1)
 
     # Vectorized scatter: create row indices and valid column indices
     rows = np.repeat(np.arange(bsz), MAX_PIECES)
@@ -224,7 +301,7 @@ def collate_sparse(batch):
     stm_feat[rows[stm_valid], stm_flat[stm_valid]] = 1.0
     nstm_feat[rows[nstm_valid], nstm_flat[nstm_valid]] = 1.0
 
-    return stm_feat, nstm_feat, tgt
+    return stm_feat, nstm_feat, tgt, res
 
 
 # ---------------------------------------------------------------------------
@@ -270,9 +347,6 @@ class RustNNUE(nn.Module):
             self.ft.weight.add_(torch.randn_like(self.ft.weight) * 0.005)
 
             # Output weights: DIVISOR / HIDDEN_SIZE
-            # ft outputs piece_val/DIVISOR per neuron, 256 neurons sum to
-            # 256 * piece_val/DIVISOR.  We need out_w * that = piece_val,
-            # so out_w = DIVISOR / 256 = 19.53.
             out_float = DIVISOR / HIDDEN_SIZE
             self.out.weight.zero_()
             self.out.weight[0, :HIDDEN_SIZE] = out_float    # STM positive
@@ -299,9 +373,18 @@ def train(args):
     if args.csv:
         print(f"Loading CSV from {args.csv}...", flush=True)
         positions = parse_csv_file(args.csv)
+        fmt = "csv"
     else:
-        print(f"Loading data from {args.plain}...", flush=True)
-        positions = parse_plain_file(args.plain)
+        fmt = _detect_format(args.plain)
+        if fmt == "pipe":
+            print(f"Format detected: pipe-separated (new)", flush=True)
+            print(f"Loading data from {args.plain}...", flush=True)
+            positions = parse_pipe_file(args.plain)
+        else:
+            print(f"Format detected: plain blocks (legacy)", flush=True)
+            print(f"Loading data from {args.plain}...", flush=True)
+            positions = parse_plain_file(args.plain)
+
     print(f"Loaded {len(positions):,} positions", flush=True)
 
     if len(positions) < 100:
@@ -324,8 +407,15 @@ def train(args):
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
                             num_workers=0, collate_fn=collate_sparse)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}", flush=True)
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        device = torch.device("cuda")
+        print(f"Device: cuda ({gpu_name})", flush=True)
+    else:
+        device = torch.device("cpu")
+        print(f"Device: cpu", flush=True)
+
+    print(f"Loss: WDL-blended sigmoid MSE (lambda={LAMBDA}, scale={LOSS_SCALE})", flush=True)
 
     if args.resume and os.path.isfile(DEFAULT_OUTPUT):
         print(f"Resuming from {DEFAULT_OUTPUT}", flush=True)
@@ -335,7 +425,11 @@ def train(args):
     else:
         print("Initializing with material knowledge", flush=True)
         model = RustNNUE(material_init=True).to(device)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.epochs, eta_min=1e-5
+    )
 
     os.makedirs(MODELS_DIR, exist_ok=True)
     best_val_loss = float("inf")
@@ -347,15 +441,22 @@ def train(args):
         train_loss_sum = 0.0
         train_batches = 0
 
-        for stm, nstm, target in train_loader:
-            stm, nstm, target = stm.to(device), nstm.to(device), target.to(device)
+        for stm, nstm, target, result in train_loader:
+            stm = stm.to(device)
+            nstm = nstm.to(device)
+            target = target.to(device)
+            result = result.to(device)
 
             output = model(stm, nstm)
-            loss = F.mse_loss(output, target)
+
+            sigmoid_out = torch.sigmoid(output / LOSS_SCALE)
+            eval_target = torch.sigmoid(target / LOSS_SCALE)
+            wdl_target = LAMBDA * eval_target + (1.0 - LAMBDA) * result
+            loss = F.mse_loss(sigmoid_out, wdl_target)
 
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1000.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
             train_loss_sum += loss.item()
@@ -369,20 +470,31 @@ def train(args):
         val_batches = 0
 
         with torch.no_grad():
-            for stm, nstm, target in val_loader:
-                stm, nstm, target = stm.to(device), nstm.to(device), target.to(device)
+            for stm, nstm, target, result in val_loader:
+                stm = stm.to(device)
+                nstm = nstm.to(device)
+                target = target.to(device)
+                result = result.to(device)
 
                 output = model(stm, nstm)
-                loss = F.mse_loss(output, target)
+
+                sigmoid_out = torch.sigmoid(output / LOSS_SCALE)
+                eval_target = torch.sigmoid(target / LOSS_SCALE)
+                wdl_target = LAMBDA * eval_target + (1.0 - LAMBDA) * result
+                loss = F.mse_loss(sigmoid_out, wdl_target)
 
                 val_loss_sum += loss.item()
                 val_batches += 1
 
         val_loss = val_loss_sum / max(val_batches, 1)
+        current_lr = scheduler.get_last_lr()[0]
 
         print(f"Epoch {epoch:3d}/{args.epochs}  "
-              f"train_loss={train_loss:.6f}  val_loss={val_loss:.6f}"
+              f"train_loss={train_loss:.6f}  val_loss={val_loss:.6f}  "
+              f"lr={current_lr:.2e}"
               f"{'  *best*' if val_loss < best_val_loss else ''}", flush=True)
+
+        scheduler.step()
 
         # Early stopping
         if val_loss < best_val_loss:
@@ -474,7 +586,7 @@ def export_nnue(model_path: str):
 def main():
     parser = argparse.ArgumentParser(description="Train NNUE on self-play or Stockfish data")
     parser.add_argument("--plain", type=str, default=None,
-                        help="Path to .plain training data")
+                        help="Path to .plain training data (auto-detects pipe vs block format)")
     parser.add_argument("--csv", type=str, default=None,
                         help="Path to CSV with fen,eval_cp columns")
     parser.add_argument("--epochs", type=int, default=30, help="Max epochs")
