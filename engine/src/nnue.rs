@@ -15,7 +15,7 @@ pub const QA: i32 = 255;
 /// Quantization parameter for output weights
 pub const QB: i32 = 64;
 /// Centipawn scaling factor
-pub const SCALE: i32 = 400;
+pub const SCALE: i32 = 600;
 
 // Piece types (must match movegen constants)
 const PAWN: u8 = 0;

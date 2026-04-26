@@ -58,7 +58,11 @@
       "Bash(./cutechess-cli.exe -engine name=Pyro-noSEE cmd=C:/Users/shami/OneDrive/Documents/torch/engine/target/release/pyro.exe arg=--no-nnue -engine name=SF-1700 cmd=C:/Users/shami/Downloads/stockfish-windows-x86-64-avx2/stockfish/stockfish-windows-x86-64-avx2.exe option.UCI_LimitStrength=true option.UCI_Elo=1700 -each proto=uci tc=10+0.1 -rounds 10 -games 2 -repeat -recover)",
       "Bash(./cutechess-cli.exe -engine name=Pyro-1thr cmd=C:/Users/shami/OneDrive/Documents/torch/engine/target/release/pyro.exe arg=--no-nnue -engine name=SF-1700 cmd=C:/Users/shami/Downloads/stockfish-windows-x86-64-avx2/stockfish/stockfish-windows-x86-64-avx2.exe option.UCI_LimitStrength=true option.UCI_Elo=1700 -each proto=uci tc=10+0.1 -rounds 10 -games 2 -repeat -recover)",
       "Bash(./cutechess-cli.exe -engine name=Pyro-plyfix cmd=C:/Users/shami/OneDrive/Documents/torch/engine/target/release/pyro.exe arg=--no-nnue -engine name=SF-1700 cmd=C:/Users/shami/Downloads/stockfish-windows-x86-64-avx2/stockfish/stockfish-windows-x86-64-avx2.exe option.UCI_LimitStrength=true option.UCI_Elo=1700 -each proto=uci tc=10+0.1 -rounds 10 -games 2 -repeat -recover)",
-      "Bash(cargo check *)"
+      "Bash(cargo check *)",
+      "Bash(cargo --version)",
+      "Bash(wmic cpu *)",
+      "Bash(\"C:/Users/shami/OneDrive/Documents/torch/engine/target/release/deps/pyro.exe\" --no-nnue)",
+      "Bash(\"C:/Users/shami/OneDrive/Documents/torch/engine/target/release/deps/pyro.exe\")"
     ]
   }
 }

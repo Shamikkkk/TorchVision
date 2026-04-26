@@ -939,11 +939,57 @@ fn time_up(deadline: Option<std::time::Instant>, stop: &AtomicBool) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Incremental NNUE accumulator update
+// ---------------------------------------------------------------------------
+
+/// Incrementally update the NNUE accumulator for a move.
+/// Must be called BEFORE make_move — reads piece positions from the current board.
+fn acc_update(
+    parent: &nnue::Accumulator,
+    network: &nnue::Network,
+    board: &Board,
+    mv: &Move,
+) -> nnue::Accumulator {
+    let mut acc = parent.clone();
+    let is_white = board.side_to_move;
+    let moving_piece = movegen::piece_type_at(board, mv.from_sq, is_white);
+
+    acc.remove_feature(network, mv.from_sq, moving_piece, is_white);
+
+    if mv.flags & movegen::FLAG_CAPTURE != 0 {
+        if mv.flags & movegen::FLAG_EN_PASSANT != 0 {
+            let cap_sq = if is_white { mv.to_sq - 8 } else { mv.to_sq + 8 };
+            acc.remove_feature(network, cap_sq, movegen::PAWN, !is_white);
+        } else {
+            let cap_piece = movegen::piece_type_at(board, mv.to_sq, !is_white);
+            acc.remove_feature(network, mv.to_sq, cap_piece, !is_white);
+        }
+    }
+
+    let dest_piece = mv.promotion.unwrap_or(moving_piece);
+    acc.add_feature(network, mv.to_sq, dest_piece, is_white);
+
+    if mv.flags & movegen::FLAG_CASTLING != 0 {
+        let (rook_from, rook_to) = match mv.to_sq {
+            6  => (7u8,  5u8),
+            2  => (0u8,  3u8),
+            62 => (63u8, 61u8),
+            58 => (56u8, 59u8),
+            _  => unreachable!(),
+        };
+        acc.remove_feature(network, rook_from, movegen::ROOK, is_white);
+        acc.add_feature(network, rook_to, movegen::ROOK, is_white);
+    }
+
+    acc
+}
+
+// ---------------------------------------------------------------------------
 // Quiescence search
 // ---------------------------------------------------------------------------
 
 /// Search captures only until the position is quiet.
-fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Option<&nnue::Network>, nodes: &AtomicU64, node_limit: u64, deadline: Option<std::time::Instant>, stop: &AtomicBool) -> i32 {
+fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Option<&nnue::Network>, acc: Option<&nnue::Accumulator>, nodes: &AtomicU64, node_limit: u64, deadline: Option<std::time::Instant>, stop: &AtomicBool) -> i32 {
     nodes.fetch_add(1, Ordering::Relaxed);
 
     let all_moves = generate_moves(board);
@@ -956,9 +1002,8 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Opt
         return 0;
     }
 
-    let stand_pat = if let Some(net) = network {
-        let acc = nnue::Accumulator::from_board(net, board);
-        net.evaluate(&acc, board.side_to_move)
+    let stand_pat = if let (Some(net), Some(a)) = (network, acc) {
+        net.evaluate(a, board.side_to_move)
     } else {
         evaluate(board)
     };
@@ -998,8 +1043,9 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Opt
         if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, stop) {
             break;
         }
+        let child_acc = network.map(|net| acc_update(acc.unwrap(), net, board, mv));
         let new_board = make_move(board, mv);
-        let score = -quiescence(&new_board, -beta, -alpha, ply + 1, network, nodes, node_limit, deadline, stop);
+        let score = -quiescence(&new_board, -beta, -alpha, ply + 1, network, child_acc.as_ref(), nodes, node_limit, deadline, stop);
         if score >= beta {
             return beta;
         }
@@ -1023,7 +1069,7 @@ pub fn alpha_beta(board: &Board, depth: u32, alpha: i32, beta: i32) -> i32 {
     let nodes = AtomicU64::new(0);
     let tt = TTable::new();
     let stop = AtomicBool::new(false);
-    ab_search(board, depth, alpha, beta, 0, &mut killers, &mut history, &mut counter_moves, None, None, true, &nodes, u64::MAX, None, &stop, &tt)
+    ab_search(board, depth, alpha, beta, 0, &mut killers, &mut history, &mut counter_moves, None, None, None, true, &nodes, u64::MAX, None, &stop, &tt)
 }
 
 /// Recursive alpha-beta with move ordering, killer heuristic, history, NMP, LMR, and TT.
@@ -1032,6 +1078,7 @@ fn ab_search(
     ply: usize, killers: &mut Killers, history: &mut History,
     counter_moves: &mut CounterMoves, prev_move: Option<(u8, u8)>,
     network: Option<&nnue::Network>,
+    acc: Option<&nnue::Accumulator>,
     allow_null: bool, nodes: &AtomicU64, node_limit: u64,
     deadline: Option<std::time::Instant>,
     stop: &AtomicBool,
@@ -1040,22 +1087,21 @@ fn ab_search(
     nodes.fetch_add(1, Ordering::Relaxed);
 
     if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, stop) {
-        return if let Some(net) = network {
-            let acc = nnue::Accumulator::from_board(net, board);
-            net.evaluate(&acc, board.side_to_move)
+        return if let (Some(net), Some(a)) = (network, acc) {
+            net.evaluate(a, board.side_to_move)
         } else {
             evaluate(board)
         };
     }
 
     if depth == 0 {
-        return quiescence(board, alpha, beta, ply, network, nodes, node_limit, deadline, stop);
+        return quiescence(board, alpha, beta, ply, network, acc, nodes, node_limit, deadline, stop);
     }
 
     // Hard ply cap: prevents stack overflow from unlimited check extensions
     // in perpetual-check positions. Any position at this depth is quiesced.
     if ply >= 2 * MAX_DEPTH {
-        return quiescence(board, alpha, beta, ply, network, nodes, node_limit, deadline, stop);
+        return quiescence(board, alpha, beta, ply, network, acc, nodes, node_limit, deadline, stop);
     }
 
     // --- TT probe ---
@@ -1095,7 +1141,7 @@ fn ab_search(
         let null_board = board.make_null_move();
         let base_r = TUNE_NMP_REDUCTION.load(Ordering::Relaxed) as u32;
         let r = base_r + depth / 6;
-        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, counter_moves, None, network, false, nodes, node_limit, deadline, stop, tt);
+        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, counter_moves, None, network, acc, false, nodes, node_limit, deadline, stop, tt);
         if score >= beta {
             return beta;
         }
@@ -1109,7 +1155,7 @@ fn ab_search(
         ab_search(
             board, depth - 2, alpha, beta, ply,
             killers, history, counter_moves, prev_move,
-            network, false,
+            network, acc, false,
             nodes, node_limit, deadline, stop, tt,
         );
         tt_move = tt.probe(hash).and_then(|e| e.best_move());
@@ -1135,10 +1181,11 @@ fn ab_search(
                     if mv.from_sq == tt_mv.0 && mv.to_sq == tt_mv.1 {
                         continue;
                     }
+                    let se_child_acc = network.map(|net| acc_update(acc.unwrap(), net, board, mv));
                     let new_board = make_move(board, mv);
                     let se_score = -ab_search(
                         &new_board, se_depth.saturating_sub(1), -se_beta, -se_beta + 1,
-                        ply + 1, killers, history, counter_moves, None, network, false,
+                        ply + 1, killers, history, counter_moves, None, network, se_child_acc.as_ref(), false,
                         nodes, node_limit, deadline, stop, tt,
                     );
                     if se_score >= se_beta {
@@ -1181,9 +1228,8 @@ fn ab_search(
         && depth <= 2
         && alpha.abs() < CHECKMATE - 1000
         && {
-            let static_eval = if let Some(net) = network {
-                let acc = nnue::Accumulator::from_board(net, board);
-                net.evaluate(&acc, board.side_to_move)
+            let static_eval = if let (Some(net), Some(a)) = (network, acc) {
+                net.evaluate(a, board.side_to_move)
             } else {
                 evaluate(board)
             };
@@ -1210,6 +1256,7 @@ fn ab_search(
             break;
         }
 
+        let child_acc = network.map(|net| acc_update(acc.unwrap(), net, board, mv));
         let new_board = make_move(board, mv);
         let is_capture = mv.flags & movegen::FLAG_CAPTURE != 0;
         let is_promotion = mv.promotion.is_some();
@@ -1249,22 +1296,22 @@ fn ab_search(
         let mv_prev = Some((mv.from_sq, mv.to_sq));
         if move_index == 0 {
             // PV move: full window + full depth, plus singular extension if applicable.
-            score = -ab_search(&new_board, depth - 1 + singular_extension as u32, -beta, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
+            score = -ab_search(&new_board, depth - 1 + singular_extension as u32, -beta, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, child_acc.as_ref(), true, nodes, node_limit, deadline, stop, tt);
         } else {
             // Non-PV moves: null window first (cheap probe), re-search on fail-high.
             let null_score;
 
             // --- Late Move Reductions (applied on top of null window) ---
             if depth >= 3 && move_index > TUNE_LMR_MOVE_INDEX.load(Ordering::Relaxed) as usize && !is_capture && !is_killer && !in_check {
-                null_score = -ab_search(&new_board, depth - 2, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
+                null_score = -ab_search(&new_board, depth - 2, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, child_acc.as_ref(), true, nodes, node_limit, deadline, stop, tt);
             } else {
-                null_score = -ab_search(&new_board, depth - 1, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
+                null_score = -ab_search(&new_board, depth - 1, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, child_acc.as_ref(), true, nodes, node_limit, deadline, stop, tt);
             }
 
             // Fail-high on null window: this move might be genuinely better.
             // Re-search at full depth + full window to get the real score.
             if null_score > alpha && null_score < beta {
-                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
+                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, child_acc.as_ref(), true, nodes, node_limit, deadline, stop, tt);
             } else {
                 score = null_score;
             }
@@ -1304,9 +1351,8 @@ fn ab_search(
     // If truncated before any move improved alpha, we have no real search result.
     // Return static eval instead of the original alpha (which could be -INF).
     if !searched_all && alpha == original_alpha {
-        return if let Some(net) = network {
-            let acc = nnue::Accumulator::from_board(net, board);
-            net.evaluate(&acc, board.side_to_move)
+        return if let (Some(net), Some(a)) = (network, acc) {
+            net.evaluate(a, board.side_to_move)
         } else {
             evaluate(board)
         };
@@ -1351,9 +1397,12 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
     let mut alpha = -INF;
     let beta = INF;
 
+    let root_acc: Option<nnue::Accumulator> = network.map(|net| nnue::Accumulator::from_board(net, board));
+
     for mv in moves {
+        let child_acc = network.map(|net| acc_update(root_acc.as_ref().unwrap(), net, board, &mv));
         let new_board = make_move(board, &mv);
-        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, true, &nodes, u64::MAX, None, &stop, &tt);
+        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, child_acc.as_ref(), true, &nodes, u64::MAX, None, &stop, &tt);
         if score > alpha {
             alpha = score;
             best = Some((mv, score));
@@ -1387,6 +1436,7 @@ fn smp_worker(
     // Each worker starts at a slightly different depth to ensure
     // diverse TT entries. Odd workers start at depth 2, even at 1.
     let start_depth: u32 = if thread_id % 2 == 0 { 1 } else { 2 };
+    let root_acc: Option<nnue::Accumulator> = network.map(|net| nnue::Accumulator::from_board(net, board));
 
     for depth in start_depth..=MAX_DEPTH as u32 {
         if stop.load(Ordering::Relaxed) || time_up(deadline, stop) {
@@ -1406,10 +1456,11 @@ fn smp_worker(
             if stop.load(Ordering::Relaxed) {
                 return;
             }
+            let child_acc = network.map(|net| acc_update(root_acc.as_ref().unwrap(), net, board, mv));
             let new_board = make_move(board, mv);
             let score = -ab_search(
                 &new_board, depth - 1, -beta, -alpha, 1,
-                &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, true,
+                &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, child_acc.as_ref(), true,
                 &nodes, node_limit, deadline, stop, tt,
             );
             if score > alpha {
@@ -1460,6 +1511,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
         let mut counter_moves: CounterMoves = [[None; 64]; 2];
         let root_hash = board.zobrist_hash();
         let mut prev_score: Option<i32> = None;
+        let root_acc: Option<nnue::Accumulator> = network.map(|net| nnue::Accumulator::from_board(net, board));
 
         for depth in 1..=MAX_DEPTH as u32 {
             // Soft check: don't start a new iteration if the deadline has
@@ -1496,10 +1548,11 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                 let mut fail_high = false;
 
                 for mv in &ordered_moves {
+                    let child_acc = network.map(|net| acc_update(root_acc.as_ref().unwrap(), net, board, mv));
                     let new_board = make_move(board, mv);
                     let score = -ab_search(
                         &new_board, depth - 1, -beta, -alpha, 1,
-                        &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, true,
+                        &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, child_acc.as_ref(), true,
                         &nodes, node_limit, deadline, &stop, &tt,
                     );
 
