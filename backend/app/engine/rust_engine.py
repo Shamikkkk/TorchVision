@@ -13,8 +13,11 @@ import subprocess
 logger = logging.getLogger(__name__)
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_ENGINE_PATH = os.path.normpath(
-    os.path.join(_SCRIPT_DIR, "..", "..", "..", "engine", "target", "release", "pyro.exe")
+_ENGINE_PATH = os.environ.get(
+    "PYRO_ENGINE_PATH",
+    os.path.normpath(
+        os.path.join(_SCRIPT_DIR, "..", "..", "..", "engine", "target", "release", "pyro.exe")
+    ),
 )
 
 NODE_LIMIT = 100000
