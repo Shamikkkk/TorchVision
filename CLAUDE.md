@@ -13,28 +13,23 @@ For development history, completed phases, and deferred plans see [HISTORY.md](H
 Make Pyro a **scary tactical chess engine with a Mittens-style 
 personality** — not a silent strength-maxxing engine.
 
-Target: **2000-2200 CCRL strength** combined with **vicious 
-Tal-style tactical play** and a **theatrical, intimidating UX**. 
-Reaching 3000 Elo is explicitly NOT the goal. A 2200-rated 
-engine already crushes 95%+ of chess.com users; the differentiator 
-is *how it plays* and *how it feels to play against*, not raw 
-strength beyond that point.
+Target: **3000+ CCRL strength** with Pyro's personality intact.
+Phase G (personality + search improvements) is COMPLETE at ~1835 Elo.
+Phase D (NNUE) is now the active development track — the path 
+from 1835 to 3000+ requires neural network evaluation that hand-
+crafted eval cannot match. Personality (Tal aggression, taunts, 
+UI) survives NNUE via training data bias + post-NNUE Tal modifier.
 
 Strategic implications:
-- **NNUE v2 (Phase D) is DEFERRED indefinitely.** NNUE produces 
-  precise positional play (Magnus-style) which is the OPPOSITE 
-  of the desired Tal-style violence. The hand-crafted Tal eval 
-  is philosophically aligned with the goal in a way NNUE isn't.
-- **MCTS (Phase E) similarly deferred** — MCTS without a strong 
-  neural value head is weaker than alpha-beta + PeSTO+Tal.
-- **Phase G is the active development track.** See Phase G 
-  section below.
-- Some style choices may COST 20-50 Elo vs pure strength tuning. 
-  That's an acceptable trade. Mittens itself was deliberately 
-  throttled.
-
-Realistic timeline at ~1hr sessions, 2-3 sessions/week: 
-8-12 weeks to ship Phase G as a complete product.
+- **Phase G (The Mittens Path) is COMPLETE.** Engine at ~1835 Elo
+  with full personality, Obsidian Ember UI, and zero crashes.
+- **Phase D (NNUE v2) is now ACTIVE.** The path to 3000+ requires
+  NNUE. Hand-crafted eval has a ceiling around 2200-2400.
+- **Personality survives NNUE** via: training data biased toward 
+  tactical positions, post-NNUE Tal bonus modifier, 31-GM tactical
+  opening book, and the full UX/taunts/visual layer.
+- **Phase E (MCTS) remains DEFERRED** until NNUE is working.
+- **Deployment runs in parallel** with NNUE data generation.
 
 ---
 
@@ -43,10 +38,10 @@ Realistic timeline at ~1hr sessions, 2-3 sessions/week:
 **Phase B (Rust engine + Tal bonuses) — COMPLETE ✅**
 **Phase C (NNUE) — ABANDONED ❌**
 **Phase C.2 (Rust engine polish) — COMPLETE ✅**
-**Phase D (NNUE v2) — DEFERRED 🛑**
+**Phase D (NNUE v2) — ACTIVE 🔥**
 **Phase E (MCTS) — DEFERRED 🛑**
-**Phase G (The Mittens Path) — ACTIVE 🔥**
-**Phase G progress: ~1835 Elo (measured Apr 26). SPSA tuning running overnight.**
+**Phase G (The Mittens Path) — COMPLETE ✅**
+**Phase G final: ~1835 Elo (measured Apr 26). Full personality + Obsidian Ember UI done.**
 G1-G5, G7-G8v2, G10, G12-G13, G16-G17 done. Countermove heuristic,
 depth-dependent NMP, LMP, IID added. UI overhaul complete (all 5 phases).
 10 UCI-tunable parameters. SPSA optimization in progress (200 iterations).
@@ -412,10 +407,12 @@ LOG_LEVEL=DEBUG
 6. Play a test game — Pyro should show 🔥 persona, mood
    selector, and opening name. At Feral difficulty, engine
    thinks ~10s per move on a 5-min clock.
-7. Phase G progress: G1-G5, G7-G8v2, G10, G12-G13, G16-G17 done.
-   Countermove, NMP-depth, LMP, IID added. UI overhaul complete.
-   SPSA tuning infrastructure built. Current strength: ~1835 Elo.
-   Next: apply SPSA results, then G9/G11 style items, then deploy.
+7. Phase G COMPLETE at ~1835 Elo. UI overhaul done.
+   Phase D (NNUE v2) is now active. Next steps:
+   - Deploy current engine (Docker + Vercel/Railway)
+   - Set up Bullet trainer
+   - Generate 100M positions at depth 8
+   - Train first NNUE, validate with SPRT
 8. For historical context on completed work, see HISTORY.md.
 
 ---
@@ -590,6 +587,177 @@ Estimated total: 12-15 sessions of ~1 hour each, ~3-4 months at 2-3 sessions/wee
 
 ---
 
+## Phase D — NNUE v2 (ACTIVE)
+
+### Goal: Pyro at 3000+ CCRL with personality intact
+
+Hand-crafted eval (PeSTO + Tal bonuses) has a ceiling around 
+2200-2400 Elo. To reach 3000+, NNUE is required — it replaces
+the eval function with a neural network that learns positional 
+understanding beyond what humans can hand-code.
+
+### Why v1 failed (do not repeat):
+- Architecture too shallow: 768→256→1 (missing hidden layers)
+- Data too little: 5M positions (need 100M+ minimum)
+- Data too circular: trained on PST self-play (can't improve)
+- Wrong trainer: homebrew PyTorch (use Bullet instead)
+- Wrong validation: measured val_loss (use SPRT game results)
+- Wrong scale factor: 400cp (use 600cp to match convention)
+
+### Phase D1: First working NNUE (target: 2200 Elo)
+**Timeline: 2-3 weeks**
+
+Architecture: (768→256)×2→1
+- 768 inputs: piece × square × color
+- 256 neurons × 2 perspectives (STM + NSTM) = 512 concatenated  
+- 1 output: centipawns (or WDL probability)
+- Activation: CReLU
+- NO king buckets — simple (piece, square) features only
+- This is the standard starter NNUE architecture
+
+Trainer: **Bullet** (https://github.com/jw1912/bullet)
+- Rust-based, purpose-built for NNUE training
+- Best-in-class performance, used by most top engines
+- Handles data loading, quantization, training loop
+- Replaces our homebrew train_nnue_rust.py
+
+Data generation: 100M positions minimum
+- Modify generate_selfplay_rust.py for depth-8 search
+- Bullet-compatible output format (.bin or .binpack)
+- Quiet position filter (skip positions where best move is a capture)
+- Save: FEN + depth-8 eval + game result (W/D/L)
+- Estimated time: 3-4 days at 4 threads
+
+Training procedure:
+- Loss: MSE(sigmoid(output/400), target)
+  where target = lambda * sigmoid(eval/400) + (1-lambda) * wdl
+  lambda = 0.5 (blend eval with game result)
+- Learning rate: start 0.001, decay on plateau (newbob)
+- Epochs: 30-50 on 100M positions
+- Estimated time: 8-12 hours CPU, 1-2 hours GPU
+
+Validation: SPRT (200 games)
+- NNUE vs PeSTO+Tal baseline
+- PASS: score >= 52% (statistically significant)
+- FAIL: iterate on data quality, not architecture
+- NEVER judge by val_loss alone
+
+Rust engine changes (engine/src/nnue.rs):
+- Clean up existing 768→256→1 inference code
+- Quantized i16 weights for accumulator, i8 for output layer
+- Incremental accumulator updates (add/remove feature on make_move)
+- SIMD vectorization (AVX2) for inner products
+
+Success criteria: NNUE beats PeSTO in SPRT → pipeline works.
+Expected Elo: ~2000-2200
+
+### Phase D2: Scale up (target: 2600-2800 Elo)
+**Timeline: 3-4 weeks**
+
+Architecture: (768×8kb→512)×2→1
+- 8 king buckets (king position bins the input features)
+- 512-neuron accumulator (double the D1 size)
+- Horizontal mirroring (reduce feature space by half)
+- SCReLU activation (Squared Clipped ReLU — better gradient flow)
+
+Data: 500M-1B positions
+- Each iteration generates 100M NEW positions using current best NNUE
+- Retrain on accumulated data
+- 3-5 iterations of generate → train → validate
+- Each iteration should gain 50-100 Elo
+
+SIMD optimization:
+- AVX2 vectorized accumulator updates
+- i16 weights for accumulator layer
+- i8 weights for output layers
+- Quantization-aware training in Bullet
+
+Advanced search tuning:
+- NNUE eval is smoother than HCE → more aggressive pruning
+- Re-tune futility margins, LMR thresholds, NMP reduction
+- NNUE makes the engine "see" positional features that HCE missed
+  → search prunes bad lines earlier → effectively deeper search
+
+Expected Elo: ~2600-2800
+
+### Phase D3: Competitive strength (target: 3000+ Elo)
+**Timeline: 4-6 weeks**
+
+Architecture: (768×16hm→1024)×2→1 or larger
+- 16 king buckets with horizontal mirroring
+- 1024-neuron accumulator
+- Output buckets (different weights based on piece count)
+- WDL output head (win/draw/loss probabilities, not just centipawns)
+
+Data: 1B+ positions
+- Supplemented with rescored Leela data (publicly available)
+- Aggressive deduplication to prevent overfitting
+
+Training refinements:
+- Multi-stage training: large LR on big data, fine-tune with small LR
+- Curriculum learning: start with simple positions, add complex ones
+- Distillation: optionally train on Stockfish evals for initial net
+
+Personality preservation:
+- Training data bias: weight tactical positions 2x (King's Gambit,
+  sacrifices, king hunts, open positions)
+- Post-NNUE Tal modifier: final_eval = nnue_eval + tal_bonus * 0.3
+  (small additive push toward aggression)
+- Opening book: 31-GM tactical book unchanged
+- All UX/personality features unchanged
+
+Expected Elo: 3000-3200
+
+### Phase D4: Polish and iterate (target: 3200+ Elo)
+**Timeline: ongoing**
+
+- Larger networks if compute allows
+- More training data iterations
+- Search-eval co-optimization
+- Potentially MCTS hybrid for endgame (Phase E)
+
+### Compute requirements:
+
+| Phase | Positions | Gen time (4 threads) | Train (CPU) | Train (GPU) |
+|-------|-----------|---------------------|-------------|-------------|
+| D1    | 100M      | 3-4 days            | 8-12 hours  | 1-2 hours   |
+| D2    | 500M-1B   | 2-3 weeks           | 2-3 days    | 6-12 hours  |
+| D3    | 1B+       | 4-6 weeks           | impractical | 1-2 days    |
+
+GPU strongly recommended for D2+. Bullet supports CUDA.
+RTX 3060 or better cuts training time by 10-20x.
+
+### Implementation files:
+
+Data generation:
+  backend/scripts/generate_selfplay_rust.py
+  - Add --depth 8 flag
+  - Add --format bullet flag (Bullet-compatible .bin output)
+  - Add quiet position filter
+  - Target: 100M positions for D1
+
+Training:
+  Use Bullet directly (clone as submodule or external tool)
+  - Configure network architecture in Bullet's TOML/config
+  - Point at generated .bin data
+  - Output: quantized .nnue weight file
+
+Rust inference:
+  engine/src/nnue.rs
+  - Already has 768→256→1 structure (from v1, needs cleanup)
+  - Add incremental accumulator updates
+  - Add AVX2 SIMD for dot products
+  - Add binary weight loading (Bullet's output format)
+  - Wire into evaluate(): if NNUE loaded, use nnue_eval + tal_modifier
+
+Validation:
+  backend/scripts/validate_nnue_rust.py
+  - Already exists, needs minor updates
+  - 200 games, NNUE vs PeSTO baseline
+  - Report win/draw/loss and SPRT result
+
+---
+
 ## Phase F — Product Polish (whenever)
 
 ### Difficulty levels:
@@ -625,9 +793,9 @@ Estimated total: 12-15 sessions of ~1 hour each, ~3-4 months at 2-3 sessions/wee
 Phase A complete:   ~1200-1400 ELO (Python Tal)
 Phase B complete:   ~1400-1600 ELO (Rust PST+Tal+TT)
 Phase C.2 complete: ~1700-1850 ELO (+ aspiration/pruning/time mgmt)
-Phase G current:    ~1835 ELO (measured Apr 26, G8v2+CM+SEE+PVS+SMP)
-Phase D (DEFERRED): ~2200-2600 ELO (+ NNUE v2 if ever revived)
-Phase E (DEFERRED): ~2400-2800 ELO (+ MCTS if ever revived)
-
-Note: 3000+ Elo is NOT a current goal. See "Current Goal" section 
-at top of file.
+Phase G complete:   ~1835 ELO (measured Apr 26, personality engine)
+Phase D1 target:    ~2000-2200 ELO (+ first working NNUE)
+Phase D2 target:    ~2600-2800 ELO (+ scaled NNUE, king buckets)
+Phase D3 target:    ~3000-3200 ELO (+ large NNUE, WDL, 1B+ data)
+Phase D4 target:    ~3200+ ELO (+ iteration, larger nets)
+Phase E (DEFERRED): ~3400+ ELO (+ MCTS hybrid)
