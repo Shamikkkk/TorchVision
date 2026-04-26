@@ -107,6 +107,11 @@ Phase D (NNUE) is now the active track — see Phase D section below.
   queen penalty)
 - SPSA tuning driver (backend/scripts/spsa_tune.py) — automated
   parameter optimization via cutechess-cli perturbation matches
+- Incremental NNUE accumulator — threaded through entire search
+  stack (ab_search + quiescence). acc_update() mirrors make_move
+  for all move types (quiet, capture, en passant, promotion,
+  castling). Zero from_board() rebuilds during search — only at
+  root. Ready for trained weights.
 
 ### Observed strength estimate (measured April 16, 2026):
 
@@ -628,6 +633,21 @@ Rust engine changes (engine/src/nnue.rs):
 
 Success criteria: NNUE beats PeSTO in SPRT → pipeline works.
 Expected Elo: ~2000-2200
+
+### Phase D1 progress (as of April 27, 2026):
+- [x] Data generator fixed (depth 6, --no-nnue, quiet filter,
+      pipe format, --target flag, progress reporting)
+- [x] 20M position generation launched (4 processes, ETA ~Apr 30)
+- [x] Incremental accumulator (acc_update, threaded through
+      full search stack, 0 from_board rebuilds during search)
+- [x] SCALE updated 400→600 in nnue.rs
+- [x] Trainer fixed (WDL sigmoid loss, pipe format parser,
+      cosine LR, gradient clip, CUDA verified on RTX 3050)
+- [ ] Train on 20M positions (~1-2 hours on GPU)
+- [ ] Export to pyro.nnue
+- [ ] SPRT validation: 200 games NNUE vs PeSTO baseline
+
+Next session: wait for data gen to complete, then train + validate.
 
 ### Phase D2: Scale up (target: 2600-2800 Elo)
 **Timeline: 3-4 weeks**
