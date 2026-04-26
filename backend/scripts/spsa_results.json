@@ -1,15 +1,15 @@
 {
   "theta": {
-    "TAL_AGGRESSION": 24.446617996413217,
-    "FUTILITY_MARGIN_D1": 100.46128187554997,
-    "FUTILITY_MARGIN_D2": 299.8522156967823,
-    "ASPIRATION_DELTA": 49.87447939510485,
+    "TAL_AGGRESSION": 24.63938578664558,
+    "FUTILITY_MARGIN_D1": 100.5089458823754,
+    "FUTILITY_MARGIN_D2": 299.97749223090955,
+    "ASPIRATION_DELTA": 49.82154828578768,
     "NMP_REDUCTION": 2.0,
     "LMR_MOVE_INDEX": 3.0,
-    "SE_BETA_MARGIN": 50.22307195603155,
-    "QUEEN_ATTACK_WT": 40.31963623501424,
-    "CASTLING_BONUS": 79.92618897008425,
-    "EARLY_QUEEN_PENALTY": 60.309254539802204
+    "SE_BETA_MARGIN": 50.27172895635494,
+    "QUEEN_ATTACK_WT": 40.408657038029254,
+    "CASTLING_BONUS": 79.80107088206668,
+    "EARLY_QUEEN_PENALTY": 60.29424162597147
   },
   "history": [
     {
@@ -6290,6 +6290,1726 @@
         "QUEEN_ATTACK_WT": 40.32,
         "CASTLING_BONUS": 79.93,
         "EARLY_QUEEN_PENALTY": 60.31
+      }
+    },
+    {
+      "iteration": 158,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.65,
+        "FUTILITY_MARGIN_D1": 109.46,
+        "FUTILITY_MARGIN_D2": 281.86,
+        "ASPIRATION_DELTA": 45.08,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 45.43,
+        "QUEEN_ATTACK_WT": 43.32,
+        "CASTLING_BONUS": 72.73,
+        "EARLY_QUEEN_PENALTY": 55.51
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.25,
+        "FUTILITY_MARGIN_D1": 91.47,
+        "FUTILITY_MARGIN_D2": 317.84,
+        "ASPIRATION_DELTA": 54.67,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 55.02,
+        "QUEEN_ATTACK_WT": 37.32,
+        "CASTLING_BONUS": 87.12,
+        "EARLY_QUEEN_PENALTY": 65.11
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.43,
+        "FUTILITY_MARGIN_D1": 100.48,
+        "FUTILITY_MARGIN_D2": 299.83,
+        "ASPIRATION_DELTA": 49.86,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.2,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.91,
+        "EARLY_QUEEN_PENALTY": 60.29
+      }
+    },
+    {
+      "iteration": 159,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.23,
+        "FUTILITY_MARGIN_D1": 109.47,
+        "FUTILITY_MARGIN_D2": 317.81,
+        "ASPIRATION_DELTA": 45.06,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 55.0,
+        "QUEEN_ATTACK_WT": 43.34,
+        "CASTLING_BONUS": 87.1,
+        "EARLY_QUEEN_PENALTY": 55.5
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.63,
+        "FUTILITY_MARGIN_D1": 91.49,
+        "FUTILITY_MARGIN_D2": 281.85,
+        "ASPIRATION_DELTA": 54.65,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 45.41,
+        "QUEEN_ATTACK_WT": 37.34,
+        "CASTLING_BONUS": 72.72,
+        "EARLY_QUEEN_PENALTY": 65.08
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.45,
+        "FUTILITY_MARGIN_D1": 100.5,
+        "FUTILITY_MARGIN_D2": 299.85,
+        "ASPIRATION_DELTA": 49.84,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.22,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.93,
+        "EARLY_QUEEN_PENALTY": 60.27
+      }
+    },
+    {
+      "iteration": 160,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.65,
+        "FUTILITY_MARGIN_D1": 109.48,
+        "FUTILITY_MARGIN_D2": 317.82,
+        "ASPIRATION_DELTA": 45.04,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 55.01,
+        "QUEEN_ATTACK_WT": 37.36,
+        "CASTLING_BONUS": 72.74,
+        "EARLY_QUEEN_PENALTY": 65.06
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.24,
+        "FUTILITY_MARGIN_D1": 91.52,
+        "FUTILITY_MARGIN_D2": 281.88,
+        "ASPIRATION_DELTA": 54.63,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 45.43,
+        "QUEEN_ATTACK_WT": 43.35,
+        "CASTLING_BONUS": 87.11,
+        "EARLY_QUEEN_PENALTY": 55.48
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.43,
+        "FUTILITY_MARGIN_D1": 100.52,
+        "FUTILITY_MARGIN_D2": 299.87,
+        "ASPIRATION_DELTA": 49.82,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.24,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.91,
+        "EARLY_QUEEN_PENALTY": 60.29
+      }
+    },
+    {
+      "iteration": 161,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.63,
+        "FUTILITY_MARGIN_D1": 91.54,
+        "FUTILITY_MARGIN_D2": 317.83,
+        "ASPIRATION_DELTA": 54.61,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 55.03,
+        "QUEEN_ATTACK_WT": 43.33,
+        "CASTLING_BONUS": 72.72,
+        "EARLY_QUEEN_PENALTY": 65.08
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.22,
+        "FUTILITY_MARGIN_D1": 109.5,
+        "FUTILITY_MARGIN_D2": 281.91,
+        "ASPIRATION_DELTA": 45.03,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 45.45,
+        "QUEEN_ATTACK_WT": 37.35,
+        "CASTLING_BONUS": 87.09,
+        "EARLY_QUEEN_PENALTY": 55.5
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.41,
+        "FUTILITY_MARGIN_D1": 100.5,
+        "FUTILITY_MARGIN_D2": 299.89,
+        "ASPIRATION_DELTA": 49.84,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.26,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.89,
+        "EARLY_QUEEN_PENALTY": 60.31
+      }
+    },
+    {
+      "iteration": 162,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.61,
+        "FUTILITY_MARGIN_D1": 109.47,
+        "FUTILITY_MARGIN_D2": 281.94,
+        "ASPIRATION_DELTA": 45.05,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 55.05,
+        "QUEEN_ATTACK_WT": 37.37,
+        "CASTLING_BONUS": 72.71,
+        "EARLY_QUEEN_PENALTY": 65.09
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.2,
+        "FUTILITY_MARGIN_D1": 91.53,
+        "FUTILITY_MARGIN_D2": 317.84,
+        "ASPIRATION_DELTA": 54.62,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 45.48,
+        "QUEEN_ATTACK_WT": 43.35,
+        "CASTLING_BONUS": 87.07,
+        "EARLY_QUEEN_PENALTY": 55.52
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.43,
+        "FUTILITY_MARGIN_D1": 100.48,
+        "FUTILITY_MARGIN_D2": 299.91,
+        "ASPIRATION_DELTA": 49.86,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.24,
+        "QUEEN_ATTACK_WT": 40.38,
+        "CASTLING_BONUS": 79.91,
+        "EARLY_QUEEN_PENALTY": 60.29
+      }
+    },
+    {
+      "iteration": 163,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.22,
+        "FUTILITY_MARGIN_D1": 91.51,
+        "FUTILITY_MARGIN_D2": 281.97,
+        "ASPIRATION_DELTA": 54.64,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 45.46,
+        "QUEEN_ATTACK_WT": 43.37,
+        "CASTLING_BONUS": 72.73,
+        "EARLY_QUEEN_PENALTY": 65.07
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.63,
+        "FUTILITY_MARGIN_D1": 109.45,
+        "FUTILITY_MARGIN_D2": 317.84,
+        "ASPIRATION_DELTA": 45.07,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 55.02,
+        "QUEEN_ATTACK_WT": 37.39,
+        "CASTLING_BONUS": 87.08,
+        "EARLY_QUEEN_PENALTY": 55.51
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.45,
+        "FUTILITY_MARGIN_D1": 100.46,
+        "FUTILITY_MARGIN_D2": 299.89,
+        "ASPIRATION_DELTA": 49.87,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.22,
+        "QUEEN_ATTACK_WT": 40.4,
+        "CASTLING_BONUS": 79.89,
+        "EARLY_QUEEN_PENALTY": 60.31
+      }
+    },
+    {
+      "iteration": 164,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.24,
+        "FUTILITY_MARGIN_D1": 91.5,
+        "FUTILITY_MARGIN_D2": 281.97,
+        "ASPIRATION_DELTA": 45.09,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 45.44,
+        "QUEEN_ATTACK_WT": 37.41,
+        "CASTLING_BONUS": 72.72,
+        "EARLY_QUEEN_PENALTY": 65.09
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.65,
+        "FUTILITY_MARGIN_D1": 109.42,
+        "FUTILITY_MARGIN_D2": 317.81,
+        "ASPIRATION_DELTA": 54.65,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 55.0,
+        "QUEEN_ATTACK_WT": 43.38,
+        "CASTLING_BONUS": 87.06,
+        "EARLY_QUEEN_PENALTY": 55.53
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.47,
+        "FUTILITY_MARGIN_D1": 100.44,
+        "FUTILITY_MARGIN_D2": 299.87,
+        "ASPIRATION_DELTA": 49.86,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.2,
+        "QUEEN_ATTACK_WT": 40.38,
+        "CASTLING_BONUS": 79.87,
+        "EARLY_QUEEN_PENALTY": 60.33
+      }
+    },
+    {
+      "iteration": 165,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.26,
+        "FUTILITY_MARGIN_D1": 109.4,
+        "FUTILITY_MARGIN_D2": 317.78,
+        "ASPIRATION_DELTA": 54.63,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 54.98,
+        "QUEEN_ATTACK_WT": 43.36,
+        "CASTLING_BONUS": 87.03,
+        "EARLY_QUEEN_PENALTY": 65.1
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.67,
+        "FUTILITY_MARGIN_D1": 91.49,
+        "FUTILITY_MARGIN_D2": 281.96,
+        "ASPIRATION_DELTA": 45.08,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 45.43,
+        "QUEEN_ATTACK_WT": 37.39,
+        "CASTLING_BONUS": 72.7,
+        "EARLY_QUEEN_PENALTY": 55.55
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.45,
+        "FUTILITY_MARGIN_D1": 100.42,
+        "FUTILITY_MARGIN_D2": 299.85,
+        "ASPIRATION_DELTA": 49.84,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.19,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.85,
+        "EARLY_QUEEN_PENALTY": 60.31
+      }
+    },
+    {
+      "iteration": 166,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.24,
+        "FUTILITY_MARGIN_D1": 109.38,
+        "FUTILITY_MARGIN_D2": 281.95,
+        "ASPIRATION_DELTA": 54.61,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 45.41,
+        "QUEEN_ATTACK_WT": 43.34,
+        "CASTLING_BONUS": 72.69,
+        "EARLY_QUEEN_PENALTY": 65.08
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.66,
+        "FUTILITY_MARGIN_D1": 91.47,
+        "FUTILITY_MARGIN_D2": 317.75,
+        "ASPIRATION_DELTA": 45.06,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 54.96,
+        "QUEEN_ATTACK_WT": 37.37,
+        "CASTLING_BONUS": 87.01,
+        "EARLY_QUEEN_PENALTY": 55.54
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.43,
+        "FUTILITY_MARGIN_D1": 100.41,
+        "FUTILITY_MARGIN_D2": 299.87,
+        "ASPIRATION_DELTA": 49.82,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.2,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.87,
+        "EARLY_QUEEN_PENALTY": 60.29
+      }
+    },
+    {
+      "iteration": 167,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.22,
+        "FUTILITY_MARGIN_D1": 91.46,
+        "FUTILITY_MARGIN_D2": 281.98,
+        "ASPIRATION_DELTA": 45.05,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 54.98,
+        "QUEEN_ATTACK_WT": 43.32,
+        "CASTLING_BONUS": 72.71,
+        "EARLY_QUEEN_PENALTY": 65.06
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.64,
+        "FUTILITY_MARGIN_D1": 109.35,
+        "FUTILITY_MARGIN_D2": 317.76,
+        "ASPIRATION_DELTA": 54.59,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 45.43,
+        "QUEEN_ATTACK_WT": 37.36,
+        "CASTLING_BONUS": 87.03,
+        "EARLY_QUEEN_PENALTY": 55.52
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.41,
+        "FUTILITY_MARGIN_D1": 100.42,
+        "FUTILITY_MARGIN_D2": 299.89,
+        "ASPIRATION_DELTA": 49.84,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.19,
+        "QUEEN_ATTACK_WT": 40.32,
+        "CASTLING_BONUS": 79.89,
+        "EARLY_QUEEN_PENALTY": 60.27
+      }
+    },
+    {
+      "iteration": 168,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.62,
+        "FUTILITY_MARGIN_D1": 109.36,
+        "FUTILITY_MARGIN_D2": 317.77,
+        "ASPIRATION_DELTA": 45.07,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 54.95,
+        "QUEEN_ATTACK_WT": 37.34,
+        "CASTLING_BONUS": 72.74,
+        "EARLY_QUEEN_PENALTY": 55.5
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.2,
+        "FUTILITY_MARGIN_D1": 91.48,
+        "FUTILITY_MARGIN_D2": 282.01,
+        "ASPIRATION_DELTA": 54.6,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 45.42,
+        "QUEEN_ATTACK_WT": 43.3,
+        "CASTLING_BONUS": 87.04,
+        "EARLY_QUEEN_PENALTY": 65.04
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.43,
+        "FUTILITY_MARGIN_D1": 100.41,
+        "FUTILITY_MARGIN_D2": 299.87,
+        "ASPIRATION_DELTA": 49.86,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.17,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.91,
+        "EARLY_QUEEN_PENALTY": 60.29
+      }
+    },
+    {
+      "iteration": 169,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.21,
+        "FUTILITY_MARGIN_D1": 109.34,
+        "FUTILITY_MARGIN_D2": 282.0,
+        "ASPIRATION_DELTA": 45.09,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 45.4,
+        "QUEEN_ATTACK_WT": 43.32,
+        "CASTLING_BONUS": 87.05,
+        "EARLY_QUEEN_PENALTY": 65.06
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.64,
+        "FUTILITY_MARGIN_D1": 91.47,
+        "FUTILITY_MARGIN_D2": 317.74,
+        "ASPIRATION_DELTA": 54.62,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 54.93,
+        "QUEEN_ATTACK_WT": 37.36,
+        "CASTLING_BONUS": 72.76,
+        "EARLY_QUEEN_PENALTY": 55.53
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.45,
+        "FUTILITY_MARGIN_D1": 100.42,
+        "FUTILITY_MARGIN_D2": 299.85,
+        "ASPIRATION_DELTA": 49.84,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.15,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.93,
+        "EARLY_QUEEN_PENALTY": 60.31
+      }
+    },
+    {
+      "iteration": 170,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.66,
+        "FUTILITY_MARGIN_D1": 109.35,
+        "FUTILITY_MARGIN_D2": 317.71,
+        "ASPIRATION_DELTA": 54.6,
+        "NMP_REDUCTION": 2.6,
+        "LMR_MOVE_INDEX": 2.4,
+        "SE_BETA_MARGIN": 45.39,
+        "QUEEN_ATTACK_WT": 37.38,
+        "CASTLING_BONUS": 87.07,
+        "EARLY_QUEEN_PENALTY": 55.55
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.23,
+        "FUTILITY_MARGIN_D1": 91.49,
+        "FUTILITY_MARGIN_D2": 281.99,
+        "ASPIRATION_DELTA": 45.07,
+        "NMP_REDUCTION": 1.4,
+        "LMR_MOVE_INDEX": 3.6,
+        "SE_BETA_MARGIN": 54.91,
+        "QUEEN_ATTACK_WT": 43.33,
+        "CASTLING_BONUS": 72.78,
+        "EARLY_QUEEN_PENALTY": 65.07
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.46,
+        "FUTILITY_MARGIN_D1": 100.41,
+        "FUTILITY_MARGIN_D2": 299.83,
+        "ASPIRATION_DELTA": 49.82,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.17,
+        "QUEEN_ATTACK_WT": 40.38,
+        "CASTLING_BONUS": 79.91,
+        "EARLY_QUEEN_PENALTY": 60.33
+      }
+    },
+    {
+      "iteration": 171,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.68,
+        "FUTILITY_MARGIN_D1": 91.48,
+        "FUTILITY_MARGIN_D2": 317.68,
+        "ASPIRATION_DELTA": 54.58,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.93,
+        "QUEEN_ATTACK_WT": 43.35,
+        "CASTLING_BONUS": 72.77,
+        "EARLY_QUEEN_PENALTY": 55.57
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.25,
+        "FUTILITY_MARGIN_D1": 109.33,
+        "FUTILITY_MARGIN_D2": 281.99,
+        "ASPIRATION_DELTA": 45.06,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.41,
+        "QUEEN_ATTACK_WT": 37.4,
+        "CASTLING_BONUS": 87.05,
+        "EARLY_QUEEN_PENALTY": 65.09
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.45,
+        "FUTILITY_MARGIN_D1": 100.39,
+        "FUTILITY_MARGIN_D2": 299.85,
+        "ASPIRATION_DELTA": 49.84,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.19,
+        "QUEEN_ATTACK_WT": 40.39,
+        "CASTLING_BONUS": 79.89,
+        "EARLY_QUEEN_PENALTY": 60.31
+      }
+    },
+    {
+      "iteration": 172,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.23,
+        "FUTILITY_MARGIN_D1": 109.31,
+        "FUTILITY_MARGIN_D2": 317.69,
+        "ASPIRATION_DELTA": 54.59,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.94,
+        "QUEEN_ATTACK_WT": 43.37,
+        "CASTLING_BONUS": 72.75,
+        "EARLY_QUEEN_PENALTY": 55.55
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.66,
+        "FUTILITY_MARGIN_D1": 91.47,
+        "FUTILITY_MARGIN_D2": 282.02,
+        "ASPIRATION_DELTA": 45.08,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.43,
+        "QUEEN_ATTACK_WT": 37.42,
+        "CASTLING_BONUS": 87.02,
+        "EARLY_QUEEN_PENALTY": 65.07
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.43,
+        "FUTILITY_MARGIN_D1": 100.37,
+        "FUTILITY_MARGIN_D2": 299.83,
+        "ASPIRATION_DELTA": 49.82,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.17,
+        "QUEEN_ATTACK_WT": 40.38,
+        "CASTLING_BONUS": 79.91,
+        "EARLY_QUEEN_PENALTY": 60.33
+      }
+    },
+    {
+      "iteration": 173,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.65,
+        "FUTILITY_MARGIN_D1": 109.28,
+        "FUTILITY_MARGIN_D2": 282.01,
+        "ASPIRATION_DELTA": 45.06,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.92,
+        "QUEEN_ATTACK_WT": 43.35,
+        "CASTLING_BONUS": 87.04,
+        "EARLY_QUEEN_PENALTY": 55.57
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.21,
+        "FUTILITY_MARGIN_D1": 91.46,
+        "FUTILITY_MARGIN_D2": 317.66,
+        "ASPIRATION_DELTA": 54.57,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.41,
+        "QUEEN_ATTACK_WT": 37.4,
+        "CASTLING_BONUS": 72.78,
+        "EARLY_QUEEN_PENALTY": 65.08
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.45,
+        "FUTILITY_MARGIN_D1": 100.35,
+        "FUTILITY_MARGIN_D2": 299.85,
+        "ASPIRATION_DELTA": 49.84,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.15,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.89,
+        "EARLY_QUEEN_PENALTY": 60.35
+      }
+    },
+    {
+      "iteration": 174,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.66,
+        "FUTILITY_MARGIN_D1": 91.44,
+        "FUTILITY_MARGIN_D2": 282.04,
+        "ASPIRATION_DELTA": 45.09,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.4,
+        "QUEEN_ATTACK_WT": 43.33,
+        "CASTLING_BONUS": 87.02,
+        "EARLY_QUEEN_PENALTY": 65.1
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.23,
+        "FUTILITY_MARGIN_D1": 109.26,
+        "FUTILITY_MARGIN_D2": 317.67,
+        "ASPIRATION_DELTA": 54.59,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.9,
+        "QUEEN_ATTACK_WT": 37.39,
+        "CASTLING_BONUS": 72.76,
+        "EARLY_QUEEN_PENALTY": 55.59
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.46,
+        "FUTILITY_MARGIN_D1": 100.37,
+        "FUTILITY_MARGIN_D2": 299.87,
+        "ASPIRATION_DELTA": 49.85,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.17,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.87,
+        "EARLY_QUEEN_PENALTY": 60.33
+      }
+    },
+    {
+      "iteration": 175,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.25,
+        "FUTILITY_MARGIN_D1": 109.27,
+        "FUTILITY_MARGIN_D2": 317.68,
+        "ASPIRATION_DELTA": 54.6,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.42,
+        "QUEEN_ATTACK_WT": 37.37,
+        "CASTLING_BONUS": 72.75,
+        "EARLY_QUEEN_PENALTY": 65.08
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.68,
+        "FUTILITY_MARGIN_D1": 91.47,
+        "FUTILITY_MARGIN_D2": 282.06,
+        "ASPIRATION_DELTA": 45.11,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.92,
+        "QUEEN_ATTACK_WT": 43.31,
+        "CASTLING_BONUS": 86.99,
+        "EARLY_QUEEN_PENALTY": 55.58
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.48,
+        "FUTILITY_MARGIN_D1": 100.39,
+        "FUTILITY_MARGIN_D2": 299.89,
+        "ASPIRATION_DELTA": 49.87,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.15,
+        "QUEEN_ATTACK_WT": 40.32,
+        "CASTLING_BONUS": 79.85,
+        "EARLY_QUEEN_PENALTY": 60.35
+      }
+    },
+    {
+      "iteration": 176,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.7,
+        "FUTILITY_MARGIN_D1": 109.29,
+        "FUTILITY_MARGIN_D2": 317.69,
+        "ASPIRATION_DELTA": 45.13,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.89,
+        "QUEEN_ATTACK_WT": 37.36,
+        "CASTLING_BONUS": 86.97,
+        "EARLY_QUEEN_PENALTY": 55.6
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.26,
+        "FUTILITY_MARGIN_D1": 91.49,
+        "FUTILITY_MARGIN_D2": 282.09,
+        "ASPIRATION_DELTA": 54.62,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.4,
+        "QUEEN_ATTACK_WT": 43.29,
+        "CASTLING_BONUS": 72.73,
+        "EARLY_QUEEN_PENALTY": 65.09
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.5,
+        "FUTILITY_MARGIN_D1": 100.37,
+        "FUTILITY_MARGIN_D2": 299.87,
+        "ASPIRATION_DELTA": 49.89,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.13,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.83,
+        "EARLY_QUEEN_PENALTY": 60.36
+      }
+    },
+    {
+      "iteration": 177,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.72,
+        "FUTILITY_MARGIN_D1": 91.48,
+        "FUTILITY_MARGIN_D2": 317.66,
+        "ASPIRATION_DELTA": 54.63,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.39,
+        "QUEEN_ATTACK_WT": 37.38,
+        "CASTLING_BONUS": 86.95,
+        "EARLY_QUEEN_PENALTY": 55.62
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.28,
+        "FUTILITY_MARGIN_D1": 109.26,
+        "FUTILITY_MARGIN_D2": 282.09,
+        "ASPIRATION_DELTA": 45.15,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.87,
+        "QUEEN_ATTACK_WT": 43.3,
+        "CASTLING_BONUS": 72.72,
+        "EARLY_QUEEN_PENALTY": 65.11
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.48,
+        "FUTILITY_MARGIN_D1": 100.35,
+        "FUTILITY_MARGIN_D2": 299.89,
+        "ASPIRATION_DELTA": 49.91,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.11,
+        "QUEEN_ATTACK_WT": 40.32,
+        "CASTLING_BONUS": 79.85,
+        "EARLY_QUEEN_PENALTY": 60.35
+      }
+    },
+    {
+      "iteration": 178,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.26,
+        "FUTILITY_MARGIN_D1": 109.24,
+        "FUTILITY_MARGIN_D2": 317.66,
+        "ASPIRATION_DELTA": 54.65,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.37,
+        "QUEEN_ATTACK_WT": 37.36,
+        "CASTLING_BONUS": 72.74,
+        "EARLY_QUEEN_PENALTY": 65.09
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.71,
+        "FUTILITY_MARGIN_D1": 91.46,
+        "FUTILITY_MARGIN_D2": 282.11,
+        "ASPIRATION_DELTA": 45.17,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.85,
+        "QUEEN_ATTACK_WT": 43.28,
+        "CASTLING_BONUS": 86.96,
+        "EARLY_QUEEN_PENALTY": 55.61
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.46,
+        "FUTILITY_MARGIN_D1": 100.33,
+        "FUTILITY_MARGIN_D2": 299.87,
+        "ASPIRATION_DELTA": 49.89,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.13,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.87,
+        "EARLY_QUEEN_PENALTY": 60.33
+      }
+    },
+    {
+      "iteration": 179,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.69,
+        "FUTILITY_MARGIN_D1": 91.45,
+        "FUTILITY_MARGIN_D2": 282.11,
+        "ASPIRATION_DELTA": 54.63,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.39,
+        "QUEEN_ATTACK_WT": 43.3,
+        "CASTLING_BONUS": 72.76,
+        "EARLY_QUEEN_PENALTY": 65.06
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.24,
+        "FUTILITY_MARGIN_D1": 109.22,
+        "FUTILITY_MARGIN_D2": 317.64,
+        "ASPIRATION_DELTA": 45.15,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.87,
+        "QUEEN_ATTACK_WT": 37.38,
+        "CASTLING_BONUS": 86.98,
+        "EARLY_QUEEN_PENALTY": 55.59
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.45,
+        "FUTILITY_MARGIN_D1": 100.31,
+        "FUTILITY_MARGIN_D2": 299.85,
+        "ASPIRATION_DELTA": 49.91,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.11,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.85,
+        "EARLY_QUEEN_PENALTY": 60.35
+      }
+    },
+    {
+      "iteration": 180,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.22,
+        "FUTILITY_MARGIN_D1": 109.19,
+        "FUTILITY_MARGIN_D2": 317.61,
+        "ASPIRATION_DELTA": 54.64,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.85,
+        "QUEEN_ATTACK_WT": 37.4,
+        "CASTLING_BONUS": 72.75,
+        "EARLY_QUEEN_PENALTY": 65.08
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.67,
+        "FUTILITY_MARGIN_D1": 91.44,
+        "FUTILITY_MARGIN_D2": 282.1,
+        "ASPIRATION_DELTA": 45.17,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.38,
+        "QUEEN_ATTACK_WT": 43.32,
+        "CASTLING_BONUS": 86.95,
+        "EARLY_QUEEN_PENALTY": 55.61
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.46,
+        "FUTILITY_MARGIN_D1": 100.33,
+        "FUTILITY_MARGIN_D2": 299.87,
+        "ASPIRATION_DELTA": 49.93,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.13,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.83,
+        "EARLY_QUEEN_PENALTY": 60.36
+      }
+    },
+    {
+      "iteration": 181,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.69,
+        "FUTILITY_MARGIN_D1": 91.46,
+        "FUTILITY_MARGIN_D2": 282.13,
+        "ASPIRATION_DELTA": 54.66,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.4,
+        "QUEEN_ATTACK_WT": 37.38,
+        "CASTLING_BONUS": 72.74,
+        "EARLY_QUEEN_PENALTY": 65.1
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.24,
+        "FUTILITY_MARGIN_D1": 109.21,
+        "FUTILITY_MARGIN_D2": 317.62,
+        "ASPIRATION_DELTA": 45.19,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.86,
+        "QUEEN_ATTACK_WT": 43.3,
+        "CASTLING_BONUS": 86.93,
+        "EARLY_QUEEN_PENALTY": 55.63
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.48,
+        "FUTILITY_MARGIN_D1": 100.35,
+        "FUTILITY_MARGIN_D2": 299.89,
+        "ASPIRATION_DELTA": 49.91,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.15,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.85,
+        "EARLY_QUEEN_PENALTY": 60.35
+      }
+    },
+    {
+      "iteration": 182,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.26,
+        "FUTILITY_MARGIN_D1": 109.22,
+        "FUTILITY_MARGIN_D2": 317.62,
+        "ASPIRATION_DELTA": 54.64,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.88,
+        "QUEEN_ATTACK_WT": 37.4,
+        "CASTLING_BONUS": 86.95,
+        "EARLY_QUEEN_PENALTY": 55.62
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.71,
+        "FUTILITY_MARGIN_D1": 91.48,
+        "FUTILITY_MARGIN_D2": 282.15,
+        "ASPIRATION_DELTA": 45.18,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.42,
+        "QUEEN_ATTACK_WT": 43.31,
+        "CASTLING_BONUS": 72.76,
+        "EARLY_QUEEN_PENALTY": 65.08
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.5,
+        "FUTILITY_MARGIN_D1": 100.37,
+        "FUTILITY_MARGIN_D2": 299.91,
+        "ASPIRATION_DELTA": 49.93,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.17,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.87,
+        "EARLY_QUEEN_PENALTY": 60.33
+      }
+    },
+    {
+      "iteration": 183,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.73,
+        "FUTILITY_MARGIN_D1": 109.23,
+        "FUTILITY_MARGIN_D2": 282.18,
+        "ASPIRATION_DELTA": 45.2,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.89,
+        "QUEEN_ATTACK_WT": 37.39,
+        "CASTLING_BONUS": 72.78,
+        "EARLY_QUEEN_PENALTY": 65.05
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.27,
+        "FUTILITY_MARGIN_D1": 91.51,
+        "FUTILITY_MARGIN_D2": 317.63,
+        "ASPIRATION_DELTA": 54.65,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.44,
+        "QUEEN_ATTACK_WT": 43.29,
+        "CASTLING_BONUS": 86.96,
+        "EARLY_QUEEN_PENALTY": 55.6
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.48,
+        "FUTILITY_MARGIN_D1": 100.39,
+        "FUTILITY_MARGIN_D2": 299.89,
+        "ASPIRATION_DELTA": 49.91,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.18,
+        "QUEEN_ATTACK_WT": 40.32,
+        "CASTLING_BONUS": 79.85,
+        "EARLY_QUEEN_PENALTY": 60.35
+      }
+    },
+    {
+      "iteration": 184,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.25,
+        "FUTILITY_MARGIN_D1": 109.24,
+        "FUTILITY_MARGIN_D2": 317.61,
+        "ASPIRATION_DELTA": 45.18,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.46,
+        "QUEEN_ATTACK_WT": 43.27,
+        "CASTLING_BONUS": 72.77,
+        "EARLY_QUEEN_PENALTY": 65.07
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.71,
+        "FUTILITY_MARGIN_D1": 91.53,
+        "FUTILITY_MARGIN_D2": 282.17,
+        "ASPIRATION_DELTA": 54.63,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.91,
+        "QUEEN_ATTACK_WT": 37.37,
+        "CASTLING_BONUS": 86.94,
+        "EARLY_QUEEN_PENALTY": 55.62
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.5,
+        "FUTILITY_MARGIN_D1": 100.4,
+        "FUTILITY_MARGIN_D2": 299.91,
+        "ASPIRATION_DELTA": 49.89,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.17,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.83,
+        "EARLY_QUEEN_PENALTY": 60.36
+      }
+    },
+    {
+      "iteration": 185,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.73,
+        "FUTILITY_MARGIN_D1": 91.55,
+        "FUTILITY_MARGIN_D2": 282.2,
+        "ASPIRATION_DELTA": 54.61,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.44,
+        "QUEEN_ATTACK_WT": 37.39,
+        "CASTLING_BONUS": 72.75,
+        "EARLY_QUEEN_PENALTY": 55.64
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.27,
+        "FUTILITY_MARGIN_D1": 109.26,
+        "FUTILITY_MARGIN_D2": 317.61,
+        "ASPIRATION_DELTA": 45.17,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.89,
+        "QUEEN_ATTACK_WT": 43.29,
+        "CASTLING_BONUS": 86.92,
+        "EARLY_QUEEN_PENALTY": 65.08
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.52,
+        "FUTILITY_MARGIN_D1": 100.42,
+        "FUTILITY_MARGIN_D2": 299.92,
+        "ASPIRATION_DELTA": 49.87,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.18,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.85,
+        "EARLY_QUEEN_PENALTY": 60.38
+      }
+    },
+    {
+      "iteration": 186,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.75,
+        "FUTILITY_MARGIN_D1": 109.27,
+        "FUTILITY_MARGIN_D2": 282.23,
+        "ASPIRATION_DELTA": 54.59,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.47,
+        "QUEEN_ATTACK_WT": 43.31,
+        "CASTLING_BONUS": 72.77,
+        "EARLY_QUEEN_PENALTY": 65.1
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.29,
+        "FUTILITY_MARGIN_D1": 91.57,
+        "FUTILITY_MARGIN_D2": 317.62,
+        "ASPIRATION_DELTA": 45.15,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.9,
+        "QUEEN_ATTACK_WT": 37.41,
+        "CASTLING_BONUS": 86.93,
+        "EARLY_QUEEN_PENALTY": 55.66
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.54,
+        "FUTILITY_MARGIN_D1": 100.4,
+        "FUTILITY_MARGIN_D2": 299.94,
+        "ASPIRATION_DELTA": 49.86,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.2,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.87,
+        "EARLY_QUEEN_PENALTY": 60.36
+      }
+    },
+    {
+      "iteration": 187,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.77,
+        "FUTILITY_MARGIN_D1": 91.56,
+        "FUTILITY_MARGIN_D2": 282.25,
+        "ASPIRATION_DELTA": 54.57,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.49,
+        "QUEEN_ATTACK_WT": 37.39,
+        "CASTLING_BONUS": 86.94,
+        "EARLY_QUEEN_PENALTY": 55.65
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.3,
+        "FUTILITY_MARGIN_D1": 109.25,
+        "FUTILITY_MARGIN_D2": 317.63,
+        "ASPIRATION_DELTA": 45.14,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.92,
+        "QUEEN_ATTACK_WT": 43.29,
+        "CASTLING_BONUS": 72.79,
+        "EARLY_QUEEN_PENALTY": 65.08
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.55,
+        "FUTILITY_MARGIN_D1": 100.42,
+        "FUTILITY_MARGIN_D2": 299.96,
+        "ASPIRATION_DELTA": 49.84,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.22,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.85,
+        "EARLY_QUEEN_PENALTY": 60.38
+      }
+    },
+    {
+      "iteration": 188,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.79,
+        "FUTILITY_MARGIN_D1": 91.58,
+        "FUTILITY_MARGIN_D2": 317.64,
+        "ASPIRATION_DELTA": 54.55,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.93,
+        "QUEEN_ATTACK_WT": 43.3,
+        "CASTLING_BONUS": 86.92,
+        "EARLY_QUEEN_PENALTY": 55.67
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.32,
+        "FUTILITY_MARGIN_D1": 109.26,
+        "FUTILITY_MARGIN_D2": 282.28,
+        "ASPIRATION_DELTA": 45.12,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.51,
+        "QUEEN_ATTACK_WT": 37.41,
+        "CASTLING_BONUS": 72.78,
+        "EARLY_QUEEN_PENALTY": 65.09
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.54,
+        "FUTILITY_MARGIN_D1": 100.4,
+        "FUTILITY_MARGIN_D2": 299.98,
+        "ASPIRATION_DELTA": 49.86,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.24,
+        "QUEEN_ATTACK_WT": 40.37,
+        "CASTLING_BONUS": 79.87,
+        "EARLY_QUEEN_PENALTY": 60.36
+      }
+    },
+    {
+      "iteration": 189,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.77,
+        "FUTILITY_MARGIN_D1": 91.57,
+        "FUTILITY_MARGIN_D2": 282.31,
+        "ASPIRATION_DELTA": 54.57,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.53,
+        "QUEEN_ATTACK_WT": 43.32,
+        "CASTLING_BONUS": 86.94,
+        "EARLY_QUEEN_PENALTY": 55.65
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.3,
+        "FUTILITY_MARGIN_D1": 109.24,
+        "FUTILITY_MARGIN_D2": 317.65,
+        "ASPIRATION_DELTA": 45.14,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.95,
+        "QUEEN_ATTACK_WT": 37.43,
+        "CASTLING_BONUS": 72.8,
+        "EARLY_QUEEN_PENALTY": 65.07
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.55,
+        "FUTILITY_MARGIN_D1": 100.42,
+        "FUTILITY_MARGIN_D2": 299.99,
+        "ASPIRATION_DELTA": 49.84,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.25,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.85,
+        "EARLY_QUEEN_PENALTY": 60.38
+      }
+    },
+    {
+      "iteration": 190,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.79,
+        "FUTILITY_MARGIN_D1": 109.25,
+        "FUTILITY_MARGIN_D2": 282.34,
+        "ASPIRATION_DELTA": 54.55,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.96,
+        "QUEEN_ATTACK_WT": 43.3,
+        "CASTLING_BONUS": 86.92,
+        "EARLY_QUEEN_PENALTY": 55.67
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.32,
+        "FUTILITY_MARGIN_D1": 91.59,
+        "FUTILITY_MARGIN_D2": 317.65,
+        "ASPIRATION_DELTA": 45.13,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.55,
+        "QUEEN_ATTACK_WT": 37.41,
+        "CASTLING_BONUS": 72.79,
+        "EARLY_QUEEN_PENALTY": 65.09
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.54,
+        "FUTILITY_MARGIN_D1": 100.44,
+        "FUTILITY_MARGIN_D2": 299.98,
+        "ASPIRATION_DELTA": 49.86,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.27,
+        "QUEEN_ATTACK_WT": 40.37,
+        "CASTLING_BONUS": 79.87,
+        "EARLY_QUEEN_PENALTY": 60.36
+      }
+    },
+    {
+      "iteration": 191,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.77,
+        "FUTILITY_MARGIN_D1": 91.61,
+        "FUTILITY_MARGIN_D2": 282.33,
+        "ASPIRATION_DELTA": 45.15,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.98,
+        "QUEEN_ATTACK_WT": 43.32,
+        "CASTLING_BONUS": 72.81,
+        "EARLY_QUEEN_PENALTY": 65.07
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.3,
+        "FUTILITY_MARGIN_D1": 109.26,
+        "FUTILITY_MARGIN_D2": 317.63,
+        "ASPIRATION_DELTA": 54.56,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.57,
+        "QUEEN_ATTACK_WT": 37.43,
+        "CASTLING_BONUS": 86.93,
+        "EARLY_QUEEN_PENALTY": 55.66
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.55,
+        "FUTILITY_MARGIN_D1": 100.46,
+        "FUTILITY_MARGIN_D2": 299.99,
+        "ASPIRATION_DELTA": 49.87,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.25,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.89,
+        "EARLY_QUEEN_PENALTY": 60.35
+      }
+    },
+    {
+      "iteration": 192,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.79,
+        "FUTILITY_MARGIN_D1": 109.28,
+        "FUTILITY_MARGIN_D2": 282.35,
+        "ASPIRATION_DELTA": 45.17,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.55,
+        "QUEEN_ATTACK_WT": 37.42,
+        "CASTLING_BONUS": 86.94,
+        "EARLY_QUEEN_PENALTY": 55.64
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.32,
+        "FUTILITY_MARGIN_D1": 91.64,
+        "FUTILITY_MARGIN_D2": 317.64,
+        "ASPIRATION_DELTA": 54.58,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.96,
+        "QUEEN_ATTACK_WT": 43.3,
+        "CASTLING_BONUS": 72.83,
+        "EARLY_QUEEN_PENALTY": 65.05
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.54,
+        "FUTILITY_MARGIN_D1": 100.47,
+        "FUTILITY_MARGIN_D2": 299.98,
+        "ASPIRATION_DELTA": 49.86,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.24,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.9,
+        "EARLY_QUEEN_PENALTY": 60.33
+      }
+    },
+    {
+      "iteration": 193,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.3,
+        "FUTILITY_MARGIN_D1": 109.29,
+        "FUTILITY_MARGIN_D2": 282.35,
+        "ASPIRATION_DELTA": 54.56,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.54,
+        "QUEEN_ATTACK_WT": 43.28,
+        "CASTLING_BONUS": 72.85,
+        "EARLY_QUEEN_PENALTY": 65.03
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.77,
+        "FUTILITY_MARGIN_D1": 91.66,
+        "FUTILITY_MARGIN_D2": 317.61,
+        "ASPIRATION_DELTA": 45.15,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.94,
+        "QUEEN_ATTACK_WT": 37.4,
+        "CASTLING_BONUS": 86.96,
+        "EARLY_QUEEN_PENALTY": 55.63
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.55,
+        "FUTILITY_MARGIN_D1": 100.49,
+        "FUTILITY_MARGIN_D2": 299.96,
+        "ASPIRATION_DELTA": 49.87,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.22,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.89,
+        "EARLY_QUEEN_PENALTY": 60.35
+      }
+    },
+    {
+      "iteration": 194,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.79,
+        "FUTILITY_MARGIN_D1": 91.68,
+        "FUTILITY_MARGIN_D2": 282.34,
+        "ASPIRATION_DELTA": 54.57,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.52,
+        "QUEEN_ATTACK_WT": 37.42,
+        "CASTLING_BONUS": 86.94,
+        "EARLY_QUEEN_PENALTY": 65.05
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.32,
+        "FUTILITY_MARGIN_D1": 109.3,
+        "FUTILITY_MARGIN_D2": 317.58,
+        "ASPIRATION_DELTA": 45.17,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.92,
+        "QUEEN_ATTACK_WT": 43.29,
+        "CASTLING_BONUS": 72.84,
+        "EARLY_QUEEN_PENALTY": 55.65
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.57,
+        "FUTILITY_MARGIN_D1": 100.51,
+        "FUTILITY_MARGIN_D2": 299.98,
+        "ASPIRATION_DELTA": 49.86,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.24,
+        "QUEEN_ATTACK_WT": 40.37,
+        "CASTLING_BONUS": 79.87,
+        "EARLY_QUEEN_PENALTY": 60.33
+      }
+    },
+    {
+      "iteration": 195,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.81,
+        "FUTILITY_MARGIN_D1": 91.7,
+        "FUTILITY_MARGIN_D2": 282.36,
+        "ASPIRATION_DELTA": 54.55,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.54,
+        "QUEEN_ATTACK_WT": 43.31,
+        "CASTLING_BONUS": 86.91,
+        "EARLY_QUEEN_PENALTY": 65.03
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.33,
+        "FUTILITY_MARGIN_D1": 109.32,
+        "FUTILITY_MARGIN_D2": 317.59,
+        "ASPIRATION_DELTA": 45.16,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.93,
+        "QUEEN_ATTACK_WT": 37.44,
+        "CASTLING_BONUS": 72.82,
+        "EARLY_QUEEN_PENALTY": 55.63
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.59,
+        "FUTILITY_MARGIN_D1": 100.53,
+        "FUTILITY_MARGIN_D2": 299.99,
+        "ASPIRATION_DELTA": 49.84,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.25,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.85,
+        "EARLY_QUEEN_PENALTY": 60.31
+      }
+    },
+    {
+      "iteration": 196,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 22.83,
+        "FUTILITY_MARGIN_D1": 109.33,
+        "FUTILITY_MARGIN_D2": 317.6,
+        "ASPIRATION_DELTA": 45.14,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.95,
+        "QUEEN_ATTACK_WT": 43.29,
+        "CASTLING_BONUS": 72.81,
+        "EARLY_QUEEN_PENALTY": 55.62
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 26.35,
+        "FUTILITY_MARGIN_D1": 91.72,
+        "FUTILITY_MARGIN_D2": 282.39,
+        "ASPIRATION_DELTA": 54.53,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.56,
+        "QUEEN_ATTACK_WT": 37.42,
+        "CASTLING_BONUS": 86.89,
+        "EARLY_QUEEN_PENALTY": 65.01
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.6,
+        "FUTILITY_MARGIN_D1": 100.51,
+        "FUTILITY_MARGIN_D2": 299.98,
+        "ASPIRATION_DELTA": 49.86,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.24,
+        "QUEEN_ATTACK_WT": 40.34,
+        "CASTLING_BONUS": 79.87,
+        "EARLY_QUEEN_PENALTY": 60.33
+      }
+    },
+    {
+      "iteration": 197,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.36,
+        "FUTILITY_MARGIN_D1": 91.71,
+        "FUTILITY_MARGIN_D2": 317.57,
+        "ASPIRATION_DELTA": 45.16,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.93,
+        "QUEEN_ATTACK_WT": 43.27,
+        "CASTLING_BONUS": 72.83,
+        "EARLY_QUEEN_PENALTY": 55.64
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.85,
+        "FUTILITY_MARGIN_D1": 109.31,
+        "FUTILITY_MARGIN_D2": 282.38,
+        "ASPIRATION_DELTA": 54.55,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.55,
+        "QUEEN_ATTACK_WT": 37.41,
+        "CASTLING_BONUS": 86.91,
+        "EARLY_QUEEN_PENALTY": 65.02
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.62,
+        "FUTILITY_MARGIN_D1": 100.49,
+        "FUTILITY_MARGIN_D2": 299.99,
+        "ASPIRATION_DELTA": 49.84,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.25,
+        "QUEEN_ATTACK_WT": 40.36,
+        "CASTLING_BONUS": 79.85,
+        "EARLY_QUEEN_PENALTY": 60.31
+      }
+    },
+    {
+      "iteration": 198,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.38,
+        "FUTILITY_MARGIN_D1": 109.28,
+        "FUTILITY_MARGIN_D2": 282.41,
+        "ASPIRATION_DELTA": 45.15,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.94,
+        "QUEEN_ATTACK_WT": 43.29,
+        "CASTLING_BONUS": 72.82,
+        "EARLY_QUEEN_PENALTY": 65.0
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.86,
+        "FUTILITY_MARGIN_D1": 91.7,
+        "FUTILITY_MARGIN_D2": 317.58,
+        "ASPIRATION_DELTA": 54.53,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.57,
+        "QUEEN_ATTACK_WT": 37.43,
+        "CASTLING_BONUS": 86.89,
+        "EARLY_QUEEN_PENALTY": 55.62
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.64,
+        "FUTILITY_MARGIN_D1": 100.51,
+        "FUTILITY_MARGIN_D2": 299.98,
+        "ASPIRATION_DELTA": 49.82,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.27,
+        "QUEEN_ATTACK_WT": 40.37,
+        "CASTLING_BONUS": 79.84,
+        "EARLY_QUEEN_PENALTY": 60.33
+      }
+    },
+    {
+      "iteration": 199,
+      "score_plus": 1.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.4,
+        "FUTILITY_MARGIN_D1": 109.3,
+        "FUTILITY_MARGIN_D2": 317.55,
+        "ASPIRATION_DELTA": 45.13,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 45.58,
+        "QUEEN_ATTACK_WT": 43.3,
+        "CASTLING_BONUS": 72.8,
+        "EARLY_QUEEN_PENALTY": 55.64
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.88,
+        "FUTILITY_MARGIN_D1": 91.72,
+        "FUTILITY_MARGIN_D2": 282.4,
+        "ASPIRATION_DELTA": 54.51,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 54.96,
+        "QUEEN_ATTACK_WT": 37.45,
+        "CASTLING_BONUS": 86.87,
+        "EARLY_QUEEN_PENALTY": 65.02
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.66,
+        "FUTILITY_MARGIN_D1": 100.53,
+        "FUTILITY_MARGIN_D2": 299.99,
+        "ASPIRATION_DELTA": 49.8,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.25,
+        "QUEEN_ATTACK_WT": 40.39,
+        "CASTLING_BONUS": 79.82,
+        "EARLY_QUEEN_PENALTY": 60.31
+      }
+    },
+    {
+      "iteration": 200,
+      "score_plus": 0.0,
+      "theta_plus": {
+        "TAL_AGGRESSION": 26.41,
+        "FUTILITY_MARGIN_D1": 109.31,
+        "FUTILITY_MARGIN_D2": 317.56,
+        "ASPIRATION_DELTA": 45.12,
+        "NMP_REDUCTION": 2.59,
+        "LMR_MOVE_INDEX": 2.41,
+        "SE_BETA_MARGIN": 45.57,
+        "QUEEN_ATTACK_WT": 37.46,
+        "CASTLING_BONUS": 86.85,
+        "EARLY_QUEEN_PENALTY": 65.0
+      },
+      "theta_minus": {
+        "TAL_AGGRESSION": 22.9,
+        "FUTILITY_MARGIN_D1": 91.74,
+        "FUTILITY_MARGIN_D2": 282.43,
+        "ASPIRATION_DELTA": 54.49,
+        "NMP_REDUCTION": 1.41,
+        "LMR_MOVE_INDEX": 3.59,
+        "SE_BETA_MARGIN": 54.94,
+        "QUEEN_ATTACK_WT": 43.32,
+        "CASTLING_BONUS": 72.79,
+        "EARLY_QUEEN_PENALTY": 55.63
+      },
+      "theta": {
+        "TAL_AGGRESSION": 24.64,
+        "FUTILITY_MARGIN_D1": 100.51,
+        "FUTILITY_MARGIN_D2": 299.98,
+        "ASPIRATION_DELTA": 49.82,
+        "NMP_REDUCTION": 2.0,
+        "LMR_MOVE_INDEX": 3.0,
+        "SE_BETA_MARGIN": 50.27,
+        "QUEEN_ATTACK_WT": 40.41,
+        "CASTLING_BONUS": 79.8,
+        "EARLY_QUEEN_PENALTY": 60.29
       }
     }
   ]
