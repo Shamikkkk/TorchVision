@@ -41,10 +41,11 @@ Strategic implications:
 **Phase D (NNUE v2) — ACTIVE 🔥**
 **Phase E (MCTS) — DEFERRED 🛑**
 **Phase G (The Mittens Path) — COMPLETE ✅**
-**Phase G final: ~1835 Elo (measured Apr 26). Full personality + Obsidian Ember UI done.**
-G1-G5, G7-G8v2, G10, G12-G13, G16-G17 done. Countermove heuristic,
-depth-dependent NMP, LMP, IID added. UI overhaul complete (all 5 phases).
-10 UCI-tunable parameters. SPSA optimization in progress (200 iterations).
+**Phase G — COMPLETE ✅ at ~1835 Elo (measured Apr 26)**
+All strength items done: G1-G5, G7-G8v2, countermove, NMP-depth, LMP, IID.
+SPSA 200 iterations: defaults confirmed near-optimal (no changes needed).
+UI overhaul complete (all 5 phases, Obsidian Ember). Deployment configs ready.
+Phase D (NNUE) is now the active track — see Phase D section below.
 **Game Analyzer — COMPLETE ✅**
 **Frontend: difficulty levels + opening name — COMPLETE ✅**
 
@@ -485,11 +486,12 @@ G5. Singular extensions ✅ COMPLETE
 **Internal Iterative Deepening (IID) ✅ COMPLETE (April 26, 2026)**
     Depth-2 shallow search when no TT move at depth ≥ 4.
 
-G6. SPSA tuning ✅ IN PROGRESS (April 26, 2026)
+G6. SPSA tuning ✅ COMPLETE (April 26, 2026)
     Session 1: 10 params made UCI-tunable via AtomicI32 statics.
     Session 2: SPSA driver script written (spsa_tune.py).
-    Running overnight: 200 iterations × 20 games at 5+0.1.
-    Results in backend/scripts/spsa_results.json.
+    200 iterations completed: all parameters converged within ±0.5
+    of hand-tuned defaults. Conclusion: defaults are near-optimal.
+    No changes applied. Results in backend/scripts/spsa_results.json.
 
 ### Track 2: Style improvements (intentional Tal-bias)
 
@@ -551,39 +553,15 @@ G17. Game-over screens ✅ COMPLETE
     - Player win: grudging acknowledgment, Pyro avatar dims
     - Draw: Pyro is annoyed ("Acceptable. Barely.")
 
-### Phase G — remaining priorities (in order):
+### Phase G — remaining priorities:
 
-1. **UI Redesign (Obsidian Ember)** — ✅ COMPLETE (April 26, 2026)
-   All 5 phases done: design tokens, Play screen, game-over
-   takeover, Lobby screen, Analyze screen restyle, dynamic
-   effects (attackGlow, check pulse, mate vignette).
+Phase G is COMPLETE. All items either done or consciously deferred:
+- G9 (sacrifice-seeking): DEFERRED — personality already strong enough
+- G11 (anti-quiet): DEFERRED — would cost Elo for marginal style gain
+- G14 (theatrical timing): SKIPPED by user preference
+- Deployment: configs ready (Netlify + Railway), deploy when ready
 
-2. **Apply SPSA results** — read spsa_results.json, update
-   AtomicI32 defaults, gauntlet to confirm improvement.
-   Expected: +50-100 Elo.
-
-3. **G8 v3 refinement** — if SPSA moves CASTLING_BONUS or
-   QUEEN_ATTACK_WT significantly, the king-exposure bonus
-   may need retuning.
-
-4. **G9 (Sacrifice-seeking)** — speculation bonus for material-
-   down positions. Style item, may cost Elo.
-
-5. **G11 (Anti-quiet)** — penalize closed positions. Style item.
-
-6. **Deployment** — Docker, Vercel/Netlify frontend, Railway
-   backend, rate limiting, game persistence.
-
-Estimated total: 12-15 sessions of ~1 hour each, ~3-4 months at 2-3 sessions/week.
-
-### Success criteria for Phase G
-
-- Cutechess gauntlet shows Pyro at 2000+ CCRL
-- Playing against Feral-difficulty Pyro feels SCARY
-  (tactical surprises, sacrifices, fast mating attacks)
-- Pyro has a recognizable visual identity and voice
-- At least 3 friends/test users can describe Pyro's 
-  "personality" in their own words after one game
+Active development has moved to Phase D (NNUE).
 
 ---
 
