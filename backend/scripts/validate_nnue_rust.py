@@ -1,256 +1,234 @@
-"""Validate trained NNUE by playing games: NNUE Pyro vs PST Pyro.
+"""NNUE vs PeSTO SPRT validation via cutechess-cli.
 
-Runs two instances of the Rust engine:
-  - NNUE: loads pyro.nnue (trained weights)
-  - PST:  runs with --no-nnue flag (PeSTO evaluation only)
+Runs a Sequential Probability Ratio Test comparing the freshly-trained
+NNUE-loaded pyro against the PeSTO-only baseline.
 
-Games alternate colors. Each move uses "go nodes 5000".
-Reports W/D/L and score percentage. PASS if NNUE scores >= 52%.
+Test parameters:
+  H0: Elo difference = 0  (no improvement)
+  H1: Elo difference = 10 (real improvement)
+  alpha = beta = 0.05     (5% Type I and Type II error rates)
+
+The test terminates early when one hypothesis is significantly more
+likely than the other, or after --games if neither bound is reached.
+
+Time control matches the gauntlet baseline (10+0.1) so the resulting
+Elo estimate is directly comparable to existing measurements.
+
+Exit codes:
+  0 = H1 accepted — NNUE is significantly stronger than PeSTO
+  1 = H0 accepted — no significant improvement, OR cutechess error
+  2 = Inconclusive — verdict line not detected; manual review needed
+      (game cap reached without SPRT convergence, OR verdict phrasing
+      differs from what this script expects — check the last-20-lines
+      dump and validate_nnue_games.pgn)
 
 Usage:
   cd backend && source venv/Scripts/activate
-  python -m scripts.validate_nnue_rust --games 200
+  python -m scripts.validate_nnue_rust
+  python -m scripts.validate_nnue_rust --games 2000
 """
 
 import argparse
-import os
+import io
 import subprocess
 import sys
-import time
+from collections import deque
+from pathlib import Path
+
+# Force UTF-8 output — Windows consoles default to cp1252.
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+# ── Paths ──────────────────────────────────────────────────────────────
+
+_HERE = Path(__file__).resolve().parent
+_ROOT = _HERE.parent.parent
+
+ENGINE_PATH    = _ROOT / "engine" / "target" / "release" / "pyro.exe"
+NNUE_PATH      = _ROOT / "engine" / "pyro.nnue"
+CUTECHESS_PATH = Path(r"C:\tools\cutechess\cutechess-1.3.1-win64\cutechess-cli.exe")
+PGN_OUT        = _HERE / "validate_nnue_games.pgn"
+
+# Expected size for (768→256)×2→1 architecture (Phase D1).
+# Phase D2 will use (768×8kb→512)×2→1 — file size will change.
+# Update this constant when transitioning to D2 weights or the
+# preflight will fail on the new file. The failure message is
+# clear, but it's better to update proactively.
+EXPECTED_NNUE_SIZE = 394_762
+
+# ── SPRT parameters ────────────────────────────────────────────────────
+
+ELO0  = 0     # H0: no improvement
+ELO1  = 10    # H1: +10 Elo
+ALPHA = 0.05  # max Type I error  (false positive — wrongly accept H1)
+BETA  = 0.05  # max Type II error (false negative — wrongly accept H0)
+
+# Hard game cap — SPRT usually terminates well before this.
+MAX_GAMES = 1000
+
+# Time control — matches gauntlet baseline for comparable Elo estimates.
+TC = "10+0.1"
 
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ENGINE_PATH = os.path.normpath(
-    os.path.join(SCRIPT_DIR, "..", "..", "engine", "target", "release", "pyro.exe")
-)
+# ── Pre-flight ─────────────────────────────────────────────────────────
 
-NODE_LIMIT = 5000
-MAX_GAME_PLIES = 400
+def preflight_checks() -> None:
+    """Refuse to run if anything obvious is broken."""
+    if not ENGINE_PATH.exists():
+        sys.exit(f"FATAL: pyro.exe not found at {ENGINE_PATH}")
 
+    if not CUTECHESS_PATH.exists():
+        sys.exit(f"FATAL: cutechess-cli not found at {CUTECHESS_PATH}")
 
-class UCIEngine:
-    """Manages a UCI engine subprocess."""
+    if not NNUE_PATH.exists():
+        sys.exit(f"FATAL: pyro.nnue not found at {NNUE_PATH}")
 
-    def __init__(self, path: str, extra_args: list[str] = None):
-        cmd = [path] + (extra_args or [])
-        self.proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
+    actual_size = NNUE_PATH.stat().st_size
+    if actual_size != EXPECTED_NNUE_SIZE:
+        sys.exit(
+            f"FATAL: pyro.nnue size mismatch — without a valid weight file,\n"
+            f"  pyro.exe silently falls back to PeSTO and the test is meaningless.\n"
+            f"  Expected : {EXPECTED_NNUE_SIZE:,} bytes\n"
+            f"  Actual   : {actual_size:,} bytes\n"
+            f"  If you changed the NNUE architecture, update EXPECTED_NNUE_SIZE."
         )
-        self._send("uci")
-        self._wait_for("uciok")
-        self._send("isready")
-        self._wait_for("readyok")
 
-    def _send(self, cmd: str):
-        self.proc.stdin.write(cmd + "\n")
-        self.proc.stdin.flush()
-
-    def _wait_for(self, token: str) -> list[str]:
-        lines = []
-        while True:
-            line = self.proc.stdout.readline().strip()
-            if not line and self.proc.poll() is not None:
-                raise RuntimeError("Engine process died")
-            lines.append(line)
-            if line.startswith(token):
-                return lines
-
-    def new_game(self):
-        self._send("ucinewgame")
-        self._send("isready")
-        self._wait_for("readyok")
-
-    def go_nodes(self, moves: list[str], nodes: int) -> tuple[str, int]:
-        """Search and return (bestmove, eval_cp from STM perspective)."""
-        if moves:
-            self._send(f"position startpos moves {' '.join(moves)}")
-        else:
-            self._send("position startpos")
-
-        self._send(f"go nodes {nodes}")
-        lines = self._wait_for("bestmove")
-
-        eval_cp = 0
-        for line in lines:
-            if "score cp" in line:
-                parts = line.split()
-                for i, tok in enumerate(parts):
-                    if tok == "cp" and i + 1 < len(parts):
-                        try:
-                            eval_cp = int(parts[i + 1])
-                        except ValueError:
-                            pass
-
-        bestmove = "(none)"
-        for line in lines:
-            if line.startswith("bestmove"):
-                bestmove = line.split()[1]
-                break
-
-        return bestmove, eval_cp
-
-    def quit(self):
-        try:
-            self._send("quit")
-            self.proc.wait(timeout=2)
-        except Exception:
-            self.proc.kill()
-
-
-def play_game(
-    white_engine: UCIEngine,
-    black_engine: UCIEngine,
-    node_limit: int,
-) -> int:
-    """Play one game. Returns result from White's perspective: 1/0/-1."""
-    white_engine.new_game()
-    black_engine.new_game()
-
-    moves: list[str] = []
-    ply = 0
-    consecutive_low_eval = 0
-    prev_eval_stm = 0
-
-    while ply < MAX_GAME_PLIES:
-        engine = white_engine if ply % 2 == 0 else black_engine
-        bestmove, eval_cp = engine.go_nodes(moves, node_limit)
-
-        white_to_move = ply % 2 == 0
-
-        if bestmove == "(none)":
-            # No legal moves — checkmate or stalemate
-            if abs(prev_eval_stm) > 500:
-                prev_was_white = not white_to_move
-                return 1 if prev_was_white else -1
-            else:
-                return 0  # stalemate
-
-        prev_eval_stm = eval_cp
-        moves.append(bestmove)
-        ply += 1
-
-        # Draw by low eval
-        if abs(eval_cp) < 10:
-            consecutive_low_eval += 1
-        else:
-            consecutive_low_eval = 0
-
-        if consecutive_low_eval >= 80:
-            return 0
-
-        # Mate found
-        if abs(eval_cp) > 40000:
-            if eval_cp > 0:
-                return 1 if white_to_move else -1
-            else:
-                return -1 if white_to_move else 1
-
-    return 0  # max plies
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Validate NNUE vs PST by playing games"
-    )
-    parser.add_argument("--games", type=int, default=200, help="Number of games")
-    parser.add_argument("--nodes", type=int, default=NODE_LIMIT, help="Nodes per move")
-    parser.add_argument("--engine", type=str, default=ENGINE_PATH, help="Engine binary")
-    parser.add_argument("--pass-threshold", type=float, default=52.0,
-                        help="Score %% needed to pass")
-    args = parser.parse_args()
-
-    if not os.path.isfile(args.engine):
-        print(f"Engine not found: {args.engine}")
-        print("Build it first: cd engine && cargo build --release")
-        sys.exit(1)
-
-    print(f"Engine: {args.engine}")
-    print(f"Games:  {args.games}")
-    print(f"Nodes:  {args.nodes}/move")
-    print(f"Pass:   >= {args.pass_threshold:.0f}% score")
+    print(f"[preflight] pyro.exe    : {ENGINE_PATH}")
+    print(f"[preflight] pyro.nnue   : {actual_size:,} bytes ✓")
+    print(f"[preflight] cutechess   : {CUTECHESS_PATH}")
+    print(f"[preflight] SPRT        : elo0={ELO0}, elo1={ELO1}, α={ALPHA}, β={BETA}")
+    print(f"[preflight] TC          : {TC}")
     print()
 
-    # Launch both engines
-    nnue_engine = UCIEngine(args.engine)
-    pst_engine = UCIEngine(args.engine, ["--no-nnue"])
 
-    # NNUE results
-    nnue_wins = 0
-    nnue_draws = 0
-    nnue_losses = 0
+# ── SPRT match ─────────────────────────────────────────────────────────
 
-    start_time = time.time()
+def run_sprt(games_cap: int = MAX_GAMES) -> bool | None:
+    """Run SPRT via cutechess-cli, streaming output to stdout.
+
+    Returns:
+      True   → H1 accepted (NNUE significantly better than PeSTO)
+      False  → H0 accepted (no significant improvement)
+      None   → inconclusive or verdict line not recognized
+
+    Note on cutechess exit codes: cutechess-cli returns 0 for all normal
+    completions regardless of SPRT verdict, so we parse stdout for
+    "H1 was accepted" / "H0 was accepted" and set our own exit code.
+    If cutechess returns non-zero, that indicates a real error (crash,
+    bad arguments) and we sys.exit(1) directly.
+    """
+    rounds = games_cap // 2  # -rounds N -games 2 → N*2 total games
+
+    cmd = [
+        str(CUTECHESS_PATH),
+        # NNUE side — loads pyro.nnue automatically at startup.
+        "-engine", f"name=Pyro-NNUE", f"cmd={ENGINE_PATH}",
+        # PeSTO baseline — same binary, NNUE disabled via --no-nnue.
+        "-engine", f"name=Pyro-PeSTO", f"cmd={ENGINE_PATH}", "arg=--no-nnue",
+        # Common engine settings.
+        "-each", "proto=uci", f"tc={TC}",
+        # Match structure: color swap every game, -repeat pairs colors per opening.
+        "-rounds", str(rounds),
+        "-games", "2",
+        "-repeat",
+        "-recover",       # restart crashed engines instead of aborting
+        "-concurrency", "1",
+        # Adjudication — skips drawn/won positions without affecting result quality.
+        "-draw", "movenumber=40", "movecount=10", "score=10",
+        "-resign", "movecount=5", "score=1000",
+        # Real SPRT termination criterion.
+        "-sprt",
+        f"elo0={ELO0}", f"elo1={ELO1}",
+        f"alpha={ALPHA}", f"beta={BETA}",
+        # Save PGN for post-hoc analysis.
+        "-pgnout", str(PGN_OUT),
+    ]
+
+    print("[run_sprt] Command:")
+    print("  " + " ".join(str(c) for c in cmd))
+    print()
+
+    h1_accepted = False
+    h0_accepted = False
+    tail: deque[str] = deque(maxlen=20)  # ring buffer for last-N-lines dump
 
     try:
-        for game_num in range(1, args.games + 1):
-            nnue_is_white = game_num % 2 == 1
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,   # merge stderr so all output is visible
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
 
-            if nnue_is_white:
-                white_eng, black_eng = nnue_engine, pst_engine
-                white_label, black_label = "NNUE", "PST"
-            else:
-                white_eng, black_eng = pst_engine, nnue_engine
-                white_label, black_label = "PST", "NNUE"
+        for line in proc.stdout:
+            line_stripped = line.rstrip()
+            print(line_stripped, flush=True)
+            tail.append(line_stripped)
 
-            result_white = play_game(white_eng, black_eng, args.nodes)
+            if "H1 was accepted" in line_stripped:
+                h1_accepted = True
+            elif "H0 was accepted" in line_stripped:
+                h0_accepted = True
 
-            # Convert to NNUE perspective
-            result_nnue = result_white if nnue_is_white else -result_white
+        proc.wait()
 
-            if result_nnue == 1:
-                nnue_wins += 1
-                outcome = f"{white_label} wins" if nnue_is_white else f"{black_label} wins"
-            elif result_nnue == -1:
-                nnue_losses += 1
-                outcome = f"{black_label} wins" if nnue_is_white else f"{white_label} wins"
-            else:
-                nnue_draws += 1
-                outcome = "draw"
-
-            total = nnue_wins + nnue_draws + nnue_losses
-            score_pct = (nnue_wins + 0.5 * nnue_draws) / total * 100
-
-            elapsed = time.time() - start_time
-            gps = game_num / elapsed if elapsed > 0 else 0
-
-            if game_num <= 5 or game_num % 10 == 0:
-                print(
-                    f"Game {game_num:3d}/{args.games}: "
-                    f"{white_label} W vs {black_label} B -> {outcome}  "
-                    f"[NNUE W{nnue_wins}/D{nnue_draws}/L{nnue_losses} = {score_pct:.1f}%]  "
-                    f"({gps:.1f} g/s)"
-                )
-
+    except FileNotFoundError:
+        sys.exit(f"FATAL: could not launch cutechess-cli at {CUTECHESS_PATH}")
     except KeyboardInterrupt:
-        print(f"\nInterrupted after {nnue_wins + nnue_draws + nnue_losses} games")
-    finally:
-        nnue_engine.quit()
-        pst_engine.quit()
+        proc.terminate()
+        sys.exit("\nAborted by user.")
 
-    total = nnue_wins + nnue_draws + nnue_losses
-    if total == 0:
-        print("No games played")
+    # Non-zero exit from cutechess = real error (crash, bad arguments, etc.)
+    if proc.returncode != 0:
+        print(f"\n[error] cutechess-cli exited with code {proc.returncode}.")
         sys.exit(1)
 
-    score_pct = (nnue_wins + 0.5 * nnue_draws) / total * 100
-    elapsed = time.time() - start_time
+    if h1_accepted:
+        return True
+    if h0_accepted:
+        return False
+
+    # Clean exit but no verdict detected — inconclusive or phrasing mismatch.
+    print()
+    print("=== SPRT INCONCLUSIVE — verdict line not recognized ===")
+    print("cutechess exited cleanly but we could not detect H0/H1 acceptance.")
+    print("This usually means cutechess hit the game cap without convergence,")
+    print("OR the verdict phrasing differs from what this script expects.")
+    print("\nLast 20 lines of cutechess output:")
+    for saved_line in tail:
+        print(f"  {saved_line}")
+    print("\nManual review required. Check validate_nnue_games.pgn for results.")
+
+    return None
+
+
+# ── Entry point ────────────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="NNUE vs PeSTO SPRT validation via cutechess-cli"
+    )
+    parser.add_argument(
+        "--games", type=int, default=MAX_GAMES,
+        help=f"Hard game cap; SPRT terminates early if conclusive (default: {MAX_GAMES})",
+    )
+    args = parser.parse_args()
+
+    preflight_checks()
+    verdict = run_sprt(args.games)
 
     print()
-    print(f"Results ({total} games, {elapsed:.1f}s):")
-    print(f"  NNUE: W={nnue_wins}  D={nnue_draws}  L={nnue_losses}  ({score_pct:.1f}% score)")
-    print()
-
-    if score_pct >= args.pass_threshold:
-        print(f"PASS  (NNUE scores {score_pct:.1f}% >= {args.pass_threshold:.0f}%)")
+    if verdict is True:
+        print("=== SPRT PASS — H1 accepted: NNUE is significantly stronger than PeSTO ===")
         sys.exit(0)
-    else:
-        print(f"FAIL  (NNUE scores {score_pct:.1f}% < {args.pass_threshold:.0f}%)")
+    elif verdict is False:
+        print("=== SPRT did not pass — H0 accepted: no significant improvement over PeSTO ===")
         sys.exit(1)
+    else:
+        # Inconclusive message already printed by run_sprt.
+        sys.exit(2)
 
 
 if __name__ == "__main__":

@@ -23,10 +23,12 @@ Usage:
 
 import argparse
 import csv
+import datetime
 import math
 import os
 import struct
 import sys
+import time
 
 import chess
 import numpy as np
@@ -435,7 +437,17 @@ def train(args):
     best_val_loss = float("inf")
     patience_counter = 0
 
+    _run_ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_path = os.path.join(MODELS_DIR, f"train_metrics_{_run_ts}.csv")
+    csv_file = open(csv_path, "w", newline="")
+    csv_writer = csv.writer(csv_file)
+    csv_writer.writerow(["epoch", "train_loss", "val_loss", "learning_rate",
+                         "epoch_seconds", "wall_clock_iso", "positions_seen"])
+    csv_file.flush()
+    print(f"[metrics] Logging to {csv_path}", flush=True)
+
     for epoch in range(1, args.epochs + 1):
+        epoch_start = time.perf_counter()
         # --- Train ---
         model.train()
         train_loss_sum = 0.0
@@ -488,11 +500,23 @@ def train(args):
 
         val_loss = val_loss_sum / max(val_batches, 1)
         current_lr = scheduler.get_last_lr()[0]
+        epoch_seconds = time.perf_counter() - epoch_start
 
         print(f"Epoch {epoch:3d}/{args.epochs}  "
               f"train_loss={train_loss:.6f}  val_loss={val_loss:.6f}  "
               f"lr={current_lr:.2e}"
               f"{'  *best*' if val_loss < best_val_loss else ''}", flush=True)
+
+        csv_writer.writerow([
+            epoch,
+            f"{train_loss:.6f}",
+            f"{val_loss:.6f}",
+            f"{current_lr:.2e}",
+            f"{epoch_seconds:.1f}",
+            datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            train_size * epoch,
+        ])
+        csv_file.flush()
 
         scheduler.step()
 
@@ -507,6 +531,7 @@ def train(args):
                 print(f"Early stopping at epoch {epoch} (patience={args.patience})")
                 break
 
+    csv_file.close()
     print(f"\nBest val_loss: {best_val_loss:.6f}")
     print(f"Saved: {os.path.abspath(DEFAULT_OUTPUT)}")
     return DEFAULT_OUTPUT

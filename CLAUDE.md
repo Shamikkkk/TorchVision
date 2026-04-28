@@ -220,7 +220,7 @@ torch/
 │   ├── scripts/
 │   │   ├── generate_selfplay_rust.py  # Self-play data gen via Rust UCI engine
 │   │   ├── train_nnue_rust.py         # NNUE trainer (768->256->1, logit-space loss)
-│   │   ├── validate_nnue_rust.py      # NNUE vs PST match validator
+│   │   ├── validate_nnue_rust.py      # SPRT validator via cutechess-cli (real SPRT, preflight, 10+0.1 TC)
 │   │   └── init_nnue_weights.py       # Material-initialized weight generator
 │   ├── model_training/        # Standalone data pipeline + training scripts
 │   ├── models/                # nnue_rust.pt saved here after training
@@ -280,7 +280,8 @@ python -m scripts.train_nnue_rust --plain data/selfplay_rust.plain --epochs 30 -
 ```bash
 cd backend
 source venv/Scripts/activate
-python -m scripts.validate_nnue_rust --games 200
+python -m scripts.validate_nnue_rust          # real SPRT via cutechess-cli, 10+0.1 TC
+python -m scripts.validate_nnue_rust --games 2000  # override game cap
 ```
 
 ### Frontend
@@ -645,9 +646,19 @@ Expected Elo: ~2000-2200
       cosine LR, gradient clip, CUDA verified on RTX 3050)
 - [ ] Train on 20M positions (~1-2 hours on GPU)
 - [ ] Export to pyro.nnue
-- [ ] SPRT validation: 200 games NNUE vs PeSTO baseline
+- [x] Validator hardened: real SPRT via cutechess-cli (elo0=0, elo1=10,
+      α=β=0.05), TC=10+0.1 matches gauntlet, preflight rejects missing/
+      corrupt pyro.nnue before launch, -recover for crash safety
+- [x] Trainer logs per-epoch metrics to backend/models/train_metrics_<timestamp>.csv
+      (epoch, train_loss, val_loss, lr, epoch_seconds, wall_clock_iso, positions_seen).
+      Use `python -m scripts.plot_train_metrics <csv>` for post-training diagnostics.
+- [ ] Train on 20M positions (~1.5h total: ~20min encode + ~50min GPU for 30 epochs —
+      stop data gen first to avoid RAM contention during encoding)
+- [ ] Export to pyro.nnue
+- [ ] SPRT validation: `python -m scripts.validate_nnue_rust`
 
-Next session: wait for data gen to complete, then train + validate.
+Next session: wait for data gen to complete (ETA Apr 30 ~18:00 IST),
+stop the 4 gen processes, concatenate parts, train, validate.
 
 ### Phase D2: Scale up (target: 2600-2800 Elo)
 **Timeline: 3-4 weeks**
