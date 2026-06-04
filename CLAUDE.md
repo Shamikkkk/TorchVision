@@ -8,28 +8,744 @@ For development history, completed phases, and deferred plans see [HISTORY.md](H
 
 ---
 
-## Current Goal (set April 15, 2026)
+## Current Goal (reset June 5, 2026)
 
-Make Pyro a **scary tactical chess engine with a Mittens-style 
-personality** — not a silent strength-maxxing engine.
+Pyro plays **beautiful, sensible, dynamic, powerful chess** on the
+PeSTO+Tal hand-crafted-eval base (~1835 Elo), finished with
+Syzygy-perfect endgames. NOT a max-Elo strength race.
 
-Target: **3000+ CCRL strength** with Pyro's personality intact.
-Phase G (personality + search improvements) is COMPLETE at ~1835 Elo.
-Phase D (NNUE) is now the active development track — the path 
-from 1835 to 3000+ requires neural network evaluation that hand-
-crafted eval cannot match. Personality (Tal aggression, taunts, 
-UI) survives NNUE via training data bias + post-NNUE Tal modifier.
+**DESIGN PRINCIPLE** (every future change is measured against this):
+Pyro plays beautiful chess by **calculating deeply and accurately**,
+then — among moves the search rates as near-equal — preferring the
+more dynamic, aggressive one. Aesthetics are a tiebreak, never an
+override. Pyro never plays a move the search shows is materially or
+tactically worse in order to look flashy. Sound sacrifices EMERGE
+from deeper search; they are never forced by a thumb on the
+move-ordering scale. (G9, June 4, proved the forcing approach fails:
+-362 Elo. Do not repeat ordering-bonus sacs.)
 
-Strategic implications:
-- **Phase G (The Mittens Path) is COMPLETE.** Engine at ~1835 Elo
-  with full personality, Obsidian Ember UI, and zero crashes.
-- **Phase D (NNUE v2) is now ACTIVE.** The path to 3000+ requires
-  NNUE. Hand-crafted eval has a ceiling around 2200-2400.
-- **Personality survives NNUE** via: training data biased toward 
-  tactical positions, post-NNUE Tal bonus modifier, 31-GM tactical
-  opening book, and the full UX/taunts/visual layer.
-- **Phase E (MCTS) remains DEFERRED** until NNUE is working.
-- **Deployment runs in parallel** with NNUE data generation.
+**NNUE-as-eval is SHELVED** (not deleted). expE was the first
+trusted net and lost to PeSTO by ~700 Elo (SPRT 1.7%); on GPU-less
+hardware a competitive net is out of reach. The pipeline is preserved
+for the day the CUDA/cudarc mismatch is fixed and the RTX 3050 is
+unlocked. Until then, the live engine runs PeSTO+Tal (--no-nnue).
+
+**PATH TO THE GOAL** (sequenced, one variable each, gauntlet-validated):
+1. **POWERFUL** — Lazy SMP (G2 Session 2): 12 cores, deeper search.
+2. **DYNAMIC** — capped dynamic-eval tiebreak (G9-done-right, in EVAL
+   not ordering): small capped term rewards initiative toward the enemy
+   king; UCI param DYNAMIC_BONUS default 0 = no-op.
+3. **BEAUTIFUL** — emerges from 1+2 over the existing Syzygy base.
+4. **PERSONALITY** — G13 taunts, G15 visual attack cues (pure frontend).
+
+**G9 CLOSED**: ordering-bonus sacrifice-seeking REJECTED — wrong
+instrument (biases what gets searched, not what calculation confirms).
+Code stays dormant at SPEC_BONUS=0 (byte-identical to baseline).
+Do not retry tightened.
+
+---
+
+## NNUE EXPERIMENT PROTOCOL (read first, every NNUE turn)
+
+This section is the shared source of truth between planning (chat) and execution
+(Claude Code). Read it at the START of every NNUE turn. Update it at the END of
+every NNUE turn. The user pastes this section to chat-Claude; no NNUE training,
+conversion, or SPRT proceeds until planning and execution agree on it.
+
+### Rules of engagement
+1. ONE VARIABLE per experiment. Before running, "Variable changed" below must
+   name exactly one change vs the previous run. If you cannot name exactly one,
+   STOP and ask. (This rule exists because 512+wdl were changed together twice.)
+2. DEPLOYMENT GATE. The engine loads pyro.nnue from the EXECUTABLE's directory
+   (engine/target/release/pyro.nnue), NOT engine/pyro.nnue. SPRT is FORBIDDEN
+   unless md5(engine/pyro.nnue) == md5(engine/target/release/pyro.nnue). Record
+   both md5s in Deployment State before any SPRT. validate_nnue_rust.py must
+   hard-refuse to run if they differ.
+3. PREDICTION FIRST. Write a falsifiable prediction before running. After the
+   run, record whether it held.
+4. NO ARCHITECTURE JUMPS ON CONTAMINATED EVIDENCE. Do not change neuron count
+   or architecture to "fix" a result until that result comes from a
+   deployment-verified, COMPLETED SPRT (>=100 games, not bailed early).
+5. DIAGNOSE BEFORE RETRAIN. Run cheap read-only diagnostics before spending
+   30-65 min of compute. Information is cheaper than experiments.
+6. RESET CHECKPOINT. When asked for a "reset checkpoint", output Live State +
+   Deployment State + Ledger + Open Questions as a plain-text snapshot and
+   change nothing.
+
+### Live experiment state
+- Experiment ID: Experiment E — TRAINING IN PROGRESS (started June 1)
+- Hypothesis: loss/inference scale mismatch is root cause of all SPRT failures.
+  Switching to stock Bullet convention (output.sigmoid() loss + ×SCALE at inference)
+  frees l1w from binary saturation.
+- Variable changed: loss `sigmoid(output/400)` → `output.sigmoid()`;
+  inference `output/(QA*QB)` → `output*400/(QA*QB)`. SCALE=400 in both files.
+  (One logical change, two files that must agree. No l0w clip. No other change.)
+- Held constant: 256 neurons, SF18 data, SB30, WDL=0, CReLU, default AdamW clips
+- Prediction (falsifiable, per rule 3):
+    (A) Gate A: l1w no longer ~100% saturated; mean_abs well below 1.98, real spread
+    (B) Gate C: queen-missing eval in roughly -600..-900cp (not +23, not -84)
+    (C) Gate D: sibling ranking ≥4/10 (up from 2/10)
+    (D) SPRT meaningfully above 0.7% — first real chance of a positive pulse
+- Status: **SPRT COMPLETED (June 2). expE-30 vs PeSTO 10+0.1:
+  0W-58L-2D = 1.7%, Elo -708, LOS 0.0%, H0 accepted at 60 games. First
+  trusted SPRT in project history (Gate A continuous + DIAG 3 material-correct
+  + deployment verified). Net learns absolute material from in-distribution
+  data but within-position ranking is too noisy to play winning chess at this
+  architecture. Pattern fits Spearman+0.155 (real but below the 0.3
+  "tracks SF18" threshold). 256-neuron / 20M-position / CReLU / WDL=0 ceiling
+  confirmed. Next planning decision: data scale, WDL blending, architecture,
+  or Tal-bias path.**
+
+Gate A result (pyro-expE-30 vs d1v3-clean baseline):
+  | Metric           | d1v3-clean (old) | pyro-expE-30 (new) |
+  |------------------|------------------|--------------------|
+  | l1w mean_abs     | 1.9800 (binary)  | **0.0405**         |
+  | l1w std          | 1.9800           | 0.0638             |
+  | l1w min/max      | ±1.98            | -0.2957 / +0.2851  |
+  | l1w >=0.95×clip  | 100.0%           | **0.0%**           |
+  | l1b raw          | +1.98 (at clip)  | +0.0579 (2.9%)     |
+  | l0w mean_abs     | 0.6608           | 0.0698             |
+  PASS: l1w no longer binary. Continuous spread confirmed. Loss change took effect.
+
+Gate C result (June 2, 2026) — pyro-expE-30:
+  | Position              | Float  | Quant | Eng d1 | FQ-gap |
+  |-----------------------|--------|-------|--------|--------|
+  | Startpos (W2M)        |   +3.7 |    +8 |    +62 |    4.3 |
+  | Startpos (B2M) 1.e4   |  +26.9 |   +28 |    +67 |    1.1 |
+  | W queen missing       |  +24.1 |   +28 |    +85 |    3.9 |
+  | B queen missing       |  +24.1 |   +28 |    +85 |    3.9 |
+  | W rook missing        |  -30.3 |   -27 |    +35 |    3.3 |
+  | Open-centre Sicilian  |   +4.3 |    +3 |    +39 |    1.3 |
+  | Endgame K+R vs K      | +152.1 |  +149 |   +304 |    3.1 |
+  | W up Q+R vs bare K    |  +18.6 |   +10 |   +851 |    8.6 |
+  FAIL: W/B queen missing = +24cp (expected <-200cp). SPRT forbidden.
+  NOTE: expE is WORSE than d1v3-clean (-84cp) despite fixing l1w saturation.
+
+### Deployment state (anti-stale-weights guard)
+- engine/pyro.nnue md5:                        23bfcd331411b8b9c6a05191d42caef5
+- engine/target/release/pyro.nnue md5:         23bfcd331411b8b9c6a05191d42caef5
+- MATCH (yes/no — SPRT forbidden if no):       YES
+- Net currently deployed (best guess):         pyro-expE-30 (256-neuron, stock loss, WDL=0, SB30, SCALE=400)
+- Last verified:                               2026-06-02
+
+### Honest ledger (APPEND-ONLY — never edit or delete past rows)
+| date | exp | one variable | max eval | nodes/s NNUE | nodes/s PeSTO | SPRT | trustworthy? | notes |
+|------|-----|--------------|----------|--------------|---------------|------|--------------|-------|
+| ~May 5  | d1v2          | PeSTO data, STM-fix | 966cp | ? | ? | 34%  | CONTAMINATED | stale-weights bug active since ~May 7 |
+| ~May 6  | d1v3          | SF18 data           | 966cp | ? | ? | ~32% | CONTAMINATED | " |
+| ~May    | d2v1          | 512 + wdl0.75       | ?     | ? | ? | 0.8% | CONTAMINATED | " |
+| ~May    | d2-evalonly   | wdl0 @256           | 572cp | ? | ? | none | n/a          | eval-only, never SPRT'd |
+| May 30  | clip10        | l1w clip ±10 @256   | 1281cp| ? | ? | ~0.7% contaminated then ~1W-13L | CONTAMINATED | first SPRT stale; 2nd bailed at 14 games |
+| May 31  | clip10-clean  | l1w clip ±10 @256   | 1281cp| ? | ? | 0.7% (0W-67L-1D) H0@68games | CLEAN | first clean SPRT; −852 Elo; LOS 0.0%; l1w saturation diagnosed |
+| May 30  | 512clip10 (B) | 512 neurons         | ?     | ? | ? | not run | pending | training COMPLETE (May 31); not yet converted; awaiting planning sign-off |
+| May 31  | (engine fix)  | robustness fix only | n/a   | n/a | n/a | n/a | n/a | 96/96 green; go wtime legal at 10s+80ms clock; (none) bug fixed |
+| May 31  | d1v3-clean    | default clip ±1.98 (vs clip10) | 1281cp | depth12/5s | depth13/5s | 0.7% (0W-74L-1D) H0@75games | CLEAN | −869 Elo; LOS 0.0%; identical to clip10-clean. Clip is NOT the differentiator. |
+| May 31  | expD          | l0w clip ±0.06 (vs d1v3-clean ±1.98) | ~24cp | depth12/5s | depth13/5s | NOT RUN | CLEAN | neurons 205/256 active (↑ from 50); queen +23cp WRONG SIGN; sibling 2/10; ±0.06 too tight (max queen eval physics bound ~24cp). Hypothesis valid; clip value wrong. |
+| Jun 2   | expE          | stock loss output.sigmoid() + ×SCALE at inference (vs old sigmoid(output/400)) | ~24cp OOD, -750cp ID | depth12/5s | depth13/5s | **1.7% (0W-58L-2D) H0@60games, -708 Elo, LOS 0.0%** | CLEAN | First trusted SPRT in project history. Gate A PASS, DIAG 3 PASS (material correct in-dist), Spearman+0.155 vs SF18. Net is continuous + material-correct in-distribution but within-position ranking too noisy. Lost every decisive game. Equal losses as W (29) and B (29). 256/20M architectural ceiling confirmed. |
+
+### Ruled out (with evidence + caveat)
+- WDL labels as bias source: eval-only (wdl0) showed same weight pattern.
+  CAVEAT: the engine-side "+492cp" symptom was a STALE FILE, so this needs a
+  clean re-test before treating as settled.
+- SCALE/sigmoid squashing: only 1.4% of targets saturate at SCALE=400.
+  Solid (computed from data file, not engine). Do NOT retrain with SCALE=800.
+- clip10 (l1w clip ±10) is CONFIRMED HARMFUL. SOLID (clean SPRT + diagnostics).
+  Raw l1w range expanded to ±9.8 (vs ±1.98 default). 89.65% of out_weights
+  saturated at ±127 quantized. Accumulator: 128/256 neurons dead (<=0),
+  78/256 maxed at QA=255; only 50/256 active. Queen eval: +129cp instead
+  of +900cp — material discrimination severely compressed. Fit diagnostic:
+  Pearson 0.97 on training data (network LEARNED the distribution) but
+  eval landscape is jagged — consecutive positions swing ±80cp — so search
+  is guided by noise. Default AdamW clip ±1.98 is a useful constraint.
+  DO NOT retrain with clip10.
+- l1w clip value (±1.98 vs ±10) is NOT the differentiating variable.
+  SOLID (d1v3-clean SPRT: -869 Elo, same as clip10-clean -852 Elo).
+  Both default-clip and clip10 nets score ~0.7% vs PeSTO. Root cause is
+  NOT l1w clip — it is l0w (ft_weight) saturation (see Open Questions).
+- l0w clip ±0.06 is TOO TIGHT for material discrimination. SOLID (Experiment D mechanism check).
+  Physics bound: max queen eval = 2 × 15 × 205 × avg_out_weight / (QA×QB) ≈ 24cp. Network
+  physically cannot represent -900cp queen value with ±0.06 l0w clip regardless of training.
+  Neurons improved to 205/256 active (confirming saturation hypothesis) but material signal
+  destroyed. DO NOT retrain at ±0.06. Next candidate: intermediate clip ~±0.3–0.5 raw
+  (→ ±76–127 quantized). l0w saturation as root cause of SPRT failures remains VALID.
+
+### Open questions / untested failure modes (check BEFORE any SPRT verdict)
+
+**bestmove (none) on go nodes N / go movetime N — DIAGNOSED (May 30, 2026)**
+- ROOT CAUSE: In `best_move_nodes` (search.rs), the budget/time check at the
+  root move loop (line 1559) fires BEFORE the first move's score is committed
+  to `best`. Guard condition is `(nodes >= limit || time_up) && best.is_none()`.
+  When the first `ab_search` call exhausts the budget (nodes=1 → returns static
+  eval immediately; or movetime 1ms deadline expires mid-search), `best` is still
+  `None`, so `completed=false; break` fires with `iter_best=None`. The fallback
+  at line 1616 only helps if `iter_best` has a value — it doesn't — so
+  `best_overall` stays `None` → `bestmove (none)`.
+  For `go movetime N` where N ≤ 50: `parse_go_deadline` computes
+  `N.saturating_sub(50).max(1)` = 1ms for any N ≤ 50. That 1ms expires during
+  the first root move's `ab_search`, hitting the same code path.
+- go wtime/btime (SPRT-relevant path): **NOT AFFECTED at any tested clock**.
+  Normal TC: `go wtime 10000 btime 10000 winc 100 binc 100` → `bestmove d2d4`.
+  Classical TC: `go wtime 300000 btime 300000 movestogo 40` → `bestmove d2d4`.
+  Low clock: `go wtime 200 btime 200 winc 100 binc 100` → `bestmove d2d4`.
+  Extreme time trouble: `go wtime 80 btime 80 winc 0 binc 0` → `bestmove d2d4`.
+  The 10ms floor in `parse_go_deadline` (`.max(10)`) protects the wtime/btime
+  path even at extremely low clocks — enough time for depth 1 to always complete.
+- SPRT validity verdict: `go wtime/btime` returns a legal move at 10s clock AND
+  at 200ms clock AND at 80ms clock (extreme time trouble). The (none) bug does
+  NOT fire on the SPRT path. Stale-weights remains a confirmed contaminant; it
+  is NOT established as the sole cause of past SPRT losses — we still have zero
+  clean completed SPRTs. The (none) bug was NOT a factor in prior SPRTs.
+- FIX APPLIED (May 31, 2026) — see subsection below. Robustness 96/96 green.
+
+**one_legal_move returns (none) at all depths — NOT A BUG (May 30, 2026)**
+- ANALYSIS: `k7/8/K7/8/8/8/8/1R6 b - - 0 1` is STALEMATE, not a forced-move
+  position. Black king at a8 has three adjacent squares: a7 (attacked by white
+  king at a6), b7 (attacked by rook b1 + white king), b8 (attacked by rook b1).
+  All squares attacked; king not in check. Zero legal moves → stalemate.
+  The test comment "Ka8 is the only legal move" was WRONG.
+  The engine correctly returns `None` at `generate_moves` → `moves.is_empty()`
+  (search.rs:1485-1487). DISTINCT from the nodes/movetime bug and not a defect.
+- FIX NEEDED: Replace the stalemate position in `engine_robustness_check.py`
+  with an actual single-legal-move position. Not urgent (doesn't affect SPRT).
+
+**NNUE eval speed — MEASURED (May 31, 2026)**
+- NNUE: depth 12 (3/3 trials) at movetime 5000ms on startpos.
+- PeSTO: depth 13 (3/3 trials) at movetime 5000ms on startpos.
+- NNUE is 1 ply shallower. Real confound but not catastrophic.
+  Engine does not output nps; depth reached is the only available metric.
+  This 1-ply penalty applies to ALL future NNUE SPRTs — factor it in when
+  interpreting results.
+
+**l0w (ft_weight) saturation — ROOT CAUSE of all ~0% SPRTs (May 31, 2026)**
+- FINDING: ft_weights (l0w) are ~16× too large. Default AdamW clip ±1.98 raw
+  = ±504 quantized (QA=255). With ~32 pieces per position each contributing
+  ±504 per neuron, the accumulator ranges from ≈-668 to ≈+780. CReLU clips
+  to [0, QA=255], so ~80% of neurons are permanently clamped to 0 or 255.
+  Only 50-53/256 neurons are active. This is true for BOTH default-clip AND
+  clip10 nets — the l0w clip was not changed in either experiment.
+- CONSEQUENCE: Network uses ~50 heavily-weighted neurons instead of all 256.
+  Evaluation landscape is coarse and volatile (±75cp per move vs ±10-20cp
+  for PeSTO). Queen eval: ~-85 to -97cp instead of -900cp.
+- EXPERIMENT D RESULT (May 31, 2026): ±0.06 clip confirmed hypothesis direction
+  but clip value too tight. Active neurons: 205/256 (↑ from 50 — saturation
+  hypothesis CONFIRMED). But max queen eval physics bound ≈ 24cp: queen is 1
+  feature per perspective → max contribution = 2 × 15 × n_active × avg_out_w /
+  (QA×QB) ≈ 24cp. Wrong sign too (+23cp, should be <-500cp). SPRT NOT RUN.
+- NEXT STEP: Intermediate l0w clip. Candidate: ±0.3–0.5 raw (→ ±76–127
+  quantized). At ±0.3: max queen eval ≈ 2 × 76 × 200 × avg_out_w / 16320 ≈
+  higher but accumulator range wider too. Needs planning sign-off.
+  Key constraint: l0w clip must be large enough for material discrimination
+  but small enough to prevent CReLU saturation. Optimal is somewhere between
+  ±0.06 (too tight) and ±1.98 (too loose).
+
+**DIAGNOSTIC E (May 31, 2026) — float vs quantized vs engine, jaggedness, sibling ranking**
+
+Net under test: pyro-d2-evalonly-30 (md5 e706ea..., HIDDEN=256, QA=255, QB=64, default clip).
+All checks read-only (no training, no SPRT).
+
+CHECK 1 — Float (raw.bin) vs Quantized-Sim vs Engine depth-1
+
+| Position              | Float  | Quant | Eng d1 | FQ-gap |
+|-----------------------|--------|-------|--------|--------|
+| Startpos (W2M)        |  +19.6 |   +19 |    +71 |  0.6cp |
+| Startpos (B2M) 1.e4   |   -3.9 |    -4 |    +61 |  0.1cp |
+| W queen missing       |  -83.7 |   -84 |     +5 |  0.3cp |
+| B queen missing       | +121.9 |  +122 |   +165 |  0.1cp |
+| W rook missing        |  -35.5 |   -36 |    +19 |  0.5cp |
+| Open-centre Sicilian  |  +99.8 |  +100 |   +262 |  0.2cp |
+
+Float vs Quant: mean gap=0.4cp, max=1.2cp. Signs correct: 8/8.
+Engine depth-1 != static eval (it searches one ply); not a mismatch.
+Queen eval -84cp (should be ~-900cp) is a NET QUALITY issue, not a pipeline bug.
+Inference verdict: **CORRECT**
+
+CHECK 2 — Eval jaggedness (20 consecutive same-game plies)
+Mean |delta| SF18 = 374.8cp. Mean |delta| NNUE = 390.1cp. Ratio = 1.04x.
+Jaggedness verdict: **SMOOTH** (threshold 3.0x).
+CAVEAT: This metric measures same-game trajectory (alternating STM — perspective flip
+accounts for the large per-ply deltas). It does NOT test within-position move
+discrimination. The 1.04x ratio means NNUE tracks SF18's game trajectory faithfully
+but is neutral on the l0w saturation hypothesis.
+
+CHECK 3 — Sibling ranking: NNUE top quiet move vs PeSTO top quiet move (10 positions)
+Agreement: 0/10 = 0%. Positions had 18-39 quiet moves each. All different positions.
+Sibling ranking verdict: **SCRAMBLED**
+NNUE cannot rank moves within a position. All sibling evals are compressed into a
+tiny range by l0w saturation → ranking is noise. This is the DIRECT cause of SPRT
+failure. Baseline for Experiment D: success = agreement rate >= 40%.
+
+Combined verdict: pipeline CORRECT, game-level eval SMOOTH, move ranking SCRAMBLED.
+l0w saturation (50/256 neurons active) confirmed as root cause of SCRAMBLED ranking.
+Experiment D (tight l0w clip ±0.06) remains the correct next step.
+
+**Experiment D mechanism check (May 31, 2026) — PARTIAL FAIL, SPRT NOT RUN**
+
+Net under test: pyro-expD-30 (md5 1b0557a..., HIDDEN=256, QA=255, QB=64, l0w clip ±0.06).
+SB30 training loss: 0.023755 (vs d1v3-clean 0.01607 — higher loss as expected from constraint).
+
+| Metric               | Baseline (d1v3-clean) | Experiment D | Verdict     |
+|----------------------|-----------------------|--------------|-------------|
+| Active neurons       | 50/256                | 205/256      | MOVED ✓     |
+| Dead neurons         | 145/256               | 9/256        | MOVED ✓     |
+| Maxed neurons        | 58/256                | 42/256       | MOVED ✓     |
+| Queen-missing eval   | -84cp                 | +23cp        | WRONG SIGN ✗|
+| Sibling ranking      | 0/10                  | 2/10         | BELOW 3/10 ✗|
+| Engine binary sign   | ok                    | ok           | OK ✓        |
+| out_bias             | -2,932                | +32,314      | ANOMALOUS   |
+
+Mechanism verdict: PARTIAL FAIL. Neurons moved (hypothesis direction confirmed). Material
+discrimination broken: wrong sign on queen eval (+23cp instead of < -500cp). Sibling ranking
+2/10 (threshold 3/10). Out_bias extremely positive (+32,314) — network compensating for
+clipped l0w by shifting bias, distorting absolute eval scale.
+
+Root analysis: ±0.06 l0w → ±15 quantized. Queen contributes 1 feature per perspective.
+Max queen eval = 2 × 15 × 205 × avg_out_weight / (QA×QB=16320). With typical avg_out_w ≈ 20,
+max ≈ 24cp. This is a hard physics limit — the queen cannot be represented at ±0.06, ever.
+The ±0.06 value chose one pathology (saturation) and introduced another (material blindness).
+
+SPRT forbidden per protocol. Next: planning sign-off on intermediate clip ~±0.3–0.5.
+
+**DIAGNOSTIC F (June 1, 2026) — loss-scale audit, target distribution, baseline weight saturation**
+
+CHECK 1 — pyro.rs vs simple.rs (stock Bullet example) FULL DIFF
+
+Every difference between our config and the stock example:
+
+| Item                  | simple.rs (stock)                             | pyro.rs (ours)                                      | Direction of diff |
+|-----------------------|-----------------------------------------------|-----------------------------------------------------|-------------------|
+| Activation            | `.screlu()` — squared clipped ReLU            | `.crelu()` — plain clipped ReLU                     | ours differs      |
+| **Loss function**     | `output.sigmoid()` — raw output thru sigmoid  | `(output*(1/400)).sigmoid()` — **divide by SCALE first** | **KEY DIFF** |
+| WDL                   | 0.75 (game-result blended)                    | 0.0 (eval-only)                                     | ours differs      |
+| LR schedule           | StepLR (start=0.001, gamma=0.1, step=18)      | CosineDecayLR (1e-3→1e-5 over 30 SB)               | ours differs      |
+| HIDDEN_SIZE           | 128                                           | 256                                                 | larger (fine)     |
+| Training volume       | 40 SB × 6104 = ~100M positions                | 30 SB × 1221 = ~20M positions                      | ours 5× less      |
+| Data filter           | ply>=16, no-check, |score|<=10000, quiet move | **none — all positions included**                   | ours unfiltered   |
+| l0w extra clip        | none — default AdamW ±1.98 only               | expD: explicit ±0.06 (d1v3-clean: none)             | ours adds clip    |
+| out_bias / l1w clips  | none beyond default AdamW ±1.98               | none beyond default AdamW ±1.98                     | same              |
+| use_devices           | not set (GPU auto-detect)                     | `.use_devices(vec![()])` (CPU explicit)             | cosmetic          |
+| Inference SCALE mult  | engine multiplies by SCALE=400 at output      | **our nnue.rs does NOT multiply by SCALE**          | **KEY DIFF** |
+
+What stock does that WE DO NOT:
+  1. SCReLU activation (better gradient flow for quantized nets)
+  2. WDL blending (game outcome reduces noise in extreme-eval positions)
+  3. Quiet-position filter (removes captures/check positions, |score|<=10000 cap)
+  4. Multiply by SCALE at inference — `eval = (accum + bias) * SCALE / (QA*QB)`
+  5. Small output loss (`output.sigmoid()` keeps l1w in ±0.04 regime)
+
+**CRITICAL IMPLICATION OF LOSS FUNCTION DIFFERENCE:**
+- Stock: `sigmoid(output)` — network learns output ≈ score/400 ∈ [-2,2]
+  For 900cp queen: need sum(crelu×l1w) ≈ 2.25. With 50 active neurons at crelu≈0.5:
+  mean(l1w) needed ≈ 2.25/(50×0.5×2) = **0.045** — well within ±1.98 clip.
+- Ours: `sigmoid(output/400)` — network learns output ≈ score (centipawns) ∈ [-800,800]
+  For 900cp queen: need sum(crelu×l1w) ≈ 900. With 50 active neurons at crelu≈0.5:
+  mean(l1w) needed ≈ 900/(50×0.5×2) = **18.0** — EXCEEDS ±1.98 clip by 9×.
+Our loss forces l1w to operate 400× outside its clipped regime vs the stock formulation.
+
+CHECK 2 — SF18 target distribution (n=2,000,000 sampled, seek-based)
+
+| Stat     | Value  |
+|----------|--------|
+| min      | -29,997 cp |
+| max      | +29,996 cp |
+| mean     | +61.1 cp |
+| std      | 3,353 cp |
+| p1       | -1,017 cp |
+| p10      | -571 cp |
+| p25      | -283 cp |
+| p50      | +46 cp |
+| p75      | +442 cp |
+| p90      | +737 cp |
+| p99      | +1,058 cp |
+
+Saturation fractions (for sigmoid(eval/400) loss):
+  |eval| > 400cp  :  50.1%  (sigmoid < 0.27 or > 0.73)
+  |eval| > 600cp  :  25.3%
+  |eval| > 800cp  :   9.3%
+  |eval| > 1000cp :   2.4%
+  |eval| > 2000cp :   1.2%
+  |eval| > 1178cp :   1.5%  (true sigmoid saturation: sigmoid < 0.05 or > 0.95)
+  median |sigmoid - 0.5| = 0.232,  mean = 0.210
+
+Distribution verdict: TRUE sigmoid saturation (±0.05/0.95 boundary) is only 1.5% of data.
+The 50.1% figure at |eval|>400cp is "outside linear zone" but not yet saturated.
+The extreme min/max (±30,000) are forced-mate evals — SF18 outputs mate scores as large cp values.
+The std of 3,353cp is large; SCALE=400 is poorly calibrated for this distribution.
+At SCALE=400: half the positions have targets where sigmoid gradient is already < 0.5× peak.
+This does push the network toward large outputs, but is NOT the primary driver of l1w saturation —
+1.5% sigmoid-saturated positions cannot force 100% l1w saturation (see CHECK 3).
+
+CHECK 3 — d1v3-clean raw.bin (SB30 default-everything baseline)
+
+| Layer | Metric          | Value               | Interpretation |
+|-------|-----------------|---------------------|----------------|
+| l1b   | raw float       | +1.980000           | PINNED AT CLIP (100%) |
+| l1b   | quantized       | +32,314             | 32314/16320 = 1.98cp contribution |
+| l1w   | mean_abs        | 1.9800              | ALL weights at clip boundary |
+| l1w   | std             | 1.9800              | bimodal at exactly ±1.98 — no gradient |
+| l1w   | |w|>=0.95×clip  | **100.0%**          | every single weight near-saturated |
+| l1w   | |w|>=0.50×clip  | 100.0%              | no small weights at all |
+| l0w   | mean_abs        | 0.6608              | substantial, not saturated |
+| l0w   | |w|>=0.95×clip  | 8.80%               | small fraction at ft-weight clip |
+| l0w   | |w|<=0.10       | 25.0%               | many near-zero (dead feature slots) |
+| l0b   | mean            | +0.2820             | modest, not saturated |
+| l0b   | std             | 0.1223              | varies across neurons |
+
+Theoretical max float output (all neurons at crelu=1, all l1w at ±1.98, 2 perspectives):
+  2 × 256 × 1.0 × 1.98 = **1014 cp** (hard upper bound for our inference)
+
+Typical output for 50/256 active neurons (crelu≈0.5):
+  2 × 50 × 0.5 × 1.98 = **99 cp** — consistent with observed queen eval of -84cp.
+
+KEY FINDING: The DEFAULT d1v3-clean net (no clip experiments, just standard training)
+already has ALL 512 l1w weights pinned at ±1.98. Mean_abs=1.9800 and std=1.9800 means
+the distribution is bimodal at {-1.98, +1.98} — every weight is at the AdamW clip
+boundary. This saturation is NOT caused by any clip experiment. It exists because
+our loss `sigmoid(output/400)` requires centipawn-scale outputs, but ±1.98 clips
+prevent l1w from ever reaching the ≈18 needed for a 900cp queen signal.
+
+The gradient pushes ALL l1w toward ±∞; the clip pins them at ±1.98; nothing escapes.
+The output layer has been reduced to 512 BINARY weights (+1.98 or -1.98) with zero
+continuous information capacity. The network cannot represent material differences
+beyond what its ~99cp ceiling allows (50 active neurons × 0.5 crelu × 1.98 l1w × 2).
+
+CORRECTION to Experiment D mechanism check table: the "Baseline out_bias = -2,932"
+row was read from pyro-d2-evalonly's deployed pyro.nnue, NOT d1v3-30 raw.bin.
+D1v3-30 raw.bin shows out_bias = +1.98 (also at clip). The d2-evalonly net had a
+negative bias — that's a different net, different training. The expD +32,314 anomaly
+is simply expD also being at the +1.98 clip, same as d1v3. Both are fully clipped.
+
+DIAGNOSTIC F — VERDICT
+
+Root driver: **Loss function scale mismatch**
+Our loss `sigmoid(output/400)` forces the network to output centipawns directly.
+This requires l1w ≈ 18 for a 900cp queen eval (50 active neurons), but the AdamW
+clip limits l1w to ±1.98. The gradient NEVER relaxes — it always pushes l1w toward
+±18 — so all 512 output weights pin at ±1.98 immediately and stay there for the
+entire training run. The output layer is permanently binary. This is the root cause
+of all failed SPRTs from d1v2 onward. The l0w saturation (50/256 active neurons)
+is a SECONDARY bottleneck — it matters, but fixing it alone (Experiment D) cannot
+help because the l1w binary ceiling remains.
+
+Ruling in/out:
+  (a) Loss-scale mismatch: CONFIRMED root cause. l1w 100% pinned in DEFAULT net.
+  (b) Unconstrained out_bias: NOT an independent cause. It's also pinned at clip,
+      same reason as l1w. Symptom, not driver.
+  (c) CReLU vs SCReLU: probably secondary. With correct loss scale, CReLU l1w
+      would be ≈0.045, well within clip. SCReLU might help gradient flow but
+      won't rescue a system where l1w must be 400× too large.
+  (d) Data ceiling: NOT primary. 1.5% sigmoid-saturated targets cannot force
+      100% weight saturation. Wide std (3353cp) adds noise but is not the driver.
+
+Recommended next experiment (Experiment E — requires planning sign-off, DO NOT RUN):
+  Change to stock inference formulation as a MATCHED PAIR of two files:
+  1. pyro.rs: change loss to `output.sigmoid()` (remove the /SCALE division)
+  2. nnue.rs: change eval formula to `(accum + out_bias) * SCALE / (QA * QB)`
+     (add ×SCALE multiplication before the divide, as in simple.rs reference engine)
+  Hold constant: 256 neurons, SF18 data, SB30, WDL=0, default AdamW clips, CReLU.
+  These two changes are a matched pair (one logical change: loss/inference scale)
+  and do not violate the one-variable rule.
+  Expected: l1w needed ≈ 0.045 (vs 18.0 now). Clip becomes non-binding. All 512
+  output weights free to express continuous values. Queen eval should reach ~900cp.
+  Active neuron count (50) remains the secondary bottleneck — address after this passes.
+
+**GATE C FAIL — Experiment E mechanism check (June 2, 2026)**
+
+Net under test: pyro-expE-30 (256-neuron, stock loss output.sigmoid(), WDL=0, SB30, SCALE=400).
+
+Comparison table:
+
+| Metric               | d1v3-clean | expD (l0w±0.06) | expE (stock loss) | Verdict         |
+|----------------------|------------|-----------------|-------------------|-----------------|
+| l1w mean_abs         | 1.98       | ~0.04           | 0.0405            | expE fixed ✓    |
+| l1w saturation       | 100%       | 0%              | 0.0%              | expE fixed ✓    |
+| Queen eval (float)   | -84cp      | +23cp           | +24cp             | STILL BROKEN ✗  |
+| Queen eval direction | right sign | wrong sign      | wrong sign        | SAME AS expD ✗  |
+| Rook eval (float)    | -36cp      | n/a             | -30cp             | correct sign ✓  |
+
+Key observation: expE is WORSE than d1v3-clean on queen eval (-84 → +24). Despite fixing
+l1w saturation (the diagnosed root cause), material discrimination did not improve.
+
+Root cause REVISION: Loss-scale mismatch was the correct first fix, but it was not
+sufficient. The remaining failure is a TRAINING DATA DISTRIBUTION problem:
+
+1. In SF18 self-play data, queens are present in almost every position for both sides.
+   A feature that fires in every position provides near-zero gradient signal during
+   training (cross-entropy trains on DIFFERENCES, not constants).
+
+2. The test position (startpos - 1 queen) is out-of-distribution. No SF18 game
+   begins with one queen removed. The network never learned to generalize
+   "queen-at-d1 absent → catastrophic loss" from mid-game queen captures.
+
+3. Observed sign evidence: removing queen at d1 → +24cp (better!), removing rook at a1
+   → -30cp (worse). The queen at d1 is the undeveloped back-rank queen. SF18 data
+   correlates "queen moved off d1 = developed = good." So l0w[queen_d1] has a slightly
+   negative sign (its absence → slightly positive eval). This is genuine positional
+   learning — but positional, not material.
+
+What expE DID fix: l1w is no longer binary. The network now has continuous output
+capacity. The pipeline is correct (float ≈ quant). The loss convention is right.
+These fixes are NECESSARY but not SUFFICIENT.
+
+What remains broken: the network learned POSITIONAL correlations from SF18 game
+positions but did not learn MATERIAL values. Queens present in almost every training
+position → near-zero discriminative signal for queen-vs-no-queen.
+
+Candidate next experiments (need planning sign-off, ranked by expected impact):
+  (F1) WDL blending WDL=0.5: game outcomes correlate more directly with material.
+       When one side loses their queen and loses the game, WDL=0 provides gradient
+       even for positions rarely seen in SF18 static eval. One variable vs expE.
+  (F2) Data augmentation: include positions with material imbalances (random piece
+       removal from game positions, scored by SF18 at depth 12).
+  (F3) More training data (100M+): more queen-capture positions in training set.
+  (F4) Different test: if queens DO appear in mid-game capture chains, test a
+       position from WITHIN a game where a queen was just captured. This would
+       verify the network IS learning from in-distribution queen-captures.
+
+SPRT forbidden per protocol. Next: planning sign-off.
+
+**DIAG SUITE EXPE (June 2, 2026) — OVERTURNS "material-blind" verdict**
+
+Four read-only diagnostics run after Gate C FAIL. Result: **the network is NOT
+material-blind. The Gate C test position is OOD and not informative.**
+
+DIAG 1 — symmetry of W vs B queen missing:
+  W queen missing: float raw=+0.060198, cp=+24.079
+  B queen missing: float raw=+0.060198, cp=+24.079
+  |stm_W - stm_B|max  = 3.6e-07  (floating-point noise)
+  |nstm_W - nstm_B|max = 4.8e-07  (floating-point noise)
+  CONCLUSION: identical by DESIGN. Chess768 symmetric encoding maps
+  W queen at d1 from W perspective to the SAME feature index (259) as B queen
+  at d8 from B perspective (sq^56 mirroring). startpos is mirror-symmetric, so
+  removing a queen from the STM side yields LITERALLY the same 256-d accumulator.
+  Identical output ≠ "eval insensitive to queen" — it's a tautology of the input
+  encoding. This is NOT evidence of material blindness.
+
+DIAG 2 — material sweep from startpos:
+  | Piece removed (W)  | float cp  | Δfloat   |
+  |--------------------|-----------|----------|
+  | base startpos      |    +3.65  |  (base)  |
+  | - Pawn (e2)        |    -7.46  |  -11.12  |  ← small, correct sign
+  | - Knight (b1)      |  -160.27  | -163.92  |  ← LARGE, correct sign (~knight ≈ 300)
+  | - Bishop (c1)      |   -32.03  |  -35.68  |  ← small, correct sign
+  | - Rook (a1)        |   -30.30  |  -33.95  |  ← small, correct sign
+  | - Queen (d1)       |   +24.08  |  +20.43  |  ← WRONG SIGN, small
+  Knight delta -164cp ALONE proves the network is NOT material-blind. It IS
+  capturing material for at least Knight; pawn delta also correct sign. Queen
+  d1 wrong sign confirms a learned POSITIONAL preference (queen-at-d1 =
+  undeveloped = slightly bad), which overrides the small residual material
+  signal IN THE STARTPOS CONFIGURATION. Bishop c1 / Rook a1 similar regime —
+  the on-back-rank features carry small positive weight (slight "in starting
+  square" preference) that mostly cancels their material contribution.
+
+DIAG 3 (DECISIVE) — in-distribution queen-down positions:
+  Scanned 51 lines of SF18 .plain, found 5 mid-game positions where STM (white)
+  has no queen, opponent has queen, ply≥16, SF18 cp ≤ -700.
+  | SF18 cp | NNUE float cp | NNUE quant cp | FEN (abbrev) |
+  |---------|---------------|---------------|--------------|
+  |  -752   |    -747.32    |     -756      | 6k1/p1p5/3pp1q1/.../... w   |
+  |  -730   |    -760.17    |     -764      | 6k1/p1p5/3pp3/7q/... w     |
+  |  -751   |    -746.50    |     -752      | 6k1/p1p5/3pp3/.../...5q2/... |
+  |  -731   |    -758.67    |     -759      | 6k1/p1p5/3pp3/.../1q6/... |
+  |  -737   |    -796.09    |     -795      | 6k1/p1p5/3p4/4p3/2q5/... w |
+  Mean |NNUE − SF18| = 18cp. **NNUE matches SF18 within ~30cp on every real
+  queen-down position.** Network correctly evaluates queen-down at ~-750cp.
+  THE NETWORK IS NOT MATERIAL-BLIND IN-DISTRIBUTION.
+
+DIAG 4 — quant rounding (Python // vs Rust integer /):
+  | pos               | int_out | Py //  | Rust /  | float cp | diff   |
+  |-------------------|---------|--------|---------|----------|--------|
+  | Startpos          |     346 |    +8  |    +8   |   +3.65  |    0   |
+  | W queen missing   |    1164 |   +28  |   +28   |  +24.08  |    0   |
+  | W rook missing    |   -1079 |   -27  |   -26   |  -30.30  |   -1   |
+  | Endgame K+R vs K  |    6084 |  +149  |  +149   | +152.13  |    0   |
+  | W up Q+R bare K   |     433 |   +10  |   +10   |  +18.60  |    0   |
+  Py // differs from Rust / by 1cp only on negative integer_out (rook miss).
+  The 8.6cp gap on "W up Q+R vs bare K" is a genuine quantization residual
+  (low piece count, large per-piece weights), NOT a Python/Rust mismatch.
+  gate_cd.py's "FQ-gap > 5cp" threshold flagged this but it is NOT an artifact.
+
+REVISED VERDICT — Gate C "FAIL" was driven by an OOD test position, not by a
+deficient network:
+
+  - The network correctly evaluates queen-down positions at ~-750cp on REAL
+    in-distribution positions (DIAG 3).
+  - The startpos-minus-queen test position is unrealistic: all pieces at
+    starting squares except one queen. This configuration never occurs in
+    real games. The network's strong "undeveloped piece" feature for d1
+    queen dominates the residual material signal in this artificial setup.
+  - Knight removal from startpos already showed -164cp delta (DIAG 2) —
+    direct evidence the network DOES learn material when the positional
+    feature doesn't dominate.
+
+  The OOD-test diagnosis (originally proposed as F4) is CONFIRMED by DIAG 3.
+  The "data-distribution / WDL blending" path (F1) is NOT NEEDED.
+
+  **Gate C as written is NOT a useful gate for this network.** The startpos-
+  minus-queen test is fundamentally OOD. A better Gate C uses real game
+  positions like the DIAG 3 set — and the network passes those decisively.
+
+  RECOMMENDATION: revise Gate C to use mid-game material-imbalanced positions
+  drawn from SF18 .plain (or equivalent), then re-check. If revised Gate C
+  passes, proceed to SPRT with expE-30 as the gate-cleared candidate.
+  No retrain needed pending revised-gate result.
+
+**CORRECTED GATE D (June 2, 2026) — sibling ranking on REAL mid-game positions**
+
+Setup: 10 positions from SF18 .plain with ply>=20, both sides have queens,
+|score|<=200cp (roughly balanced), in-check excluded. For each: top quiet move
+per NNUE float static eval (negated through child positions) vs top quiet move
+per engine `--no-nnue` depth-1 (PeSTO).
+
+Result: **1/10 agreement on REAL mid-game positions.**
+  Baseline (old startpos-like Gate D on d2-evalonly): 0/10
+  Baseline (expD, l0w clip ±0.06):                    2/10
+  expE (this run):                                    1/10
+
+Deployment gate (re-verified before this check):
+  md5 engine/pyro.nnue                  = 23bfcd331411b8b9c6a05191d42caef5
+  md5 engine/target/release/pyro.nnue   = 23bfcd331411b8b9c6a05191d42caef5
+  MATCH: YES. Deployed net is still pyro-expE-30. Unchanged since Gate B.
+
+Interpretation: this is the "correct absolute material, scrambled relative
+ranking" scenario. DIAG 3 confirmed expE prices queen-down at ~-750cp matching
+SF18 (correct ABSOLUTE eval). But on quiet move ranking within a position,
+NNUE picks the same top quiet move as PeSTO only 1/10. Either:
+  (a) NNUE and PeSTO are different evaluators and legitimately disagree on
+      the best quiet move (PeSTO is not ground truth; SF18 would be a better
+      reference). 1/10 vs PeSTO is not the same as 1/10 vs the "truth".
+  (b) NNUE's within-position eval landscape is noisy (delta-per-move ~10cp
+      vs PeSTO's smoother landscape), and small noise re-orders the top
+      move on most positions.
+  (c) The test positions are biased — SF18 picked them mid-game where SF18's
+      preferred move was a CAPTURE or CHECK, so "top quiet move" is
+      a second-class decision both engines find hard.
+
+The check was designed to predict SPRT outcome. 1/10 is no better than the
+prior contaminated/lost baselines. Per protocol, STOP and ask planning before
+running SPRT. SPRT NOT RUN.
+
+**SF18-REFERENCED SIBLING SPEARMAN (June 2, 2026) — informational, not a gate**
+
+15 mid-game positions (ply>=20, both sides have queens, |score|<=200cp), all
+25 quiet child moves per position evaluated by both expE (float) and Stockfish
+depth=10. Spearman correlation of NNUE-child-eval vs SF18-child-eval, computed
+per position then averaged.
+
+  Mean rho across 15 positions:  +0.155
+  Median:                        +0.151
+  Min / Max:                     -0.116  / +0.542
+  Fraction rho > 0.3:            0.20  (3/15)
+  Fraction rho > 0.0:            0.73  (11/15)
+
+Interpretation: real positive signal, well below the 0.3 threshold for "tracks
+SF18". Network's within-position ranking is noisy but not random. Pre-registered
+prediction: SPRT will likely land BETWEEN the old 0.7% floor and a passing
+score — informative but probably not a pass. Whatever the number, this is the
+first SPRT measuring the NET (continuous output, material-correct on
+in-distribution positions) rather than the plumbing.
+
+**SPRT EXPE (June 2, 2026) — first trusted SPRT in project history**
+
+Config: pyro-expE-30 vs pyro --no-nnue (PeSTO), TC=10+0.1, SPRT elo0=0 elo1=10,
+α=β=0.05, adjudication draw@move40 score=10, resign movecount=5 score=1000,
+cutechess concurrency=1 -recover, color-paired openings (-repeat).
+
+Pre-flight: deployment md5 verified match (23bfcd33...) before launch.
+
+Result: **H0 accepted at 60 games.**
+  W-L-D:                       0 - 58 - 2
+  Score%:                      1.7%
+  Elo difference:              -708.3
+  LOS:                         0.0%
+  DrawRatio:                   3.3%
+  SPRT llr:                    -2.95 (lbound -2.94)
+  White vs Black:              29-29-2 (no color bias)
+  Pyro-NNUE as White:          0W-29L-1D
+  Pyro-NNUE as Black:          0W-29L-1D
+
+Loss decomposition:
+  Mated:                     37  (21 black-mated + 16 white-mated)
+  Adjudicated (>=1000cp):    21  (8 black-adj + 13 white-adj)
+  Drawn (3-fold repetition):  2
+
+Zero wins. Equal losses as both colors. All decisive games ended in mate or
+material-collapse adjudication — the network never built nor defended a
+position. This is the first SPRT in the project's history that measures
+the NET, not the plumbing:
+  - Gate A confirmed continuous output layer (no binary l1w)
+  - DIAG 3 confirmed absolute material correct on in-distribution positions
+  - Deployment md5 verified at launch
+  - SPRT ran to completion without manual bailout
+
+The score is 1.7% — slightly above the old contaminated 0.7% floor but in the
+same regime: no significant improvement over PeSTO. This is the trusted
+number we've been circling for four experiments. The conclusion is now
+grounded: expE is the first CORRECTLY-TRAINED net, and at this architecture
+(256 neurons + 20M positions + CReLU + WDL=0 + no king buckets) it is
+materially weaker than PeSTO.
+
+What this rules in (with evidence):
+  - The training pipeline (data → bullet → quantization → engine) is sound.
+  - The loss convention fix worked as designed (Gate A).
+  - The network learns absolute material from in-distribution positions
+    (DIAG 3) but learns relative ranking with too much noise (Spearman 0.155,
+    sibling vs PeSTO 1/10, SPRT 1.7%).
+
+What this does NOT rule in or out:
+  - 512 neurons could fix ranking noise OR could be no better.
+  - WDL>0 blending could fix or worsen.
+  - SCReLU could help or hurt (still unknown).
+  - 100M positions instead of 20M could fix or be marginal.
+  - King buckets could matter or not.
+  - The Tal-modifier post-hoc approach (use NNUE for absolute eval but
+    overlay PeSTO+Tal for tactical sharpness) was not tested.
+
+Next planning decision is now well-posed. The cheapest informative next
+experiment is the one that changes the variable most likely to improve
+within-position ranking. The Spearman 0.155 + SPRT 1.7% combination is the
+new baseline against which next experiments are measured.
+
+**Experiment B (512clip10) — UNTESTED, caution warranted**
+- Training complete (SB30, loss=0.003370). Checkpoint at
+  bullet/checkpoints/pyro-d2-512clip10/pyro-d2-512clip10-30/. Not converted.
+- RISK: clip10 is confirmed harmful at 256 neurons. If the root cause is
+  l1w range (not neuron count), 512clip10 will fail the same way. The one
+  variable for Experiment B was 512 neurons; clip10 is held constant from
+  a CATASTROPHICALLY BAD baseline. Do NOT run SPRT without planning sign-off.
+- PROPOSED alternative: Experiment C = 512 neurons + DEFAULT clip. This
+  cleanly tests capacity without the clip10 confound.
+
+### FIX APPLIED (May 31, 2026) — robustness 96/96 green
+Two changes were required in `engine/src/search.rs`, `best_move_nodes`:
+
+**Fix 1 (approved): root move loop reorder**
+- Moved `if score >= beta` and `if score > alpha` blocks to BEFORE the
+  `(nodes >= limit || time_up) && best.is_none()` check. Score is now committed
+  to `best` before the budget abort fires. Fixes `go nodes 1`: first move's
+  result is captured even when the node counter trips immediately.
+
+**Fix 2 (discovered during verification): soft-check depth guard**
+- Added `depth > 1 &&` to the soft time check at the top of the depth loop
+  (was: `if time_up(...)`, now: `if depth > 1 && time_up(...)`).
+- Root cause: `go movetime 1ms` and `go movetime 10ms` both compute a 1ms
+  deadline (`N.saturating_sub(50).max(1) = 1ms`). Thread setup + accumulator
+  construction takes >1ms, so the soft check fired at depth=1 BEFORE any
+  iteration ran. `best_overall = None` guaranteed. Fix: depth=1 always runs.
+- This also fixes the SPRT-irrelevant `movetime 1` / `movetime 10` cases.
+
+**Result**: robustness check 96/96 PASSED. Stalemate test position replaced
+with `7k/8/6R1/8/8/8/8/1K6 b - - 0 1` (Kh7 only legal move).
+
+### CRITICAL CORRECTION (May 30, 2026) — stale weights invalidate prior results
+The engine loads pyro.nnue from target/release/, but bullet_to_pyro_nnue.py
+only wrote engine/pyro.nnue. From ~May 7, every SPRT ran a stale d1v3 net, not
+the config under test. Separately, nnue_verify.py loaded the NEW net in Python
+while the engine subprocess ran the OLD net — so every "Python vs engine eval"
+discrepancy (including the +492cp depth-1 ghost chased across ~5 experiments)
+was a two-different-networks artifact, not a real phenomenon. Consequence: the
+"Phase D1 FINAL VERDICT: capacity bottleneck" and "D2 Step 1: go to 512" are NOT
+established — they rest on contaminated SPRTs. We are at experiment ZERO with a
+now-fixed harness, not three experiments deep.
 
 ---
 
@@ -386,6 +1102,19 @@ LOG_LEVEL=DEBUG
 ---
 
 ### Known issues:
+- CRITICAL (found May 30): engine loads pyro.nnue from target/release/, not
+  engine/. Converter now mirrors to BOTH paths. ALWAYS md5-verify the two
+  match before SPRT. This bug silently contaminated every SPRT since ~May 7.
+  converter mirrors both paths: CONFIRMED (bullet_to_pyro_nnue.py write_nnue +
+  exe_dir_copy logic present and verified).
+- FIXED (May 31): `go nodes N` and `go movetime N` (N ≤ 50ms) returned
+  bestmove (none). Two root causes fixed: (1) root move loop budget check fired
+  before first score was committed to `best` → reordered score-commit first;
+  (2) soft time check at depth=1 fired before any iteration ran for 1ms
+  deadlines → guarded with `depth > 1`. Robustness check now 96/96 green.
+  `go wtime/btime` (SPRT path) was never affected. `one_legal_move` (none) at
+  depth 1 was stalemate — not a bug; test FEN replaced with a real forced-move
+  position.
 - Rust engine NNUE loads but doesn't help (86cp RMSE)
   → Could disable NNUE loading to save startup time
 - Premove smoothness (minor UI issue)
@@ -510,9 +1239,25 @@ G7. Crank TAL_AGGRESSION to 2.5 ✅ COMPLETE (April 18, 2026)
 G8. King-exposure bonus — v1 ❌ REVERTED, v2 ✅ COMPLETE (Apr 26)
     v2: capped additive (max 50cp, AND-gated shield + attackers)
 
-G9. Sacrifice-seeking in search (1 session)
-    - Add "speculation bonus" to move ordering that slightly prefers SEE-negative captures
-    - Gate on: opponent king exposed, attacking material present near opponent king
+G9. Sacrifice-seeking in search — TRIED (June 4-5, 2026), FAILED Elo floor
+    Code: TUNE_SPEC_BONUS UCI param (default 0 = byte-identical to baseline).
+    Gate (SEE<0 AND to-sq in enemy king zone AND >=2 STM attackers in zone
+    excluding mover) lifts gated sacs from ~3000 to ~5000 ordering score
+    when SPEC_BONUS>0. STEP 0 no-op proof PASS (10/10 identical at default).
+    STEP 1 baseline aggression on Apr-16 PGNs (200 games vs SF-1700+1900):
+      sac_rate=73.5%, kz_sac_rate=25.5%, sacs/g=1.22, kz_sacs/g=0.32
+    STEP 2 gauntlet @ SPEC_BONUS=2000, 100 games each @ 10+0.1:
+      vs SF-1700: 13W-85L-2D = 14.0%  (Elo diff -315; was +123 baseline; Δ -438)
+      vs SF-1900: 12W-87L-1D = 12.5%  (Elo diff -338; was -53  baseline; Δ -286)
+      implied Pyro Elo ~1473 (was ~1835; Δ -362; floor was -40)  ← BLOWN
+      Style: sac_rate 92.5%, kz_sac_rate 37.5%, sacs/g 1.99, kz_sacs/g 0.45
+              (kz_sac_rate +47% relative — meets style target)
+    STEP 3 verdict: CLAUSE (1) style PASS, CLAUSE (2) Elo FAIL by 9x the floor.
+    FINAL VERDICT: REJECTED — ordering-bonus is the wrong instrument.
+    It biases WHAT GETS SEARCHED, not what calculation confirms. Default
+    SPEC_BONUS=0 stays (byte-identical to baseline). Do not retry tightened.
+    The dynamic-eval tiebreak approach (Experiment 2, DYNAMIC_BONUS in eval)
+    is the correct instrument — it can only break ties between near-equal moves.
 
 G10. Aggressive opening book ✅ COMPLETE (31 GMs, tactical double-weighted)
     - Whitelist: King's Gambit, Smith-Morra, Latvian Gambit, Albin Counter-Gambit,
@@ -561,19 +1306,27 @@ G17. Game-over screens ✅ COMPLETE
 
 ### Phase G — remaining priorities:
 
-Phase G is COMPLETE. All items either done or consciously deferred:
-- G9 (sacrifice-seeking): DEFERRED — personality already strong enough
+Phase G is COMPLETE. All items either done or consciously closed:
+- G9 (sacrifice-seeking): ❌ REJECTED — ordering-bonus is wrong instrument (-362 Elo). Code dormant at SPEC_BONUS=0.
 - G11 (anti-quiet): DEFERRED — would cost Elo for marginal style gain
 - G14 (theatrical timing): SKIPPED by user preference
 - Deployment: configs ready (Netlify + Railway), deploy when ready
 
-Active development has moved to Phase D (NNUE).
+Active development: G2 Session 2 (Lazy SMP) → Experiment 2 (DYNAMIC_BONUS eval tiebreak) → G13/G15 personality.
 
 ---
 
-## Phase D — NNUE v2 (ACTIVE)
+## Phase D — NNUE v2 (SHELVED — awaiting GPU/CUDA fix)
 
-### Goal: Pyro at 3000+ CCRL with personality intact
+### Status: pipeline is correct, CPU-only hardware insufficient
+
+expE-30 (first trusted net) scored 1.7% vs PeSTO (SPRT, -708 Elo).
+The pipeline is sound (loss convention fixed, deployment verified),
+but 256-neuron / 20M positions / CPU-only training cannot compete.
+NNUE resumes when the RTX 3050 CUDA/cudarc mismatch is resolved.
+Until then the live engine runs PeSTO+Tal (--no-nnue flag required).
+
+### Original goal: Pyro at 3000+ CCRL with personality intact
 
 Hand-crafted eval (PeSTO + Tal bonuses) has a ceiling around 
 2200-2400 Elo. To reach 3000+, NNUE is required — it replaces
@@ -635,45 +1388,120 @@ Rust engine changes (engine/src/nnue.rs):
 Success criteria: NNUE beats PeSTO in SPRT → pipeline works.
 Expected Elo: ~2000-2200
 
-### Phase D1 progress (as of April 27, 2026):
+### Phase D1 progress (as of May 4, 2026):
 - [x] Data generator fixed (depth 6, --no-nnue, quiet filter,
       pipe format, --target flag, progress reporting)
-- [x] 20M position generation launched (4 processes, ETA ~Apr 30)
+- [x] 20M positions generated (selfplay_d6_combined.plain, ~1.3 GB)
 - [x] Incremental accumulator (acc_update, threaded through
       full search stack, 0 from_board rebuilds during search)
 - [x] SCALE updated 400→600 in nnue.rs
-- [x] Trainer fixed (WDL sigmoid loss, pipe format parser,
-      cosine LR, gradient clip, CUDA verified on RTX 3050)
-- [ ] Train on 20M positions (~1-2 hours on GPU)
-- [ ] Export to pyro.nnue
+- [x] Homebrew trainer abandoned — float CReLU saturation creates
+      structural ceiling; queen eval capped at ~508 cp (0.56× expected);
+      three full training runs all failed SPRT catastrophically.
+      See memory/feedback_nnue_homebrew_trainer_ceiling.md.
 - [x] Validator hardened: real SPRT via cutechess-cli (elo0=0, elo1=10,
       α=β=0.05), TC=10+0.1 matches gauntlet, preflight rejects missing/
       corrupt pyro.nnue before launch, -recover for crash safety
-- [x] Trainer logs per-epoch metrics to backend/models/train_metrics_<timestamp>.csv
-      (epoch, train_loss, val_loss, lr, epoch_seconds, wall_clock_iso, positions_seen).
-      Use `python -m scripts.plot_train_metrics <csv>` for post-training diagnostics.
-- [ ] Train on 20M positions (~1.5h total: ~20min encode + ~50min GPU for 30 epochs —
-      stop data gen first to avoid RAM contention during encoding)
-- [ ] Export to pyro.nnue
-- [ ] SPRT validation: `python -m scripts.validate_nnue_rust`
+- [x] Bullet integration — Session 2 complete (May 5, 2026):
+      - Training script: bullet/examples/pyro.rs (HIDDEN=256, CReLU, custom loss)
+      - Bullet binary: bullet/target/release/examples/pyro.exe (CPU backend, CUDA 13.2 too new)
+      - Converter: backend/scripts/bullet_to_pyro_nnue.py (strips 62-byte "bullet" footer trailer)
+      - Training run 1 (FAILED): 30 superbatches, loss 0.0345→0.0165 (plateaued).
+        SPRT: 4W-24L-2D = 16.7% after 30 games. Root cause: BulletFormat encoding bug —
+        converter used ABSOLUTE piece colors (white=0, black=1) and RAW squares instead
+        of STM-normalised encoding. Bullet's Chess768 input always maps bit3=0→STM pieces,
+        bit3=1→NSTM pieces. With absolute colors, all black-to-move positions had inverted
+        STM/NSTM features. ~10M of 20M positions were garbage. Score was white-relative
+        instead of STM-relative. Result was white-relative instead of STM-relative.
+      - Bug fixed in convert_plain_to_bullet.py (May 5, 2026):
+        - bit3=0 for STM's pieces (black pieces when black to move)
+        - bit3=1 for NSTM's pieces (white pieces when black to move)
+        - squares mirrored (sq^56) when black to move, then sorted by ascending sq
+        - score = eval_stm (already STM-relative, removed -eval_stm for black)
+        - result flipped for black to move (0↔2)
+      - Re-encoded 20M positions (selfplay_d6.data). Retrained as pyro-d1v2 (SB30).
+      - SCALE fix in pyro.rs loss: (output/400).sigmoid() makes model output centipawns
+        directly, matching engine's output/(QA*QB) formula. This worked correctly —
+        queen eval 966 cp (was 508 cp homebrew). Loss fix is unrelated to STM bug.
+- [x] Re-encode data with STM-normalised converter (done May 5, 2026)
+- [x] Retrain Bullet on corrected data — pyro-d1v2, SB30, loss=0.01574
+- [x] Convert SB30 quantised.bin → pyro.nnue (394,762 bytes)
+- [x] SPRT v2 (PeSTO data): 34% over 100+ games (~−130 Elo vs PeSTO). Pipeline proven.
 
-Next session: wait for data gen to complete (ETA Apr 30 ~18:00 IST),
-stop the 4 gen processes, concatenate parts, train, validate.
+### Phase D1.5: SF18 re-evaluation — COMPLETE ✅ (May 5-6, 2026)
+- [x] SF18 re-eval: 20,000,365 positions, 0 errors, 17.35h at 320 pos/s
+        Output: C:/torch_data/selfplay_sf18_d12.plain (1.3 GB)
+- [x] Converted to Bullet format: C:/torch_data/selfplay_sf18_d12.data (610.4 MB, 876s)
+- [x] Retrained as pyro-d1v3 (SB30, loss=0.01607)
+- [x] SPRT v3 (SF18 data): ~32% over 47 games — NO IMPROVEMENT over v2
 
-### Phase D2: Scale up (target: 2600-2800 Elo)
-**Timeline: 3-4 weeks**
+### Phase D1 — FINAL VERDICT: FAIL ❌
 
-Architecture: (768×8kb→512)×2→1
-- 8 king buckets (king position bins the input features)
-- 512-neuron accumulator (double the D1 size)
-- Horizontal mirroring (reduce feature space by half)
+> ⚠️ CONTAMINATED — see 'CRITICAL CORRECTION (May 30)' in the NNUE EXPERIMENT PROTOCOL section. The SPRTs behind this verdict ran stale weights. Do not treat the capacity conclusion or the 512-neuron plan as confirmed.
+
+Both v2 and v3 score ~32-34% vs PeSTO+Tal. Data quality is NOT the bottleneck.
+
+| Version | Data | Loss  | Queen-up | SPRT  | Games |
+|---------|------|-------|----------|-------|-------|
+| v2      | PeSTO depth-6 | 0.01574 | 966cp | 34%  | 100+  |
+| v3      | SF18 depth-12 | 0.01607 | 966cp | ~32% | 47    |
+
+Root cause analysis (rank-ordered bottlenecks):
+1. **Network capacity** — 256 hidden neurons is too small. PeSTO+Tal encodes
+   decades of chess knowledge. A 256-neuron NNUE from 20M self-play positions
+   cannot match it. D2 must increase to 512+ neurons.
+2. **Game outcome quality** — depth-6 self-play WDL is too noisy; NNUE tries
+   to learn from games played by a depth-6 engine it can't yet beat.
+3. **Data volume** — 20M is the floor; 100M+ needed for generalization.
+4. **Inference cost** — NNUE may be slower than PeSTO at 10+0.1 TC; worth
+   profiling before D2.
+
+All training data, weights, and scripts preserved for D2 ablations:
+  - backend/data/selfplay_d6_combined.plain (PeSTO evals, original)
+  - C:/torch_data/selfplay_sf18_d12.plain   (SF18 evals)
+  - bullet/checkpoints/pyro-d1v2/           (v2 weights)
+  - bullet/checkpoints/pyro-d1v3/           (v3 weights)
+
+### Phase D2: Scale up (ACTIVE NEXT — target: 2200+ Elo)
+
+> ⚠️ CONTAMINATED — see 'CRITICAL CORRECTION (May 30)' in the NNUE EXPERIMENT PROTOCOL section. The SPRTs behind this verdict ran stale weights. Do not treat the capacity conclusion or the 512-neuron plan as confirmed.
+
+**First objective: beat PeSTO at all. Then worry about 2600.**
+
+D1 verdict forces a resequencing. D2 must first prove NNUE can beat
+PeSTO before chasing D2's original 2600-2800 Elo targets. The
+bottleneck is network capacity, not architecture sophistication.
+
+**D2 Step 1 (immediate): 256 → 512 hidden neurons, same data**
+- Change HIDDEN_SIZE to 512 in bullet/examples/pyro.rs
+- Update engine/src/nnue.rs: HIDDEN_SIZE=512, layer sizes, weight loading
+- Retrain on existing C:/torch_data/selfplay_sf18_d12.data (20M SF18 positions)
+- SPRT vs PeSTO: if score crosses 50%, the capacity hypothesis is confirmed
+- Expected: +50-150 Elo from capacity alone
+
+**D2 Step 2 (if Step 1 passes): SCReLU + 100M positions**
+- Switch .crelu() → .screlu() in pyro.rs; update nnue.rs activation
+- Generate 100M positions at depth 8 (5× current data, deeper games)
+- Retrain, SPRT vs PeSTO baseline
+
+**D2 Step 3 (if Step 2 passes): king buckets**
+- Add 8 king buckets (king position bins the input features)
+- 768×8 → 6144 input features with horizontal mirroring
+- Only add this complexity after plain 512+SCReLU is validated
+
+Architecture for Step 1: (768→512)×2→1
+- 512-neuron accumulator (double D1)
 - SCReLU activation (Squared Clipped ReLU — better gradient flow)
 
-Data: 500M-1B positions
-- Each iteration generates 100M NEW positions using current best NNUE
-- Retrain on accumulated data
-- 3-5 iterations of generate → train → validate
-- Each iteration should gain 50-100 Elo
+Data: start with existing 20M SF18 positions, scale to 100M+ after Step 1 confirms capacity helps
+
+SIMD optimization:
+- AVX2 vectorized accumulator updates
+- i16 weights for accumulator layer
+- i8 weights for output layers
+- Quantization-aware training in Bullet
+
+Expected Elo after full D2: ~2200-2600
 
 SIMD optimization:
 - AVX2 vectorized accumulator updates
