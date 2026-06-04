@@ -137,7 +137,7 @@ fn main() {
                         name @ ("tal_aggression" | "futility_margin_d1" | "futility_margin_d2" |
                                 "aspiration_delta" | "nmp_reduction" | "lmr_move_index" |
                                 "se_beta_margin" | "queen_attack_wt" | "castling_bonus" |
-                                "early_queen_penalty") => {
+                                "early_queen_penalty" | "spec_bonus") => {
                             if let Ok(v) = tokens[4].parse::<i32>() {
                                 set_tune_param(name, v);
                             }

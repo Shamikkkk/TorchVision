@@ -17,6 +17,11 @@ static TUNE_SE_BETA_MARGIN:      AtomicI32 = AtomicI32::new(50);
 static TUNE_QUEEN_ATTACK_WT:     AtomicI32 = AtomicI32::new(40);
 static TUNE_CASTLING_BONUS:      AtomicI32 = AtomicI32::new(80);
 static TUNE_EARLY_QUEEN_PENALTY: AtomicI32 = AtomicI32::new(60);
+// G9 — sacrifice-seeking ordering bonus. Default 0 = byte-identical baseline.
+// When >0, gated SEE-negative captures landing in enemy king zone with
+// 2+ STM attackers there get ordering_score += SPEC_BONUS (lifts them from
+// the ~3000 SEE-negative band toward killer/countermove band at ~4500-5000).
+static TUNE_SPEC_BONUS:          AtomicI32 = AtomicI32::new(0);
 
 /// Set a tunable search/eval parameter by name (called from UCI setoption handler).
 pub fn set_tune_param(name: &str, value: i32) {
@@ -31,6 +36,7 @@ pub fn set_tune_param(name: &str, value: i32) {
         "queen_attack_wt"     => TUNE_QUEEN_ATTACK_WT.store(value, Ordering::Relaxed),
         "castling_bonus"      => TUNE_CASTLING_BONUS.store(value, Ordering::Relaxed),
         "early_queen_penalty" => TUNE_EARLY_QUEEN_PENALTY.store(value, Ordering::Relaxed),
+        "spec_bonus"          => TUNE_SPEC_BONUS.store(value, Ordering::Relaxed),
         _ => {}
     }
 }
@@ -857,6 +863,24 @@ fn piece_val_on(board: &Board, sq: u8, is_white: bool) -> i32 {
     else { MVV_LVA_VAL[5] }
 }
 
+/// G9 — count side-to-move's pieces (other than the one on `from_sq`) that
+/// attack any square in the enemy king zone. Cheap: ≤9 zone squares × one
+/// attackers_to() each. `from_sq` is excluded so the attacker count reflects
+/// the FOLLOW-UP after the sacrificed piece is gone.
+fn stm_attackers_in_zone(board: &Board, zone: u64, from_sq: u8) -> i32 {
+    let occupied = board.occupied() & !(1u64 << from_sq);
+    let stm_pieces = if board.side_to_move { board.white_pieces() } else { board.black_pieces() }
+        & !(1u64 << from_sq);
+    let mut union = 0u64;
+    let mut z = zone;
+    while z != 0 {
+        let sq = z.trailing_zeros() as u8;
+        z &= z - 1;
+        union |= movegen::attackers_to(board, sq, occupied) & stm_pieces;
+    }
+    union.count_ones() as i32
+}
+
 /// Score a move for ordering. Higher = searched first.
 fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize, tt_move: Option<(u8, u8)>, history: &History, counter_moves: &CounterMoves, prev_move: Option<(u8, u8)>) -> i32 {
     // TT best move: highest priority
@@ -872,8 +896,25 @@ fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize, tt_move: 
             piece_val_on(board, mv.to_sq, !board.side_to_move)
         };
         let attacker = piece_val_on(board, mv.from_sq, board.side_to_move);
+        let see_score = see(board, mv);
         // SEE-negative captures go below killers; SEE-positive above
-        if see(board, mv) < 0 {
+        if see_score < 0 {
+            // G9 speculation gate: gated SEE-negative captures that land in the
+            // enemy king zone with 2+ follow-up attackers get lifted toward the
+            // killer band. SPEC_BONUS=0 (default) -> byte-identical to baseline.
+            let spec_bonus = TUNE_SPEC_BONUS.load(Ordering::Relaxed);
+            if spec_bonus > 0 {
+                let enemy_king_sq = if board.side_to_move {
+                    board.black_kings.trailing_zeros() as u8
+                } else {
+                    board.white_kings.trailing_zeros() as u8
+                };
+                let zone = king_zone(enemy_king_sq);
+                let to_in_zone = (1u64 << mv.to_sq) & zone != 0;
+                if to_in_zone && stm_attackers_in_zone(board, zone, mv.from_sq) >= 2 {
+                    return 3_000 + victim - attacker / 10 + spec_bonus;
+                }
+            }
             return 3_000 + victim - attacker / 10;
         }
         return 10_000 + victim - attacker / 10;
@@ -1516,7 +1557,8 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
         for depth in 1..=MAX_DEPTH as u32 {
             // Soft check: don't start a new iteration if the deadline has
             // already passed. The result from the previous depth stays in best_overall.
-            if time_up(deadline, &stop) {
+            // Depth 1 always runs so we always have something to return.
+            if depth > 1 && time_up(deadline, &stop) {
                 break;
             }
 
@@ -1556,24 +1598,26 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                         &nodes, node_limit, deadline, &stop, &tt,
                     );
 
-                    if (nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop)) && best.is_none() {
-                        completed = false;
-                        break;
-                    }
-
-                    // Fail-high at root: score == beta under fail-hard.
-                    // Record the move, break, and re-search with wider beta.
+                    // Commit score FIRST so that even a budget-exhausted
+                    // first move leaves iter_best populated for the fallback.
                     if score >= beta {
                         best = Some((mv.clone(), score));
                         fail_high = true;
                         break;
                     }
-
                     if score > alpha {
                         alpha = score;
                         best = Some((mv.clone(), score));
                     }
 
+                    // Budget/time check AFTER score is committed.
+                    // If best is still None here, the position failed-low on
+                    // every move searched so far (aspiration miss) — mark the
+                    // iteration incomplete and let the re-search widen.
+                    if (nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop)) && best.is_none() {
+                        completed = false;
+                        break;
+                    }
                     if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop) {
                         break;
                     }
