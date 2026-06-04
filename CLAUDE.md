@@ -1171,7 +1171,7 @@ G1. Cutechess gauntlet harness ✅ COMPLETE (April 16, 2026)
     Full result at backend/scripts/gauntlet/baseline_2026-04-16/RESULT.md.
     Use this baseline to validate every future Phase G change.
 
-G2. Lazy SMP multithreading ✅ COMPLETE (June 5, 2026)
+G2. Lazy SMP multithreading ⏳ CODE COMPLETE, GAUNTLET PENDING (June 5, 2026)
 
     Session 1: TTable thread-safe (Vec<TTSlot>, paired AtomicU64s,
     XOR-checksum torn-entry detection), node counter AtomicU64,
