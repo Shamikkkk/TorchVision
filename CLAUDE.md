@@ -1171,18 +1171,21 @@ G1. Cutechess gauntlet harness ✅ COMPLETE (April 16, 2026)
     Full result at backend/scripts/gauntlet/baseline_2026-04-16/RESULT.md.
     Use this baseline to validate every future Phase G change.
 
-G2. Lazy SMP multithreading (2 sessions, +50-150 Elo)
-    Session 1 of 2 ✅ COMPLETE (April 16, 2026)
+G2. Lazy SMP multithreading ✅ COMPLETE (June 5, 2026)
 
-    Session 1: TTable now thread-safe (Vec<TTSlot> with paired AtomicU64s,
-    XOR-checksum torn-entry detection, &self methods), node counter is
-    AtomicU64, stop flag (AtomicBool) plumbed through ab_search/quiescence.
-    Engine still single-threaded, plays identically to before.
-    Session 2: wrap TTable in Arc, spawn N worker threads, add UCI Threads
-    option, re-run gauntlet for validation.
+    Session 1: TTable thread-safe (Vec<TTSlot>, paired AtomicU64s,
+    XOR-checksum torn-entry detection), node counter AtomicU64,
+    stop flag AtomicBool plumbed through ab_search/quiescence.
+    Session 2: std::thread::scope spawns N-1 worker threads (smp_worker),
+    each runs independent ID loop sharing the TT. UCI Threads option added.
+    rust_engine.py sends setoption Threads 4 at startup.
 
-    Expected impact: +50-150 Elo on 4-8 core hardware.
-    Validation plan: 100-game gauntlet vs SF-1700 and SF-1900 with Threads=4.
+    NO-OP PROOF (June 5, 2026): 10/10 positions byte-identical at Threads=1.
+    DEPTH CHECK: startpos movetime 5000: Threads=1→depth12, Threads=4→depth13.
+    +1 ply confirmed (within predicted 1-2 ply range).
+    GAUNTLET PENDING: 100 games vs SF-1700 + SF-1900 at Threads=4, TC 10+0.1.
+
+    Expected impact: +50-150 Elo on 4-core hardware.
 
 G3. Principal Variation Search ✅ COMPLETE
     - Refactor ab_search: first move searched with full window, subsequent
