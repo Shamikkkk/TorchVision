@@ -14,8 +14,8 @@ pub const HIDDEN_SIZE: usize = 256;
 pub const QA: i32 = 255;
 /// Quantization parameter for output weights
 pub const QB: i32 = 64;
-/// Centipawn scaling factor
-pub const SCALE: i32 = 600;
+/// Centipawn scaling factor — must equal eval_scale in bullet/examples/pyro.rs
+pub const SCALE: i32 = 400;
 
 // Piece types (must match movegen constants)
 const PAWN: u8 = 0;
@@ -169,8 +169,10 @@ impl Network {
             output += clamped * self.out_weights[HIDDEN_SIZE + i] as i32;
         }
 
-        // Scale: model outputs centipawns directly, just undo quantization
-        output / (QA * QB)
+        // Stock Bullet scale convention: network learns output ≈ score/SCALE,
+        // so multiply by SCALE to restore centipawns. i64 to avoid overflow
+        // (max output ~16.6M × SCALE=400 = 6.6B exceeds i32::MAX).
+        (output as i64 * SCALE as i64 / (QA as i64 * QB as i64)) as i32
     }
 
     /// Create a network with small random weights (for testing only).
@@ -344,8 +346,8 @@ mod tests {
         let acc = Accumulator::from_board(&net, &board);
         let score = net.evaluate(&acc, board.side_to_move);
         assert!(
-            score > -10_000 && score < 10_000,
-            "Startpos eval with random weights should be in [-10000, 10000], got {}",
+            score > -100_000 && score < 100_000,
+            "Startpos eval with random weights should be in [-100000, 100000], got {}",
             score
         );
     }
@@ -359,8 +361,8 @@ mod tests {
         let black_eval = net.evaluate(&acc, false);
         // With symmetric position, flipping perspective may differ due to
         // different out_weights for STM vs NSTM halves. Just check both are valid.
-        assert!(white_eval > -10_000 && white_eval < 10_000);
-        assert!(black_eval > -10_000 && black_eval < 10_000);
+        assert!(white_eval > -100_000 && white_eval < 100_000);
+        assert!(black_eval > -100_000 && black_eval < 100_000);
     }
 
     #[test]

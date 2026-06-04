@@ -29,6 +29,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import io
 import subprocess
 import sys
@@ -48,11 +49,8 @@ NNUE_PATH      = _ROOT / "engine" / "pyro.nnue"
 CUTECHESS_PATH = Path(r"C:\tools\cutechess\cutechess-1.3.1-win64\cutechess-cli.exe")
 PGN_OUT        = _HERE / "validate_nnue_games.pgn"
 
-# Expected size for (768→256)×2→1 architecture (Phase D1).
-# Phase D2 will use (768×8kb→512)×2→1 — file size will change.
-# Update this constant when transitioning to D2 weights or the
-# preflight will fail on the new file. The failure message is
-# clear, but it's better to update proactively.
+# Expected size for (768→512)×2→1 architecture (Phase D2 Experiment B).
+# 8 (header) + (768*512 + 512 + 512*2 + 1) * 2 (weights) = 789,514 bytes
 EXPECTED_NNUE_SIZE = 394_762
 
 # ── SPRT parameters ────────────────────────────────────────────────────
@@ -70,6 +68,12 @@ TC = "10+0.1"
 
 
 # ── Pre-flight ─────────────────────────────────────────────────────────
+
+def md5_file(path: Path) -> str:
+    h = hashlib.md5()
+    h.update(path.read_bytes())
+    return h.hexdigest()
+
 
 def preflight_checks() -> None:
     """Refuse to run if anything obvious is broken."""
@@ -92,8 +96,32 @@ def preflight_checks() -> None:
             f"  If you changed the NNUE architecture, update EXPECTED_NNUE_SIZE."
         )
 
+    # Hard check: engine loads from target/release/pyro.nnue (next to exe),
+    # not engine/pyro.nnue.  If the two files differ the engine runs stale weights
+    # and every SPRT result is garbage.  Refuse to run until they match.
+    exe_side_nnue = ENGINE_PATH.parent / "pyro.nnue"
+    if not exe_side_nnue.exists():
+        sys.exit(
+            f"FATAL: {exe_side_nnue} does not exist.\n"
+            f"  The engine always loads pyro.nnue from its own directory first.\n"
+            f"  Run bullet_to_pyro_nnue.py to write weights to both locations."
+        )
+
+    hash_src = md5_file(NNUE_PATH)
+    hash_exe = md5_file(exe_side_nnue)
+    if hash_src != hash_exe:
+        sys.exit(
+            f"FATAL: NNUE weight mismatch — engine will load STALE weights.\n"
+            f"  {NNUE_PATH}\n"
+            f"    md5 = {hash_src}\n"
+            f"  {exe_side_nnue}\n"
+            f"    md5 = {hash_exe}\n"
+            f"  Run bullet_to_pyro_nnue.py to sync both files before SPRT."
+        )
+
     print(f"[preflight] pyro.exe    : {ENGINE_PATH}")
     print(f"[preflight] pyro.nnue   : {actual_size:,} bytes ✓")
+    print(f"[preflight] nnue md5    : {hash_src[:12]}...  (both locations match)")
     print(f"[preflight] cutechess   : {CUTECHESS_PATH}")
     print(f"[preflight] SPRT        : elo0={ELO0}, elo1={ELO1}, α={ALPHA}, β={BETA}")
     print(f"[preflight] TC          : {TC}")

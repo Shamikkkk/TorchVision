@@ -317,7 +317,7 @@ DIVISOR = 5000.0
 class RustNNUE(nn.Module):
     """768->256->1 NNUE matching engine/src/nnue.rs architecture."""
 
-    def __init__(self, material_init: bool = True):
+    def __init__(self, material_init: bool = False):
         super().__init__()
         self.ft = nn.Linear(INPUT_SIZE, HIDDEN_SIZE)   # shared feature transformer
         self.out = nn.Linear(HIDDEN_SIZE * 2, 1)       # output layer
@@ -325,13 +325,37 @@ class RustNNUE(nn.Module):
 
         if material_init:
             self._init_material_weights()
+        else:
+            self._init_random_weights()
+
+    def _init_random_weights(self):
+        """Random initialization that keeps neurons alive and avoids pre-converging.
+
+        Why: material_init starts the model at near-perfect material predictions,
+        so loss is already ~0 from epoch 1 and gradients are too small to learn
+        positional patterns. Random init forces the model to learn everything from
+        data (material AND PST), producing genuine positional understanding.
+
+        Bias is set positive to prevent dying ReLU: with zero bias and
+        material-based weights, ~50% of neurons have pre-activation < 0 at init
+        and stay dead because gradients don't flow through clamped-to-0 neurons.
+        """
+        with torch.no_grad():
+            # Small uniform weights: keeps pre-activations near 0 initially,
+            # allowing bias to keep neurons alive while training begins.
+            nn.init.uniform_(self.ft.weight, -0.01, 0.01)
+            # Positive bias: pre-activation starts at +0.1 for all neurons,
+            # so CReLU doesn't kill them before training has a chance to update.
+            nn.init.constant_(self.ft.bias, 0.1)
+            # Small random output weights — smaller than ft to prevent early overfit
+            # to the ~10% of neurons that fire before training distributes load
+            nn.init.uniform_(self.out.weight, -0.005, 0.005)
+            nn.init.zeros_(self.out.bias)
 
     def _init_material_weights(self):
-        """Initialize ft weights with material knowledge (like init_nnue_weights.py).
+        """Material-biased initialization (deprecated: causes pre-convergence).
 
-        Each piece feature gets a uniform weight across all hidden neurons
-        proportional to its material value / DIVISOR. Small noise breaks symmetry.
-        Output weights: STM positive, NSTM negative.
+        Kept for ablation testing only. Use --material-init to enable.
         """
         with torch.no_grad():
             self.ft.weight.zero_()
@@ -424,10 +448,17 @@ def train(args):
         model = RustNNUE(material_init=False)
         model.load_state_dict(torch.load(DEFAULT_OUTPUT, map_location="cpu", weights_only=True))
         model = model.to(device)
-    else:
-        print("Initializing with material knowledge", flush=True)
+    elif args.material_init:
+        print("Initializing with material knowledge (--material-init)", flush=True)
         model = RustNNUE(material_init=True).to(device)
+    else:
+        print("Initializing with random weights (default, avoids pre-convergence)", flush=True)
+        model = RustNNUE(material_init=False).to(device)
 
+    # Use Adam without weight_decay. With Adam (not AdamW), adding weight_decay
+    # modifies the gradient before Adam's normalization step — both the learning
+    # signal and the decay get normalized to ±lr, so they cancel and nothing learns.
+    # Regularization comes solely from the hard clips below.
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs, eta_min=1e-5
@@ -470,6 +501,15 @@ def train(args):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+
+            # Hard-clip ft weights to limit CReLU saturation. ±1.0 in float space
+            # means the quantized ft weight stays in [-QA, QA] = [-255, 255], which
+            # is the natural bound for this architecture. The out layer is NOT clipped
+            # here — the ±127/QB cap from the previous run was wrong (assumed int8
+            # output weights, but our export uses int16; 127/QB ≈ 2cp ceiling killed
+            # representational capacity for large material advantages).
+            with torch.no_grad():
+                model.ft.weight.clamp_(-1.0, 1.0)
 
             train_loss_sum += loss.item()
             train_batches += 1
@@ -620,6 +660,8 @@ def main():
     parser.add_argument("--patience", type=int, default=5, help="Early stopping patience")
     parser.add_argument("--resume", action="store_true", help="Resume from existing nnue_rust.pt")
     parser.add_argument("--no-export", action="store_true", help="Skip pyro.nnue export")
+    parser.add_argument("--material-init", action="store_true", dest="material_init",
+                        help="Use material-biased init instead of random (deprecated, causes pre-convergence)")
     args = parser.parse_args()
 
     if not args.csv and not args.plain:
