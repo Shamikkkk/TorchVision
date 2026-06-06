@@ -32,11 +32,23 @@ unlocked. Until then, the live engine runs PeSTO+Tal (--no-nnue).
 
 **PATH TO THE GOAL** (sequenced, one variable each, gauntlet-validated):
 1. **POWERFUL** — Lazy SMP (G2 Session 2): 12 cores, deeper search.
+   STATUS: ⏳ Code works (no-op proof ✓, +1 ply bench ✓), but RUN B (June 5)
+   showed T4 ≈ T1 (49% in 100 games self-play). SMP neutral — not validated ✅.
+   Re-test after search.rs baseline is confirmed. (See G2 section below.)
 2. **DYNAMIC** — capped dynamic-eval tiebreak (G9-done-right, in EVAL
    not ordering): small capped term rewards initiative toward the enemy
    king; UCI param DYNAMIC_BONUS default 0 = no-op.
+   STATUS: 🛑 Blocked until Step 1 is validated.
 3. **BEAUTIFUL** — emerges from 1+2 over the existing Syzygy base.
 4. **PERSONALITY** — G13 taunts, G15 visual attack cues (pure frontend).
+
+**BASELINE STATE (June 7, 2026):**
+True search.rs baseline restored to b134da9 (G8v2+CM+SEE+SE, no IID/LMP/depNMP).
+Measured strength: ~50% vs SF-1700 (30 games). The documented "1835 Elo / 67%
+vs SF-1700" cannot be reproduced from any committed code; probable cause is
+Stockfish luck variance or different binary at the time. The reliable measured
+baseline is ~50-53% vs SF-1700 (b134da9 equivalent). Do NOT reference the 1835
+figure without a fresh gauntlet measurement on the current binary.
 
 **G9 CLOSED**: ordering-bonus sacrifice-seeking REJECTED — wrong
 instrument (biases what gets searched, not what calculation confirms).
@@ -1171,7 +1183,7 @@ G1. Cutechess gauntlet harness ✅ COMPLETE (April 16, 2026)
     Full result at backend/scripts/gauntlet/baseline_2026-04-16/RESULT.md.
     Use this baseline to validate every future Phase G change.
 
-G2. Lazy SMP multithreading ⏳ CODE COMPLETE, GAUNTLET PENDING (June 5, 2026)
+G2. Lazy SMP multithreading ⏳ CODE COMPLETE, GAUNTLET PENDING (June 5-7, 2026)
 
     Session 1: TTable thread-safe (Vec<TTSlot>, paired AtomicU64s,
     XOR-checksum torn-entry detection), node counter AtomicU64,
@@ -1183,9 +1195,22 @@ G2. Lazy SMP multithreading ⏳ CODE COMPLETE, GAUNTLET PENDING (June 5, 2026)
     NO-OP PROOF (June 5, 2026): 10/10 positions byte-identical at Threads=1.
     DEPTH CHECK: startpos movetime 5000: Threads=1→depth12, Threads=4→depth13.
     +1 ply confirmed (within predicted 1-2 ply range).
-    GAUNTLET PENDING: 100 games vs SF-1700 + SF-1900 at Threads=4, TC 10+0.1.
 
-    Expected impact: +50-150 Elo on 4-core hardware.
+    RUN B (June 5, 2026): Threads=4 vs Threads=1 self-play, 100 games.
+      42W-44L-14D = 49.0% for Threads=4, Elo -7 ± 64. Near 50% → SMP neutral.
+      Threads reach 1 ply deeper but don't play stronger at this position set.
+      VERDICT: NOT VALIDATED. Gauntlet awaits confirmed search.rs baseline.
+
+    COMPLICATION (June 5-7): RUN A revealed a ~240 Elo regression in the engine
+    vs the April-26 baseline. Root cause: c56fc5c (IID+LMP+dep-NMP commit) and
+    f1bcb31 (Fix 1 reorder) both hurt TC play. FIXED (June 7) by reverting
+    search.rs to b134da9 (G8v2+CM baseline, no IID/LMP/dep-NMP) + Fix 2 only.
+    search.rs fix validated: 50% vs SF-1700 (30 games), 45% vs b134da9 binary.
+
+    NEXT STEP: Re-run RUN A (Threads=4 vs SF-1700/1900, 100 games each) on the
+    FIXED search.rs to establish the true SMP Elo. Only then decide G2 ✅ or bug.
+
+    Expected impact: +50-150 Elo on 4-core hardware (still the prediction).
 
 G3. Principal Variation Search ✅ COMPLETE
     - Refactor ab_search: first move searched with full window, subsequent
