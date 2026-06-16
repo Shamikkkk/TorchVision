@@ -11,8 +11,9 @@ For development history, completed phases, and deferred plans see [HISTORY.md](H
 ## Current Goal (reset June 5, 2026)
 
 Pyro plays **beautiful, sensible, dynamic, powerful chess** on the
-PeSTO+Tal hand-crafted-eval base (~1835 Elo), finished with
-Syzygy-perfect endgames. NOT a max-Elo strength race.
+PeSTO+Tal hand-crafted-eval base (~1820 Elo Threads=4, verified June 2026 —
+see VERIFIED BASELINE below), finished with Syzygy-perfect endgames.
+NOT a max-Elo strength race.
 
 **DESIGN PRINCIPLE** (every future change is measured against this):
 Pyro plays beautiful chess by **calculating deeply and accurately**,
@@ -32,9 +33,11 @@ unlocked. Until then, the live engine runs PeSTO+Tal (--no-nnue).
 
 **PATH TO THE GOAL** (sequenced, one variable each, gauntlet-validated):
 1. **POWERFUL** — Lazy SMP (G2 Session 2): 12 cores, deeper search.
-   STATUS: ⏳ Code works (no-op proof ✓, +1 ply bench ✓), but RUN B (June 5)
-   showed T4 ≈ T1 (49% in 100 games self-play). SMP neutral — not validated ✅.
-   Re-test after search.rs baseline is confirmed. (See G2 section below.)
+   STATUS: ✅ VALIDATED (June 2026 baseline run). Threads=4 is +80-118 Elo over
+   Threads=1 on the SF-ladder (61.0% vs SF-1700 / 44.5% vs SF-1900 at T4, vs
+   44.3% / 33.8% at T1). The June-5 self-play "neutral" (49%) was wrong — A/B
+   self-play understates SMP because both sides gain the ply. (See VERIFIED
+   BASELINE + G2 section below.)
 2. **DYNAMIC** — capped dynamic-eval tiebreak (G9-done-right, in EVAL
    not ordering): small capped term rewards initiative toward the enemy
    king; UCI param DYNAMIC_BONUS default 0 = no-op.
@@ -42,18 +45,47 @@ unlocked. Until then, the live engine runs PeSTO+Tal (--no-nnue).
 3. **BEAUTIFUL** — emerges from 1+2 over the existing Syzygy base.
 4. **PERSONALITY** — G13 taunts, G15 visual attack cues (pure frontend).
 
-**BASELINE STATE (June 7, 2026):**
-True search.rs baseline restored to b134da9 (G8v2+CM+SEE+SE, no IID/LMP/depNMP).
-Measured strength: ~50% vs SF-1700 (30 games). The documented "1835 Elo / 67%
-vs SF-1700" cannot be reproduced from any committed code; probable cause is
-Stockfish luck variance or different binary at the time. The reliable measured
-baseline is ~50-53% vs SF-1700 (b134da9 equivalent). Do NOT reference the 1835
-figure without a fresh gauntlet measurement on the current binary.
+**BASELINE STATE (superseded June 16, 2026 — see VERIFIED BASELINE below):**
+search.rs baseline is b134da9 (G8v2+CM+SEE+SE, no IID/LMP/depNMP). The "1835
+mystery" is now RESOLVED, not retired: the old 1835 was a Threads=4 measurement
+(~1820 reproduced here at T4). June-5's "cannot reproduce" compared a fresh
+single-thread rebuild (~1721) against a 4-thread historical number — a
+thread-count mismatch, not Stockfish luck. The figure was real but
+thread-count-unlabeled. IMPLICATION: the IID/LMP/dep-NMP deletion was likely
+chasing a thread-count artifact, not a real regression — flag for the re-add fork.
 
 **G9 CLOSED**: ordering-bonus sacrifice-seeking REJECTED — wrong
 instrument (biases what gets searched, not what calculation confirms).
 Code stays dormant at SPEC_BONUS=0 (byte-identical to baseline).
 Do not retry tightened.
+
+---
+
+## VERIFIED BASELINE (June 2026) — measure everything against this
+
+- **Anchor:** commit `b8e25f0b` · binary md5 `587567f2bbd5ce54e40481b7cc9ccea6`
+  · `--no-nnue` · TC 10+0.1 · concurrency=1 · no opening book · 600 games · 0 disconnects.
+- **Threads=1 (engineering baseline — the reference for "did a code change help"):**
+  44.3% vs SF-1700 (−40 ± 47), 33.8% vs SF-1900 (−117 ± 49) → implied **~1721 Elo**.
+- **Threads=4 (production — what ships; rust_engine.py sends `setoption Threads 4`):**
+  61.0% vs SF-1700 (+78 ± 64), 44.5% vs SF-1900 (−38 ± 68) → implied **~1820 Elo**.
+- **SMP VERDICT: POSITIVE, +80-118 Elo on the SF-ladder.** vs SF-1700 the T4/T1
+  CIs do not overlap (significant); vs SF-1900 same direction (suggestive).
+  This OVERTURNS the June-5 "neutral" self-play result — A/B self-play understates
+  SMP because both sides gain the ply. **G2 ✅ VALIDATED.**
+- **1835 mystery RESOLVED:** old 1835 ≈ this T4 ~1820. It was a Threads=4 number
+  all along; the June-5 reproduction failure was a single-thread-vs-4-thread
+  comparison. Real, but thread-count-unlabeled. (See BASELINE STATE note above for
+  the IID/LMP/dep-NMP re-add implication.)
+- **Style anchor (for DYNAMIC_BONUS clause 1):**
+  T1 — aggression 77.2% / kz_sac 31.0% / sacs_per_game 1.30 / kz_sacs_per_game 0.35.
+  T4 — aggression 71.0% / kz_sac 38.0% / sacs_per_game 1.20 / kz_sacs_per_game 0.42.
+- **Prediction held?** RUN 1 mostly held (SF-1900 33.8% in 30-35% range, implied
+  ~1721 at top of 1690-1720 guess; SF-1700 slightly under the ~50% guess).
+  RUN 2 FAILED (predicted T4 within ±25 Elo of T1; actual +80-118) — SMP is positive.
+- **Rules:** every future change measured vs THIS baseline (T1 for "did it help",
+  T4 for "what ships"), ≥100 games minimum, one variable at a time, prediction first.
+- Raw data: `backend/scripts/gauntlet/results/baseline_2026-06/` (PGNs, logs, NOTES.md).
 
 ---
 
@@ -1183,7 +1215,7 @@ G1. Cutechess gauntlet harness ✅ COMPLETE (April 16, 2026)
     Full result at backend/scripts/gauntlet/baseline_2026-04-16/RESULT.md.
     Use this baseline to validate every future Phase G change.
 
-G2. Lazy SMP multithreading ⏳ CODE COMPLETE, GAUNTLET PENDING (June 5-7, 2026)
+G2. Lazy SMP multithreading ✅ VALIDATED (June 2026 baseline run)
 
     Session 1: TTable thread-safe (Vec<TTSlot>, paired AtomicU64s,
     XOR-checksum torn-entry detection), node counter AtomicU64,
@@ -1197,20 +1229,24 @@ G2. Lazy SMP multithreading ⏳ CODE COMPLETE, GAUNTLET PENDING (June 5-7, 2026)
     +1 ply confirmed (within predicted 1-2 ply range).
 
     RUN B (June 5, 2026): Threads=4 vs Threads=1 self-play, 100 games.
-      42W-44L-14D = 49.0% for Threads=4, Elo -7 ± 64. Near 50% → SMP neutral.
-      Threads reach 1 ply deeper but don't play stronger at this position set.
-      VERDICT: NOT VALIDATED. Gauntlet awaits confirmed search.rs baseline.
+      42W-44L-14D = 49.0%, Elo -7 ± 64. Concluded "SMP neutral" — WRONG.
+      A/B self-play understates SMP because BOTH sides gain the extra ply, so
+      the advantage cancels. The SF-ladder (fixed opponent) is the right test.
 
-    COMPLICATION (June 5-7): RUN A revealed a ~240 Elo regression in the engine
-    vs the April-26 baseline. Root cause: c56fc5c (IID+LMP+dep-NMP commit) and
-    f1bcb31 (Fix 1 reorder) both hurt TC play. FIXED (June 7) by reverting
-    search.rs to b134da9 (G8v2+CM baseline, no IID/LMP/dep-NMP) + Fix 2 only.
-    search.rs fix validated: 50% vs SF-1700 (30 games), 45% vs b134da9 binary.
+    SF-LADDER VALIDATION (June 2026 verified baseline, anchor commit b8e25f0):
+      T1: 44.3% vs SF-1700 (−40 ± 47), 33.8% vs SF-1900 (−117 ± 49) → ~1721.
+      T4: 61.0% vs SF-1700 (+78 ± 64), 44.5% vs SF-1900 (−38 ± 68) → ~1820.
+      SMP delta: +117.8 Elo vs SF-1700 (CIs disjoint → significant),
+      +78.8 Elo vs SF-1900 (same direction, suggestive). Matches the
+      "+50-150 Elo on 4-core hardware" prediction.
+      VERDICT: ✅ VALIDATED. SMP is POSITIVE, not neutral.
 
-    NEXT STEP: Re-run RUN A (Threads=4 vs SF-1700/1900, 100 games each) on the
-    FIXED search.rs to establish the true SMP Elo. Only then decide G2 ✅ or bug.
+    1835 MYSTERY RESOLVED: old 1835 ≈ T4 ~1820. It was a Threads=4 number;
+    June-5's "cannot reproduce" compared a single-thread rebuild (~1721)
+    against a 4-thread historical figure. The IID/LMP/dep-NMP deletion was
+    therefore likely chasing a thread-count artifact — flag for the re-add fork.
 
-    Expected impact: +50-150 Elo on 4-core hardware (still the prediction).
+    Expected impact (confirmed): +80-118 Elo on the SF-ladder at 4 threads.
 
 G3. Principal Variation Search ✅ COMPLETE
     - Refactor ab_search: first move searched with full window, subsequent
