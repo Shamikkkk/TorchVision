@@ -36,6 +36,11 @@ move-ordering thumb. (G9 proved the forcing approach fails: −362 Elo. Closed.)
    understates them — both sides gain the ply, so the advantage cancels. (June 2026:
    self-play called SMP "neutral" at 49%; the SF-ladder showed +80-118 Elo.)
 7. The live engine runs PeSTO+Tal via `--no-nnue`. Do not ship NNUE as eval.
+8. RUN-TO-RUN VARIANCE IS REAL. Identical-config 100-game runs have been
+   observed 14pp (~97 Elo) apart (IID vs SF-1700: 46.5% then 60.5%). A single
+   100g leg never overrides pooled multi-instrument evidence; anchors carry
+   their own CI. When a script may run twice, use tee -a (append) or unique
+   log names — logs were overwritten in the IID experiment.
 
 ---
 
@@ -62,15 +67,19 @@ Anchor: commit `b8e25f0` · binary md5 `587567f2bbd5ce54e40481b7cc9ccea6` · `--
 2. **DYNAMIC** — capped dynamic-eval tiebreak (DYNAMIC_BONUS, default 0, in EVAL not
    ordering). Small term rewarding initiative toward the enemy king, hard-capped
    ~15-25cp so it only breaks near-ties. Measure vs T1 ~1721 + the style anchor.
+   STATUS: ACTIVE — next experiment.
 3. **BEAUTIFUL** — emerges from 1+2 over the existing Syzygy endgame base.
 4. **PERSONALITY** — G13 taunts, G15 visual attack cues (pure frontend, no Elo risk).
 
-**Open fork:** the June 5-7 session deleted IID, LMP, and depth-dependent NMP from
-search.rs to chase a "regression" that turned out to be largely a thread-count artifact
-(single-thread rebuild compared against a 4-thread historical number). These are
-standard +Elo techniques when correct. Re-add ONE at a time, each SPRT'd vs T1 ~1721,
-using the Reckless engine source (open, Rust, TCEC-level — codedeliveryservice/Reckless)
-as a working reference for thresholds and the SE/IID interaction. Do NOT bulk-re-add.
+**Re-add fork: CLOSED (July 2, 2026).** IID was re-added cleanly (SE-gate fix:
+original_tt_entry captured pre-IID so SE can't fire on IID's shallow entry) and
+measured NEUTRAL across 600 games vs the T1 anchor: self-play 48.75% (200g),
+vs SF-1900 34.25% (200g, anchor 33.8%), vs SF-1700 53.5% (200g, anchor 44.3% —
+not credited: the two identical-config 100g halves were 46.5%/60.5%, disagreeing
+by more than the effect). IID_ENABLE stays default false; code dormant, SE fix
+retained. Since LMP-without-IID is catastrophic (June data), LMP and dep-NMP are
+PARKED — the trio only plausibly pays as a tuned package, and Elo-hunting it is
+off-mission. Raw data: backend/scripts/gauntlet/results/iid_experiment/.
 
 **NNUE-as-eval: SHELVED.** First trusted net (expE) lost to PeSTO by ~700 Elo; CPU-only
 hardware can't train a competitive net. Pipeline preserved for when the RTX 3050
@@ -117,7 +126,9 @@ Don't `taskkill` uvicorn — Ctrl+C in its terminal.
 - **Engine features live now:** alpha-beta + PVS + aspiration + NMP + LMR + killers +
   countermove + qsearch + SEE + singular extensions + check-extension ply cap + full
   UCI time mgmt + Lazy SMP (validated) + incremental NNUE accumulator (dormant) +
-  31-GM opening book + Syzygy. NOT live (deleted June 7, see fork): IID, LMP, dep-NMP.
+  31-GM opening book + Syzygy. Dormant behind default-off params: IID (IID_ENABLE,
+  measured neutral July 2026), G9 SPEC_BONUS. Deleted and parked: LMP, dep-NMP
+  (predicted to fail without IID).
 - **G9 dormant:** SPEC_BONUS param exists, default 0, byte-identical to baseline. Closed.
 
 ---
@@ -126,7 +137,7 @@ Don't `taskkill` uvicorn — Ctrl+C in its terminal.
 
 - Don't make code decisions on <100-game samples; don't use self-play for depth/SMP.
 - Don't ship NNUE as eval (runs --no-nnue).
-- Don't bulk-re-add IID/LMP/dep-NMP — one at a time, SPRT'd vs T1 ~1721.
+- Don't reopen IID/LMP/dep-NMP without explicit sign-off — measured/parked July 2026.
 - Don't run `uvicorn --workers >1` (in-memory game state).
 - Don't import chess.js in backend or python-chess in frontend.
 - Don't bundle two changes into one experiment.

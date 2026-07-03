@@ -2124,3 +2124,28 @@ Phase D4 target:    ~3200+ ELO (+ iteration, larger nets)
 Phase E (DEFERRED): ~3400+ ELO (+ MCTS hybrid)
 
 <!-- END verbatim archive of CLAUDE.md @ c26d387 -->
+
+## IID re-add experiment — CLOSED NEUTRAL (July 2, 2026)
+
+The IID re-add experiment (July 2, 2026) is CLOSED as NEUTRAL. IID was re-implemented
+in engine/src/search.rs behind UCI param IID_ENABLE (AtomicBool, default false) with
+the SE-gate fix (original_tt_entry captured before IID runs, so singular extension
+cannot fire on the shallow depth-2 entry IID writes). No-op proof passed (10/10
+byte-identical at default; 2/10 differ when on). It was then measured — 600 games
+total at Threads=1, TC 10+0.1, vs the T1 anchor (44.3% vs SF-1700, 33.8% vs SF-1900):
+  - Self-play IID-on vs IID-off, 200 games (two 100g invocations): 50.5% and 47.0%,
+    pooled 48.75% → null.
+  - vs SF-1900, 200 games (two invocations): 37.0% and 31.5%, pooled 34.25% vs anchor
+    33.8% → null.
+  - vs SF-1700, 200 games (two invocations): 46.5% and 60.5%, pooled 53.5% vs anchor
+    44.3% → nominal +9pp, but the two identical-config halves disagree by more than
+    the effect size (~97 Elo apart), it's a single ~1.9σ leg out of three instruments,
+    and it is NOT credited.
+VERDICT: IID_ENABLE stays default FALSE; code stays dormant (the SE fix is retained —
+it is correct code). Likely mechanism: killers+countermove+history already order
+TT-miss nodes well enough that the depth-2 sub-search's benefit ≈ its overhead at
+fast TC. DOWNSTREAM: June data showed LMP-without-IID is catastrophic, so with IID
+neutral, LMP-alone is predicted to fail → LMP and dep-NMP are PARKED (not next).
+Elo-hunting the trio is off-mission. Next active experiment: DYNAMIC_BONUS.
+Note: the two script invocations overwrote logs (tee without -a) but PGNs appended;
+raw data is backend/scripts/gauntlet/results/iid_experiment/ (200-game PGNs).
