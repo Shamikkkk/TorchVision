@@ -81,6 +81,7 @@ fn main() {
                 println!("option name CASTLING_BONUS type spin default 80 min 20 max 200");
                 println!("option name EARLY_QUEEN_PENALTY type spin default 60 min 15 max 120");
                 println!("option name IID_ENABLE type check default false");
+                println!("option name DYNAMIC_BONUS type spin default 0 min 0 max 60");
                 println!("uciok");
                 io::stdout().flush().ok();
             }
@@ -138,7 +139,7 @@ fn main() {
                         name @ ("tal_aggression" | "futility_margin_d1" | "futility_margin_d2" |
                                 "aspiration_delta" | "nmp_reduction" | "lmr_move_index" |
                                 "se_beta_margin" | "queen_attack_wt" | "castling_bonus" |
-                                "early_queen_penalty" | "spec_bonus") => {
+                                "early_queen_penalty" | "spec_bonus" | "dynamic_bonus") => {
                             if let Ok(v) = tokens[4].parse::<i32>() {
                                 set_tune_param(name, v);
                             }

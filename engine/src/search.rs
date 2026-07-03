@@ -17,6 +17,7 @@ static TUNE_SE_BETA_MARGIN:      AtomicI32 = AtomicI32::new(50);
 static TUNE_QUEEN_ATTACK_WT:     AtomicI32 = AtomicI32::new(40);
 static TUNE_CASTLING_BONUS:      AtomicI32 = AtomicI32::new(80);
 static TUNE_EARLY_QUEEN_PENALTY: AtomicI32 = AtomicI32::new(60);
+static TUNE_DYNAMIC_BONUS:       AtomicI32 = AtomicI32::new(0);   // 0 = off (exact no-op)
 
 static IID_ENABLE: AtomicBool = AtomicBool::new(false);
 
@@ -37,6 +38,7 @@ pub fn set_tune_param(name: &str, value: i32) {
         "queen_attack_wt"     => TUNE_QUEEN_ATTACK_WT.store(value, Ordering::Relaxed),
         "castling_bonus"      => TUNE_CASTLING_BONUS.store(value, Ordering::Relaxed),
         "early_queen_penalty" => TUNE_EARLY_QUEEN_PENALTY.store(value, Ordering::Relaxed),
+        "dynamic_bonus"       => TUNE_DYNAMIC_BONUS.store(value, Ordering::Relaxed),
         _ => {}
     }
 }
@@ -634,6 +636,62 @@ fn tal_bonuses(board: &Board) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
+// Dynamic-initiative tiebreak (DYNAMIC_BONUS, default 0 = skipped entirely)
+// ---------------------------------------------------------------------------
+
+/// One side's built-up initiative against the enemy king, hard-capped at `cap`.
+/// Rewards the ATTACKER's pressure — pieces bearing on the enemy king zone and
+/// heavy pieces on own-half-open files toward the king. Distinct from the G8v2
+/// exposure term above, which is gated on the DEFENDER's weak shield and counts
+/// pieces physically inside the zone.
+fn side_initiative(
+    board: &Board, cap: i32, enemy_king_sq: u8,
+    own_minors_majors: u64, own_pawns: u64, own_heavy: u64, occupied: u64,
+) -> i32 {
+    // a) Own non-pawn pieces attacking any square of the enemy king zone.
+    let mut zone = king_zone(enemy_king_sq);
+    let mut attackers = 0u64;
+    while zone != 0 {
+        let sq = pop_lsb(&mut zone);
+        attackers |= movegen::attackers_to(board, sq, occupied) & own_minors_majors;
+    }
+    let att_count = (attackers.count_ones() as i32).min(3);
+
+    // b) King file ±1: own-half-open (no own pawn) with an own rook/queen on it.
+    let kf = (enemy_king_sq % 8) as i32;
+    let mut open_files = 0i32;
+    for f in (kf - 1).max(0)..=(kf + 1).min(7) {
+        let fmask = file_mask(f as u8);
+        if own_pawns & fmask == 0 && own_heavy & fmask != 0 {
+            open_files += 1;
+        }
+    }
+    let file_count = open_files.min(2);
+
+    (att_count * (cap / 4) + file_count * (cap / 4)).min(cap)
+}
+
+/// White-relative dynamic-initiative term: white's capped initiative minus
+/// black's, so the eval stays perspective-correct (same convention as
+/// tal_bonuses). Each side can never exceed `cap` centipawns.
+fn dynamic_initiative(board: &Board, cap: i32) -> i32 {
+    let occupied = board.occupied();
+    let wk_sq = board.white_kings.trailing_zeros() as u8;
+    let bk_sq = board.black_kings.trailing_zeros() as u8;
+
+    let w_pieces = board.white_knights | board.white_bishops
+                 | board.white_rooks   | board.white_queens;
+    let b_pieces = board.black_knights | board.black_bishops
+                 | board.black_rooks   | board.black_queens;
+
+    let w = side_initiative(board, cap, bk_sq, w_pieces, board.white_pawns,
+                            board.white_rooks | board.white_queens, occupied);
+    let b = side_initiative(board, cap, wk_sq, b_pieces, board.black_pawns,
+                            board.black_rooks | board.black_queens, occupied);
+    w - b
+}
+
+// ---------------------------------------------------------------------------
 // Tapered PeSTO evaluation
 // ---------------------------------------------------------------------------
 
@@ -684,7 +742,14 @@ pub fn evaluate(board: &Board) -> i32 {
     // Add Tal-style bonuses (white-relative, then flip for STM)
     let tal_agg = TUNE_TAL_AGGRESSION.load(Ordering::Relaxed) as f32 / 10.0;
     let tal = (tal_bonuses(board) as f32 * tal_agg) as i32;
-    let score = pst_score + tal;
+    let mut score = pst_score + tal;
+
+    // DYNAMIC_BONUS tiebreak: added outside the TAL_AGGRESSION multiplier so
+    // the per-side hard cap is exact centipawns. 0 (default) skips everything.
+    let dyn_cap = TUNE_DYNAMIC_BONUS.load(Ordering::Relaxed);
+    if dyn_cap > 0 {
+        score += dynamic_initiative(board, dyn_cap);
+    }
 
     if board.side_to_move { score } else { -score }
 }
