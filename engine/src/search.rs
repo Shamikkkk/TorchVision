@@ -18,6 +18,12 @@ static TUNE_QUEEN_ATTACK_WT:     AtomicI32 = AtomicI32::new(40);
 static TUNE_CASTLING_BONUS:      AtomicI32 = AtomicI32::new(80);
 static TUNE_EARLY_QUEEN_PENALTY: AtomicI32 = AtomicI32::new(60);
 
+static IID_ENABLE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_iid_enable(v: bool) {
+    IID_ENABLE.store(v, Ordering::Relaxed);
+}
+
 /// Set a tunable search/eval parameter by name (called from UCI setoption handler).
 pub fn set_tune_param(name: &str, value: i32) {
     match name {
@@ -1061,8 +1067,11 @@ fn ab_search(
     // --- TT probe ---
     let hash = board.zobrist_hash();
     let mut tt_move: Option<(u8, u8)> = None;
+    // Capture the pre-IID TT entry so SE only fires on genuine high-depth evidence,
+    // not on the shallow entry that IID itself writes.
+    let original_tt_entry = tt.probe(hash);
 
-    if let Some(entry) = tt.probe(hash) {
+    if let Some(entry) = original_tt_entry {
         // Always use the best move for ordering (even from older generations)
         tt_move = entry.best_move();
         // Only trust scores from the current generation (same iterative deepening depth)
@@ -1100,12 +1109,23 @@ fn ab_search(
         }
     }
 
+    // --- Internal Iterative Deepening ---
+    // If no TT move, run a reduced-depth search to seed the TT before move ordering.
+    // allow_null=false keeps the sub-search cheap. original_tt_entry (captured above)
+    // ensures SE doesn't fire on the shallow entry IID writes.
+    if IID_ENABLE.load(Ordering::Relaxed) && tt_move.is_none() && depth >= 4 && !in_check {
+        ab_search(board, depth - 2, alpha, beta, ply, killers, history, counter_moves, prev_move, network, false, nodes, node_limit, deadline, stop, tt);
+        tt_move = tt.probe(hash).and_then(|e| e.best_move());
+    }
+
     // --- Singular Extension ---
     // If the TT move is significantly better than all alternatives (tested
     // by a reduced-depth search excluding it), extend its search by 1 ply.
+    // Gate on original_tt_entry (not a fresh probe) so IID's shallow write
+    // cannot falsely satisfy the depth condition and trigger SE.
     let mut singular_extension: i32 = 0;
     if let Some(tt_mv) = tt_move {
-        if let Some(entry) = tt.probe(hash) {
+        if let Some(entry) = original_tt_entry {
             let tt_score_raw = tt_score_probe(entry.score, ply);
             if entry.depth as u32 + 3 >= depth
                 && depth >= 6

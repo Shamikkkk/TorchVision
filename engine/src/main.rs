@@ -5,7 +5,7 @@ mod search;
 
 use board::Board;
 use nnue::Network;
-use search::{best_move, best_move_nodes, parse_uci_move, set_tune_param};
+use search::{best_move, best_move_nodes, parse_uci_move, set_tune_param, set_iid_enable};
 use std::io::{self, BufRead, Write};
 
 struct Engine {
@@ -80,6 +80,7 @@ fn main() {
                 println!("option name QUEEN_ATTACK_WT type spin default 40 min 15 max 80");
                 println!("option name CASTLING_BONUS type spin default 80 min 20 max 200");
                 println!("option name EARLY_QUEEN_PENALTY type spin default 60 min 15 max 120");
+                println!("option name IID_ENABLE type check default false");
                 println!("uciok");
                 io::stdout().flush().ok();
             }
@@ -141,6 +142,9 @@ fn main() {
                             if let Ok(v) = tokens[4].parse::<i32>() {
                                 set_tune_param(name, v);
                             }
+                        }
+                        "iid_enable" => {
+                            set_iid_enable(tokens[4].eq_ignore_ascii_case("true"));
                         }
                         _ => {}
                     }
