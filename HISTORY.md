@@ -2149,3 +2149,51 @@ neutral, LMP-alone is predicted to fail → LMP and dep-NMP are PARKED (not next
 Elo-hunting the trio is off-mission. Next active experiment: DYNAMIC_BONUS.
 Note: the two script invocations overwrote logs (tee without -a) but PGNs appended;
 raw data is backend/scripts/gauntlet/results/iid_experiment/ (200-game PGNs).
+
+## DYNAMIC_BONUS=20 experiment — CLOSED, STYLE CLAUSE FAILED (July 4, 2026)
+
+The DYNAMIC_BONUS experiment (PATH TO THE GOAL item 2) is CLOSED. The term was
+implemented in engine/src/search.rs behind UCI param DYNAMIC_BONUS (default 0,
+no-op proof passed), a capped eval-side bonus rewarding initiative toward the
+enemy king (attackers standing on the board, heavy pieces on files), hard-capped
+so it only breaks near-ties. Measured at DYNAMIC_BONUS=20, Threads=1, TC 10+0.1,
+concurrency=1, no book, 200 games vs the T1 anchor (~1721; agg 77.2% /
+kz_sac 31.0%).
+
+VERDICT: Clause 2 (Elo floor) PASS. Clause 1 (style: kz_sac_rate must not drop)
+FAIL. Param stays dormant at default 0.
+
+Elo results (clause 2 — PASS):
+
+| Opponent | Score | Elo diff | Anchor | Delta |
+|----------|-------|----------|--------|-------|
+| SF-1700  | 48-46-6 → 51.0% | +6.9 ±66.7 | 44.3% | +6.7pp |
+| SF-1900  | 34-56-10 → 39.0% | −77.7 ±66.9 | 33.8% | +5.2pp |
+
+Implied ~1765 vs anchor ~1721 — nominal +44, within noise. The Elo floor
+comfortably held; if anything the term was slightly positive for strength.
+
+Style results (clause 1 — FAIL):
+
+| Leg | agg% | kz_sac% | Anchor kz_sac |
+|-----|------|---------|---------------|
+| vs SF-1700 (100g) | 76.0% | 15.0% | 31.0% |
+| vs SF-1900 (100g) | 82.0% | 26.0% | 31.0% |
+| Pooled (200g)     | 79.0% | 20.5% | 31.0% |
+
+kz_sac_rate dropped 31.0% → 20.5% pooled (−10.5pp, ~2.7σ), with BOTH legs below
+the anchor. This is the opposite of the design intent and fails clause 1.
+
+MECHANISM: the term pays for attackers standing on the board and heavy pieces on
+files; a sacrifice removes both, so it incentivizes holding pressure over cashing
+in. Initiative-presence ≠ sacrifice incentive.
+
+STRUCTURAL NOTE: total eval-side king-attack budget (~≤150cp) can never price a
+~300cp piece sac as compensated; sacs come only from search resolving the attack.
+DO NOT retry larger caps — bigger cap = stronger anti-sac incentive.
+
+OPEN DECISION (not made here): a compensation-gated v2 (bonus applies only when
+material was invested) vs moving the dynamic-style goal entirely to the
+personality layer (item 4). Raw data:
+backend/scripts/gauntlet/results/dynamic_bonus_2026-07/ (two 100-game PGNs;
+per-leg style computed with backend/scripts/aggression_rate.py).

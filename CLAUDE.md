@@ -67,7 +67,10 @@ Anchor: commit `b8e25f0` · binary md5 `587567f2bbd5ce54e40481b7cc9ccea6` · `--
 2. **DYNAMIC** — capped dynamic-eval tiebreak (DYNAMIC_BONUS, default 0, in EVAL not
    ordering). Small term rewarding initiative toward the enemy king, hard-capped
    ~15-25cp so it only breaks near-ties. Measure vs T1 ~1721 + the style anchor.
-   STATUS: ACTIVE — next experiment.
+   STATUS: MEASURED July 2026 — clause 1 FAIL: DB=20 held Elo (nominal +44) but
+   DROPPED kz_sac_rate 31.0%→20.5%. Mechanism: rewards standing attackers; sacs
+   remove them. Param dormant at 0. Open decision: compensation-gated v2 vs move
+   to personality.
 3. **BEAUTIFUL** — emerges from 1+2 over the existing Syzygy endgame base.
 4. **PERSONALITY** — G13 taunts, G15 visual attack cues (pure frontend, no Elo risk).
 
