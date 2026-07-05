@@ -18,6 +18,7 @@ static TUNE_QUEEN_ATTACK_WT:     AtomicI32 = AtomicI32::new(40);
 static TUNE_CASTLING_BONUS:      AtomicI32 = AtomicI32::new(80);
 static TUNE_EARLY_QUEEN_PENALTY: AtomicI32 = AtomicI32::new(60);
 static TUNE_DYNAMIC_BONUS:       AtomicI32 = AtomicI32::new(0);   // 0 = off (exact no-op)
+static TUNE_COMP_BONUS:          AtomicI32 = AtomicI32::new(0);   // 0 = off (exact no-op)
 
 static IID_ENABLE: AtomicBool = AtomicBool::new(false);
 
@@ -39,6 +40,7 @@ pub fn set_tune_param(name: &str, value: i32) {
         "castling_bonus"      => TUNE_CASTLING_BONUS.store(value, Ordering::Relaxed),
         "early_queen_penalty" => TUNE_EARLY_QUEEN_PENALTY.store(value, Ordering::Relaxed),
         "dynamic_bonus"       => TUNE_DYNAMIC_BONUS.store(value, Ordering::Relaxed),
+        "comp_bonus"          => TUNE_COMP_BONUS.store(value, Ordering::Relaxed),
         _ => {}
     }
 }
@@ -692,6 +694,75 @@ fn dynamic_initiative(board: &Board, cap: i32) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
+// Compensation-gated attack term (COMP_BONUS, default 0 = skipped entirely)
+// ---------------------------------------------------------------------------
+
+/// White-relative compensation term: a material-down side that kept its queen
+/// and has a live attack on the enemy king retains partial eval credit for the
+/// deficit. Pays ONLY when down 100..350cp, so the value survives a sacrifice
+/// instead of vanishing with the sacrificed piece (the DYNAMIC_BONUS failure
+/// mode: it rewarded attackers STANDING on the board). Hard-capped at `cap`;
+/// a piece-down attack still evaluates as worse than material equality.
+fn compensation_term(board: &Board, cap: i32) -> i32 {
+    // g1 (cheapest): compensation is queen-led — no queens, nothing to do.
+    if board.white_queens == 0 && board.black_queens == 0 {
+        return 0;
+    }
+
+    // g2: simple material count matching SEE values, computed once and shared.
+    // Only one side can be down; 100..350cp is the compensation window
+    // (below = gambit noise, above = usually just lost).
+    let mat = |p: u64, n: u64, b: u64, r: u64, q: u64| -> i32 {
+        p.count_ones() as i32 * 100
+            + n.count_ones() as i32 * 320
+            + b.count_ones() as i32 * 330
+            + r.count_ones() as i32 * 500
+            + q.count_ones() as i32 * 900
+    };
+    let w_mat = mat(board.white_pawns, board.white_knights, board.white_bishops,
+                    board.white_rooks, board.white_queens);
+    let b_mat = mat(board.black_pawns, board.black_knights, board.black_bishops,
+                    board.black_rooks, board.black_queens);
+    let deficit = (w_mat - b_mat).abs();
+    if deficit < 100 || deficit > 350 {
+        return 0;
+    }
+
+    let white_down = w_mat < b_mat;
+    let (own_queens, own_minors_majors, enemy_king_sq) = if white_down {
+        (board.white_queens,
+         board.white_knights | board.white_bishops | board.white_rooks | board.white_queens,
+         board.black_kings.trailing_zeros() as u8)
+    } else {
+        (board.black_queens,
+         board.black_knights | board.black_bishops | board.black_rooks | board.black_queens,
+         board.white_kings.trailing_zeros() as u8)
+    };
+    // g1 per-side: the DOWN side must still have its queen.
+    if own_queens == 0 {
+        return 0;
+    }
+
+    // g3 (most expensive): ≥2 own non-pawn pieces attacking the enemy king
+    // zone (same zone-attacker machinery as side_initiative).
+    let occupied = board.occupied();
+    let mut zone = king_zone(enemy_king_sq);
+    let mut attackers = 0u64;
+    while zone != 0 {
+        let sq = pop_lsb(&mut zone);
+        attackers |= movegen::attackers_to(board, sq, occupied) & own_minors_majors;
+    }
+    let att_count = attackers.count_ones() as i32;
+    if att_count < 2 {
+        return 0;
+    }
+
+    // Graduated, hard-capped: at cap=100, 2 attackers → 50, 3 → 75, 4+ → 100.
+    let comp = (att_count.min(4) * (cap / 4)).min(cap);
+    if white_down { comp } else { -comp }
+}
+
+// ---------------------------------------------------------------------------
 // Tapered PeSTO evaluation
 // ---------------------------------------------------------------------------
 
@@ -749,6 +820,13 @@ pub fn evaluate(board: &Board) -> i32 {
     let dyn_cap = TUNE_DYNAMIC_BONUS.load(Ordering::Relaxed);
     if dyn_cap > 0 {
         score += dynamic_initiative(board, dyn_cap);
+    }
+
+    // COMP_BONUS compensation-gated attack term: same white-relative
+    // convention, exact centipawn cap. 0 (default) skips everything.
+    let comp_cap = TUNE_COMP_BONUS.load(Ordering::Relaxed);
+    if comp_cap > 0 {
+        score += compensation_term(board, comp_cap);
     }
 
     if board.side_to_move { score } else { -score }
