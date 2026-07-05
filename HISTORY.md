@@ -2197,3 +2197,75 @@ material was invested) vs moving the dynamic-style goal entirely to the
 personality layer (item 4). Raw data:
 backend/scripts/gauntlet/results/dynamic_bonus_2026-07/ (two 100-game PGNs;
 per-leg style computed with backend/scripts/aggression_rate.py).
+
+## COMP_BONUS — CLOSED, eval-side beauty exhausted (July 5, 2026)
+
+Final eval-side beauty experiment: compensation-gated attack term inverting the
+DYNAMIC_BONUS incentive — pay for attack signals ONLY when material-down
+(100..350cp window, queen-led, >=2 non-pawn zone attackers), so the position
+AFTER a sacrifice holds eval value. TUNE_COMP_BONUS in evaluate() (HCE path),
+white-relative, graduated min(attackers,4)*cap/4, hard cap; measured at cap=100.
+DYNAMIC_BONUS untouched at 0 (one variable). Code at commit ce92f63; base 0f19f77.
+
+NO-OP PROOF (both halves):
+- Default (0): 10/10 byte-identical bestmove + final info line vs the preserved
+  HEAD binary (0f19f77) on the standard suite, depth 8, --no-nnue both sides.
+- Gate-alive: the standard suite is material-EQUAL, so the g2 gate cannot fire
+  there. On 3 material-imbalanced attack FENs, COMP_BONUS=100 changed the
+  reported score on 2/3 (piece-down hunt -261 -> -231; black-down attack
+  -95 -> -112; the third resolved to forced mate, masking the term).
+
+PREDICTION (written before games): pooled kz_sac_rate 31.0% -> 35-42%; sacs_pg
+up from 1.30; implied Elo within -20..+15 of ~1721; no crashes.
+OUTCOME: mostly did NOT hold. kz_sac 32.7% (below range); sacs_pg 1.23 (down,
+not up); Elo +27 nominal (floor held, upper bound exceeded); no crashes (one
+"bestmove (none)" loss, game 61 vs SF-1700 — identical event exists in the
+June baseline log, pre-existing ~1/200-300 game edge, not the tripwire).
+
+GAUNTLET (clean 200 games, TC 10+0.1, Threads=1, --no-nnue, COMP_BONUS=100):
+| Leg              | W-L-D    | Score | Elo diff   | Implied |
+|------------------|----------|-------|------------|---------|
+| vs SF-1700 (100) | 49-40-11 | 54.5% | +31 +/- 64 | ~1731   |
+| vs SF-1900 (100) | 30-67-3  | 31.5% | -135 +/- 73| ~1765   |
+Implied (leg average, baseline method): ~1748 vs anchor ~1721.
+Legs disagree in sign vs anchors (SF-1700 +10.2pp, SF-1900 -2.3pp) — the
+single-instrument scatter of working rule 8, same pattern as IID.
+
+STYLE vs T1 anchor:
+| Metric        | Anchor | SF-1700 | SF-1900 | Pooled (199g) |
+|---------------|--------|---------|---------|---------------|
+| aggression    | 77.2%  | 76.8%   | 73.0%   | 74.9%         |
+| kz_sac_rate   | 31.0%  | 39.4%   | 26.0%   | 32.7%         |
+| sacs_per_game | 1.30   | 1.25    | 1.21    | 1.23          |
+| kz_sacs_pg    | 0.35   | 0.43    | 0.29    | 0.36          |
+
+CLAUSE VERDICTS (pre-committed):
+1. DYNAMIC UP — FAIL. Pooled kz_sac_rate 32.7% < 35% threshold. All style
+   metrics within noise of anchor: the term did approximately NOTHING to style
+   (unlike DYNAMIC_BONUS, which actively inverted sacs).
+2. SENSIBLE HELD — PASS. Implied ~1748 >= 1701 floor.
+
+BRACKETING ARGUMENT — eval-side sac incentives PROVEN exhausted: the two
+instruments bracket the design space. Presence-reward (DYNAMIC_BONUS: pay for
+attackers standing on the board) INVERTED sacs (31.0 -> 20.5%). Compensation-
+reward (COMP_BONUS: pay only after material is invested) was INERT (32.7% vs
+31.0%). Neither direction moves the sac rate up; sacs come from search
+resolving attacks, not from leaf bonuses. Both params dormant at 0, no-op
+proven. Beauty work moves to the personality layer (G13/G15).
+
+SIDE-FINDING (uncredited): both dormant terms were nominally Elo-POSITIVE at
+the caps tested (DB=20 +44, CB=100 +27 vs the ~1721 anchor) — neither credited
+(single-leg scatter exceeds effect; see rule 8) but both are SPSA candidates
+if the project ever Elo-hunts. Do not reopen for style.
+
+INCIDENT (phantom process): the first gauntlet invocation was reported
+"killed" by the harness but the bash/cutechess tree survived detached and ran
+to completion; a continuation started on that false premise overlapped it for
+53 minutes (concurrency=1 violated, interleaved PGN appends, ~86 game records
+mangled). Contaminated data quarantined in
+results/comp_bonus_2026-07/contaminated_run1/ (NOTE.md documents it); the
+verdict uses only the 82 pre-overlap games (validated against the run log:
+40-32-10) plus 118 games played after verified process cleanup. Countermeasure:
+working rule 9 + tasklist guard in run_comp_bonus_gauntlet_finish.sh.
+
+Raw data: backend/scripts/gauntlet/results/comp_bonus_2026-07/.

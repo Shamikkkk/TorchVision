@@ -41,6 +41,11 @@ move-ordering thumb. (G9 proved the forcing approach fails: −362 Elo. Closed.)
    100g leg never overrides pooled multi-instrument evidence; anchors carry
    their own CI. When a script may run twice, use tee -a (append) or unique
    log names — logs were overwritten in the IID experiment.
+9. BACKGROUND-TASK "killed" NOTIFICATIONS ARE UNRELIABLE on Windows — the
+   process tree may survive detached. Verify via Get-Process
+   (cutechess/pyro/stockfish) before starting or restarting any gauntlet.
+   Gauntlet scripts must guard against running engines (see
+   run_comp_bonus_gauntlet_finish.sh).
 
 ---
 
@@ -67,12 +72,16 @@ Anchor: commit `b8e25f0` · binary md5 `587567f2bbd5ce54e40481b7cc9ccea6` · `--
 2. **DYNAMIC** — capped dynamic-eval tiebreak (DYNAMIC_BONUS, default 0, in EVAL not
    ordering). Small term rewarding initiative toward the enemy king, hard-capped
    ~15-25cp so it only breaks near-ties. Measure vs T1 ~1721 + the style anchor.
-   STATUS: MEASURED July 2026 — clause 1 FAIL: DB=20 held Elo (nominal +44) but
-   DROPPED kz_sac_rate 31.0%→20.5%. Mechanism: rewards standing attackers; sacs
-   remove them. Param dormant at 0. Open decision: compensation-gated v2 vs move
-   to personality.
+   STATUS: EVAL-SIDE CLOSED (July 5, 2026): both instruments measured.
+   DYNAMIC_BONUS=20 (presence-reward): Elo held, kz_sac DOWN 31.0→20.5%.
+   COMP_BONUS=100 (compensation-reward): Elo held (~1748 vs ~1721), kz_sac
+   FLAT 32.7% vs 31.0% (threshold 35%). Eval-side sac incentives PROVEN
+   exhausted — sacs come from search resolving attacks, not from leaf bonuses.
+   Both params dormant at 0. Do not reopen without sign-off. Beauty work
+   proceeds at the personality layer.
 3. **BEAUTIFUL** — emerges from 1+2 over the existing Syzygy endgame base.
 4. **PERSONALITY** — G13 taunts, G15 visual attack cues (pure frontend, no Elo risk).
+   STATUS: ACTIVE — next work.
 
 **Re-add fork: CLOSED (July 2, 2026).** IID was re-added cleanly (SE-gate fix:
 original_tt_entry captured pre-IID so SE can't fire on IID's shallow entry) and
