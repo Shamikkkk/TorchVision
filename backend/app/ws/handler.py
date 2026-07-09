@@ -15,6 +15,7 @@ from ..chess_utils.board import (
     san_history,
     uci_to_san,
 )
+from ..chess_utils.game_store import save_game
 from ..chess_utils.opening_book import is_book_move
 from ..engine.pyro_voice import PyroVoice, game_end_fields, voice_fields
 from ..engine.suggest import suggest_move
@@ -74,6 +75,11 @@ def _pyro_result(winner: str | None, human_color: str) -> str:
         return "draw"
     return "loss" if winner == human_color else "win"
 
+
+def _persist(board: _chess.Board, st: dict, human_color: str) -> None:  # type: ignore[type-arg]
+    """Fail-open PGN persistence of a finished game."""
+    save_game(board, human_color=human_color, status=st.get("status", "?"), winner=st.get("winner"))
+
 async def ws_game_endpoint(websocket: WebSocket) -> None:
     await manager.connect(websocket)
     board = new_board()
@@ -109,6 +115,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                 st = _state(board, white_ms=white_ms, black_ms=black_ms, winner=winner, human_color=human_color)
                 st.update(game_end_fields(voice, _pyro_result(st.get("winner"), human_color), enabled=voice_enabled))
                 await manager.send(websocket, st)
+                _persist(board, st, human_color)
                 return
 
             await manager.send(websocket, {"type": "tick", "white_ms": white_ms, "black_ms": black_ms})
@@ -181,6 +188,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                 st = _state(board, resigned=True, white_ms=white_ms, black_ms=black_ms, human_color=human_color)
                 st.update(game_end_fields(voice, _pyro_result(st.get("winner"), human_color), enabled=voice_enabled))
                 await manager.send(websocket, st)
+                _persist(board, st, human_color)
                 continue
 
             if msg_type == "move" and not board.is_game_over() and not resigned and not game_over:
@@ -209,6 +217,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                     st = _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color)
                     st.update(game_end_fields(voice, _pyro_result(st.get("winner"), human_color), enabled=voice_enabled))
                     await manager.send(websocket, st)
+                    _persist(board, st, human_color)
                     continue
 
                 # Send state immediately so the frontend sees the human's move
@@ -315,6 +324,8 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                             ply=len(board.move_stack), enabled=voice_enabled, tb_wdl=tb_wdl,
                         ))
                     await manager.send(websocket, st)
+                    if board.is_game_over():
+                        _persist(board, st, human_color)
 
                 except Exception:
                     logger.exception(

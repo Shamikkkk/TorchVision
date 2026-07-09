@@ -9,6 +9,7 @@ from .config import settings
 from .engine.model import PyroEngine
 from .routes import analyze as analyze_routes
 from .routes import engine as engine_routes
+from .routes import local_games as local_games_routes
 from .ws.handler import ws_game_endpoint
 
 logging.basicConfig(level=settings.log_level.upper())
@@ -53,4 +54,5 @@ async def health():
 
 app.include_router(engine_routes.router, prefix="/api")
 app.include_router(analyze_routes.router, prefix="/api/analyze")
+app.include_router(local_games_routes.router, prefix="/api")
 app.add_api_websocket_route("/ws/game", ws_game_endpoint)

@@ -5,11 +5,16 @@ games must persist as valid PGN (fail-open).
 Run from backend/:  python -m unittest discover -s tests -v
 """
 
+import io
+import tempfile
 import unittest
+from pathlib import Path
 
 import chess
+import chess.pgn
 
 from app.chess_utils.board import result_of
+from app.chess_utils.game_store import save_game
 from app.engine.pyro_voice import PyroVoice, game_end_fields
 from app.ws.handler import _pyro_result, _state
 
@@ -113,6 +118,51 @@ class TestTerminalStateMessages(unittest.TestCase):
             st = _state(board_from(*moves), human_color="w")
             self.assertIn("winner", st)
             self.assertEqual(st["winner"], expected)
+
+
+class TestGameStore(unittest.TestCase):
+    def test_saves_parseable_pgn_with_result(self):
+        b = board_from(*BLACK_MATES)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = save_game(b, human_color="w", status="checkmate", winner="b", directory=Path(tmp))
+            self.assertIsNotNone(path)
+            game = chess.pgn.read_game(io.StringIO(path.read_text(encoding="utf-8")))
+            self.assertEqual(game.headers["Result"], "0-1")
+            self.assertEqual(game.headers["White"], "You")
+            self.assertEqual(game.headers["Black"], "Pyro")
+            self.assertEqual(game.headers["Termination"], "checkmate")
+            self.assertEqual(len(list(game.mainline_moves())), len(BLACK_MATES))
+
+    def test_appends_multiple_games(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            save_game(board_from(*BLACK_MATES), human_color="w", status="checkmate", winner="b", directory=Path(tmp))
+            path = save_game(board_from("e2e4"), human_color="b", status="resigned", winner="w", directory=Path(tmp))
+            stream = io.StringIO(path.read_text(encoding="utf-8"))
+            games = []
+            while True:
+                g = chess.pgn.read_game(stream)
+                if g is None:
+                    break
+                games.append(g)
+            self.assertEqual(len(games), 2)
+            self.assertEqual(games[1].headers["Result"], "1-0")
+            self.assertEqual(games[1].headers["White"], "Pyro")
+
+    def test_draw_result_string(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = save_game(chess.Board(STALEMATE_FEN), human_color="w", status="stalemate", winner=None, directory=Path(tmp))
+            game = chess.pgn.read_game(io.StringIO(path.read_text(encoding="utf-8")))
+            self.assertEqual(game.headers["Result"], "1/2-1/2")
+
+    def test_fail_open_on_bad_directory(self):
+        # A directory path that is actually a file: mkdir/open fails -> None, no raise.
+        with tempfile.NamedTemporaryFile(suffix=".notadir", delete=False) as f:
+            blocker = Path(f.name)
+        try:
+            result = save_game(board_from("e2e4"), human_color="w", status="draw", directory=blocker)
+            self.assertIsNone(result)
+        finally:
+            blocker.unlink()
 
 
 if __name__ == "__main__":
