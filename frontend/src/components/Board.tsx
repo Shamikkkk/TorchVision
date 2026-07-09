@@ -22,8 +22,13 @@ const DARK_SQ_STYLE = { backgroundColor: DARK }
 const LIGHT_SQ_STYLE = { backgroundColor: LIGHT }
 const NOTATION_STYLE = { fontSize: '11px', fontWeight: '600', color: 'rgba(0,0,0,0.45)' }
 
+// Checked once — static tint instead of pulse for reduced-motion users (G15).
+const REDUCED_MOTION =
+  typeof window !== 'undefined' &&
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
 export default function Board({ game }: Props) {
-  const { fen, boardFlipped, humanColor, turn, makeMove, status, lastMove } = game
+  const { fen, boardFlipped, humanColor, turn, makeMove, status, lastMove, heat, voiceEnabled } = game
   const gameOver = status !== 'ongoing'
   const isHumanTurn = turn === humanColor
 
@@ -113,6 +118,30 @@ export default function Board({ game }: Props) {
     return sqs
   }, [premoveSq, premove])
 
+  // G15 heat 3: ember highlight on the hunted (human) king's square.
+  const heatKingHighlight = useMemo(() => {
+    const sqs: Record<string, { background: string; animation?: string }> = {}
+    if (heat < 3 || !voiceEnabled) return sqs
+    try {
+      const chess = new Chess(fen)
+      const board = chess.board()
+      outer: for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const piece = board[r][c]
+          if (piece && piece.type === 'k' && piece.color === humanColor) {
+            sqs['abcdefgh'[c] + (8 - r)] = {
+              background:
+                'radial-gradient(circle, rgba(255, 122, 42, 0.55) 0%, rgba(255, 60, 20, 0.22) 55%, transparent 78%)',
+              ...(REDUCED_MOTION ? {} : { animation: 'pyroPulse 1.6s ease-in-out infinite' }),
+            }
+            break outer
+          }
+        }
+      }
+    } catch {}
+    return sqs
+  }, [fen, heat, voiceEnabled, humanColor])
+
   const checkHighlight = useMemo(() => {
     const sqs: Record<string, { background: string; animation: string }> = {}
     try {
@@ -138,8 +167,8 @@ export default function Board({ game }: Props) {
   }, [fen])
 
   const customSquareStyles = useMemo(
-    () => ({ ...lastMoveSqs, ...selectedHighlight, ...legalDots, ...highlightedSquares, ...premoveHighlights, ...checkHighlight }),
-    [lastMoveSqs, selectedHighlight, legalDots, highlightedSquares, premoveHighlights, checkHighlight],
+    () => ({ ...lastMoveSqs, ...selectedHighlight, ...legalDots, ...highlightedSquares, ...premoveHighlights, ...heatKingHighlight, ...checkHighlight }),
+    [lastMoveSqs, selectedHighlight, legalDots, highlightedSquares, premoveHighlights, heatKingHighlight, checkHighlight],
   )
 
   function clearAnnotations() {
