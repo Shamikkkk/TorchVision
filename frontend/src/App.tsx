@@ -314,6 +314,7 @@ export default function App() {
             <GameOverModal
               status={status}
               winner={winner}
+              turn={turn}
               moveCount={history.length}
               humanColor={humanColor}
               onRematch={() => newGame(difficulty)}

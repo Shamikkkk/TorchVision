@@ -4,6 +4,7 @@ import type { GameStatus, Side } from '../types/game'
 interface Props {
   status: GameStatus
   winner: Side | null
+  turn: Side
   moveCount: number
   humanColor: Side
   onRematch: () => void
@@ -14,6 +15,7 @@ interface Props {
 export default function GameOverModal({
   status,
   winner,
+  turn,
   moveCount,
   humanColor,
   onRematch,
@@ -29,11 +31,23 @@ export default function GameOverModal({
 
   if (status === 'ongoing') return null
 
-  const isDraw = winner === null || status === 'stalemate' || status === 'draw'
-  const pyroWon = !isDraw && winner !== humanColor
+  // Status decides whether the game was decisive; winner picks the side.
+  // If the backend omitted winner on a decisive status, derive it rather
+  // than falling back to a draw (checkmate: side to move is the mated one;
+  // resigned: only the human can resign in this app).
+  const derivedWinner: Side | null =
+    winner ??
+    (status === 'checkmate'
+      ? turn === 'w' ? 'b' : 'w'
+      : status === 'resigned'
+        ? humanColor === 'w' ? 'b' : 'w'
+        : null)
+
+  const isDraw = derivedWinner === null
+  const pyroWon = !isDraw && derivedWinner !== humanColor
 
   // Score in standard notation (white wins = 1-0, black wins = 0-1)
-  const scoreStr = isDraw ? '½–½' : winner === 'w' ? '1–0' : '0–1'
+  const scoreStr = isDraw ? '½–½' : derivedWinner === 'w' ? '1–0' : '0–1'
 
   const kicker = isDraw
     ? 'Draw'

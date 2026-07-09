@@ -94,6 +94,24 @@ def _build_history(board: chess.Board) -> list[str]:
     return result
 
 
+def result_of(board: chess.Board, status: str, *, resigner: str | None = None) -> str | None:
+    """Winner side ("w"/"b") for a terminal status, or None for draws/ongoing.
+
+    Single source of truth for result derivation — the WS handler, the voice
+    layer, and any future consumer must all go through this.
+
+    checkmate → the side that just moved (board.turn is the mated side);
+    resigned  → the opponent of *resigner*;
+    timeout   → decided by the clock, not derivable here → None;
+    stalemate / draw / ongoing → None.
+    """
+    if status == "checkmate":
+        return "b" if board.turn == chess.WHITE else "w"
+    if status == "resigned" and resigner in ("w", "b"):
+        return "b" if resigner == "w" else "w"
+    return None
+
+
 def _status(board: chess.Board) -> str:
     if board.is_checkmate():
         return "checkmate"

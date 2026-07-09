@@ -11,6 +11,7 @@ from ..chess_utils.board import (
     has_mate_in_one,
     is_sacrifice,
     new_board,
+    result_of,
     san_history,
     uci_to_san,
 )
@@ -40,8 +41,15 @@ def _state(
         "human_color": human_color,
     }
     if winner is not None:
+        # Timeout: the clock decides the winner.
         d["status"] = "timeout"
         d["winner"] = winner
+    else:
+        # Checkmate/resignation: derive the winner so the frontend never has
+        # to guess (winner-less decisive states used to render as ½–½).
+        derived = result_of(board, d["status"], resigner=human_color if resigned else None)
+        if derived is not None:
+            d["winner"] = derived
     return d
 
 
@@ -58,13 +66,13 @@ def _difficulty_movetime(d: str) -> int | None:
     return _MOVETIME.get(d, None)
 
 
-def _game_end_result(board: _chess.Board, human_color: str) -> str:
-    """Map a finished board to Pyro's result: 'win' | 'loss' | 'draw'."""
-    if board.is_checkmate():
-        loser = "w" if board.turn == _chess.WHITE else "b"
-        return "win" if loser == human_color else "loss"
-    return "draw"
-
+def _pyro_result(winner: str | None, human_color: str) -> str:
+    """Pyro's result ('win'|'loss'|'draw') from the winner the state message
+    carries — same derivation the frontend sees, so voice and UI can't
+    disagree."""
+    if winner is None:
+        return "draw"
+    return "loss" if winner == human_color else "win"
 
 async def ws_game_endpoint(websocket: WebSocket) -> None:
     await manager.connect(websocket)
@@ -99,8 +107,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
             if timed_out:
                 game_over = True
                 st = _state(board, white_ms=white_ms, black_ms=black_ms, winner=winner, human_color=human_color)
-                result = "win" if winner != human_color else "loss"
-                st.update(game_end_fields(voice, result, enabled=voice_enabled))
+                st.update(game_end_fields(voice, _pyro_result(st.get("winner"), human_color), enabled=voice_enabled))
                 await manager.send(websocket, st)
                 return
 
@@ -172,7 +179,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                     tick_task.cancel()
                 resigned = True
                 st = _state(board, resigned=True, white_ms=white_ms, black_ms=black_ms, human_color=human_color)
-                st.update(game_end_fields(voice, "win", enabled=voice_enabled))
+                st.update(game_end_fields(voice, _pyro_result(st.get("winner"), human_color), enabled=voice_enabled))
                 await manager.send(websocket, st)
                 continue
 
@@ -200,7 +207,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                     if tick_task and not tick_task.done():
                         tick_task.cancel()
                     st = _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color)
-                    st.update(game_end_fields(voice, _game_end_result(board, human_color), enabled=voice_enabled))
+                    st.update(game_end_fields(voice, _pyro_result(st.get("winner"), human_color), enabled=voice_enabled))
                     await manager.send(websocket, st)
                     continue
 
@@ -300,7 +307,7 @@ async def ws_game_endpoint(websocket: WebSocket) -> None:
                     st = _state(board, white_ms=white_ms, black_ms=black_ms, human_color=human_color)
                     if board.is_game_over():
                         st.update(game_end_fields(
-                            voice, _game_end_result(board, human_color), enabled=voice_enabled,
+                            voice, _pyro_result(st.get("winner"), human_color), enabled=voice_enabled,
                         ))
                     else:
                         st.update(voice_fields(
