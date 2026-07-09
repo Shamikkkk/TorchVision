@@ -51,6 +51,9 @@ class PyroEngine:
     """
 
     last_eval: float | None = None
+    # Syzygy WDL (mover's perspective, 2 = win) when the last best_move came
+    # from the tablebase; None otherwise. Consumed by the G13 voice layer.
+    last_tb_wdl: int | None = None
 
     def __init__(self, stockfish_path: str) -> None:
         self._stockfish_path = stockfish_path
@@ -232,6 +235,7 @@ class PyroEngine:
         """
         board = chess.Board(fen)
         legal = list(board.legal_moves)
+        self.last_tb_wdl = None
         if not legal:
             return ""
 
@@ -240,6 +244,7 @@ class PyroEngine:
             tb_move = _tablebase.best_move(board)
             if tb_move:
                 self.last_eval = 0.0
+                self.last_tb_wdl = _tablebase.last_wdl
                 logger.debug("Tablebase move: %s", tb_move.uci())
                 return tb_move.uci()
 

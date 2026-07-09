@@ -108,7 +108,12 @@ export function useGameSocket(): ExtendedGameState {
   const [bestWas, setBestWas] = useState<BestWasMessage | null>(null)
   const [moveSymbols, setMoveSymbols] = useState<Record<number, string>>({})
   const [pyroSays, setPyroSays] = useState<string | null>(null)
-  const pyroSaysTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [voiceEvent, setVoiceEvent] = useState<string | null>(null)
+  const [heat, setHeat] = useState(0)
+  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem('pyro.voice') !== 'off' } catch { return true }
+  })
+  const voiceEnabledRef = useRef(voiceEnabled)
   const historyLenRef = useRef(0)
 
   const evalAbortRef = useRef<AbortController | null>(null)
@@ -162,6 +167,13 @@ export function useGameSocket(): ExtendedGameState {
             setBoardFlipped(msg.human_color === 'b')
           }
         }
+        // G15 heat rides on states following a Pyro move
+        if (typeof msg.heat === 'number') setHeat(msg.heat)
+        // G13 taunt (display lifetime is handled by PyroSpeech)
+        if (msg.pyro_says) {
+          setPyroSays(msg.pyro_says)
+          setVoiceEvent(msg.voice_event ?? null)
+        }
       }
       if (msg.type === 'best_was') {
         setBestWas(msg)
@@ -173,9 +185,9 @@ export function useGameSocket(): ExtendedGameState {
         }
       }
       if (msg.type === 'pyro_says') {
-        if (pyroSaysTimerRef.current) clearTimeout(pyroSaysTimerRef.current)
+        // Legacy message type — still honored if the backend sends it.
         setPyroSays(msg.text)
-        pyroSaysTimerRef.current = setTimeout(() => setPyroSays(null), 4000)
+        setVoiceEvent(null)
       }
     },
     [fetchEval],
@@ -198,7 +210,9 @@ export function useGameSocket(): ExtendedGameState {
     setBestWas(null)
     setMoveSymbols({})
     setPyroSays(null)
-    wsRef.current?.send({ type: 'new_game', difficulty })
+    setVoiceEvent(null)
+    setHeat(0)
+    wsRef.current?.send({ type: 'new_game', difficulty, voice_enabled: voiceEnabledRef.current })
   }, [])
 
   const resign = useCallback(() => {
@@ -206,6 +220,14 @@ export function useGameSocket(): ExtendedGameState {
   }, [])
 
   const flipBoard = useCallback(() => setBoardFlipped((f) => !f), [])
+
+  const toggleVoice = useCallback(() => {
+    const next = !voiceEnabledRef.current
+    voiceEnabledRef.current = next
+    try { localStorage.setItem('pyro.voice', next ? 'on' : 'off') } catch {}
+    wsRef.current?.send({ type: 'voice', enabled: next })
+    setVoiceEnabled(next)
+  }, [])
 
   return {
     fen,
@@ -224,10 +246,14 @@ export function useGameSocket(): ExtendedGameState {
     bestWas,
     moveSymbols,
     pyroSays,
+    voiceEvent,
+    heat,
+    voiceEnabled,
     makeMove,
     newGame,
     resign,
     flipBoard,
+    toggleVoice,
     materialAdv: materialAdvantage(capturedPieces),
   }
 }

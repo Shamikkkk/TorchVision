@@ -26,6 +26,9 @@ _TABLEBASE_PATH = Path(__file__).parent.parent.parent / "data" / "syzygy"
 class TablebaseProber:
     def __init__(self) -> None:
         self._tb: chess.syzygy.Tablebase | None = None
+        # WDL of the move returned by the last best_move() call, from the
+        # mover's perspective (2 = win). None when no tablebase move was found.
+        self.last_wdl: int | None = None
 
         if not _TABLEBASE_PATH.exists():
             logger.info(
@@ -57,6 +60,7 @@ class TablebaseProber:
         - More than 6 pieces: outside tablebase range
         - Any castling rights: tablebases don't encode castling
         """
+        self.last_wdl = None
         if not self.available:
             return None
         if len(board.piece_map()) > 6:
@@ -82,6 +86,8 @@ class TablebaseProber:
             finally:
                 board.pop()
 
+        if best_move is not None:
+            self.last_wdl = best_wdl
         return best_move
 
 

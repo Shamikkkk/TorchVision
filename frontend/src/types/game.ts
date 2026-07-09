@@ -13,6 +13,10 @@ export interface StateMessage {
   black_ms: number
   winner?: Side
   human_color?: Side
+  // G13/G15 fields — present only on states following a Pyro move / game end
+  pyro_says?: string | null
+  voice_event?: string | null
+  heat?: number
 }
 
 export interface TickMessage {
@@ -53,13 +57,19 @@ export type Difficulty = 'beginner' | 'intermediate' | 'advanced' | 'expert' | '
 export interface NewGamePayload {
   type: 'new_game'
   difficulty?: Difficulty
+  voice_enabled?: boolean
 }
 
 export interface ResignPayload {
   type: 'resign'
 }
 
-export type ClientPayload = MovePayload | NewGamePayload | ResignPayload
+export interface VoicePayload {
+  type: 'voice'
+  enabled: boolean
+}
+
+export type ClientPayload = MovePayload | NewGamePayload | ResignPayload | VoicePayload
 
 export interface SuggestResponse {
   move: string
@@ -88,8 +98,12 @@ export interface GameState {
   bestWas: BestWasMessage | null
   moveSymbols: Record<number, string>
   pyroSays: string | null
+  voiceEvent: string | null
+  heat: number
+  voiceEnabled: boolean
   makeMove: (uci: string) => void
   newGame: (difficulty?: Difficulty) => void
   resign: () => void
   flipBoard: () => void
+  toggleVoice: () => void
 }

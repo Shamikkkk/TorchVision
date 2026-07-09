@@ -9,6 +9,7 @@ import EnginePanel from './components/EnginePanel'
 import GameOverModal from './components/GameOverModal'
 import LobbyScreen from './components/LobbyScreen'
 import MoveList from './components/MoveList'
+import PyroSpeech from './components/PyroSpeech'
 import AnalyzerPanel from './components/analyzer/AnalyzerPanel'
 import { useGameSocket } from './hooks/useGameSocket'
 import { playGameEnd } from './lib/sounds'
@@ -35,11 +36,15 @@ function PlayerRow({
   materialAdv,
   side,
   isEngine,
+  voiceEnabled,
+  onToggleVoice,
 }: {
   captured: import('./types/game').CapturedPieces
   materialAdv: { white: number; black: number }
   side: 'white' | 'black'
   isEngine: boolean
+  voiceEnabled?: boolean
+  onToggleVoice?: () => void
 }) {
   return (
     <div className="flex items-center justify-between h-8">
@@ -53,6 +58,18 @@ function PlayerRow({
             <span className="text-pyro-text-faint text-xs italic hidden sm:inline font-display">
               burns brightest when you're losing
             </span>
+            {onToggleVoice && (
+              <button
+                type="button"
+                onClick={onToggleVoice}
+                title={voiceEnabled ? 'Mute Pyro' : 'Unmute Pyro'}
+                className={`text-sm leading-none transition-opacity ${
+                  voiceEnabled ? 'opacity-90 hover:opacity-100' : 'opacity-40 hover:opacity-70 grayscale'
+                }`}
+              >
+                {voiceEnabled ? '🔥' : '🧯'}
+              </button>
+            )}
           </>
         ) : (
           <>
@@ -88,10 +105,22 @@ export default function App() {
     humanColor,
     materialAdv,
     pyroSays,
+    voiceEvent,
+    heat,
+    voiceEnabled,
+    toggleVoice,
     newGame,
     resign,
     flipBoard,
   } = game
+
+  // G15 — heat glow warms in slowly, downgrades instantly.
+  const effectiveHeat = voiceEnabled ? heat : 0
+  const prevHeatRef = useRef(0)
+  const heatDropping = effectiveHeat < prevHeatRef.current
+  useEffect(() => {
+    prevHeatRef.current = effectiveHeat
+  }, [effectiveHeat])
 
   // Persist difficulty to localStorage whenever it changes
   useEffect(() => {
@@ -121,11 +150,6 @@ export default function App() {
   // ── PLAY / ANALYZE ─────────────────────────────────────────────────────
   const clockStarted = white_ms < 300_000 || black_ms < 300_000
   const openingName = history.length <= 30 ? detectOpening(history) : null
-
-  // Glow intensifies as Pyro's advantage grows (0 at 50cp, 1.0 at 300cp).
-  const pyroColor = humanColor === 'w' ? 'b' : 'w'
-  const pyroEval = pyroColor === 'w' ? (evalScore ?? 0) : -(evalScore ?? 0)
-  const attackGlow = Math.min(1, Math.max(0, (pyroEval - 50) / 250))
 
   const topSide = boardFlipped ? 'w' : 'b'
   const bottomSide = boardFlipped ? 'b' : 'w'
@@ -196,13 +220,11 @@ export default function App() {
                   materialAdv={materialAdv}
                   side={topCaptures}
                   isEngine={topColor === engineColor}
+                  voiceEnabled={voiceEnabled}
+                  onToggleVoice={topColor === engineColor ? toggleVoice : undefined}
                 />
-                {topColor === engineColor && pyroSays && (
-                  <div className="h-5 flex items-center -mt-0.5">
-                    <span className="text-pyro-taunt text-xs italic animate-pyro-taunt-in">
-                      &ldquo;{pyroSays}&rdquo;
-                    </span>
-                  </div>
+                {topColor === engineColor && (
+                  <PyroSpeech text={pyroSays} event={voiceEvent} enabled={voiceEnabled} />
                 )}
 
                 {clockStarted && (
@@ -217,12 +239,9 @@ export default function App() {
                   style={{
                     width: BOARD_SIZE,
                     height: BOARD_SIZE,
-                    boxShadow: attackGlow > 0.1
-                      ? `0 0 ${40 + attackGlow * 60}px ${attackGlow * 12}px rgba(255, 100, 40, ${0.25 + attackGlow * 0.45})`
-                      : 'none',
-                    transition: 'box-shadow 400ms ease-out',
-                  }}
-                  className="rounded-sm overflow-hidden"
+                    ['--heat-transition' as string]: heatDropping ? '150ms' : '1400ms',
+                  } as React.CSSProperties}
+                  className={`rounded-sm overflow-hidden board-heat board-heat-${effectiveHeat}`}
                 >
                   <Board game={game} />
                 </div>
@@ -240,13 +259,11 @@ export default function App() {
                   materialAdv={materialAdv}
                   side={bottomCaptures}
                   isEngine={bottomColor === engineColor}
+                  voiceEnabled={voiceEnabled}
+                  onToggleVoice={bottomColor === engineColor ? toggleVoice : undefined}
                 />
-                {bottomColor === engineColor && pyroSays && (
-                  <div className="h-5 flex items-center -mt-0.5">
-                    <span className="text-pyro-taunt text-xs italic animate-pyro-taunt-in">
-                      &ldquo;{pyroSays}&rdquo;
-                    </span>
-                  </div>
+                {bottomColor === engineColor && (
+                  <PyroSpeech text={pyroSays} event={voiceEvent} enabled={voiceEnabled} />
                 )}
 
                 <div className="h-7 flex items-center justify-center">
