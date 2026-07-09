@@ -109,6 +109,8 @@ export default function App() {
     heat,
     voiceEnabled,
     toggleVoice,
+    coachEnabled,
+    toggleCoach,
     newGame,
     resign,
     flipBoard,
@@ -208,10 +210,12 @@ export default function App() {
         {activeTab === 'play' && (
           <>
             <div className="flex gap-4 items-start">
-              {/* Eval bar */}
-              <div className="flex" style={{ height: BOARD_SIZE + 120 }}>
-                <EvalBar score={evalScore} boardFlipped={boardFlipped} />
-              </div>
+              {/* Eval bar — live analysis, only with Coach on */}
+              {coachEnabled && (
+                <div className="flex" style={{ height: BOARD_SIZE + 120 }}>
+                  <EvalBar score={evalScore} boardFlipped={boardFlipped} />
+                </div>
+              )}
 
               {/* Board column */}
               <div className="flex flex-col gap-1.5" style={{ width: BOARD_SIZE }}>
@@ -281,7 +285,10 @@ export default function App() {
                 style={{ width: 280 }}
               >
                 <MoveList history={history} moveSymbols={moveSymbols} />
-                <EnginePanel evalMove={evalMove} evalScore={evalScore} bestWas={bestWas} />
+                {/* Live suggestion / best-move panel — only with Coach on */}
+                {coachEnabled && (
+                  <EnginePanel evalMove={evalMove} evalScore={evalScore} bestWas={bestWas} />
+                )}
                 <Controls
                   difficulty={difficulty}
                   onDifficultyChange={setDifficulty}
@@ -289,6 +296,8 @@ export default function App() {
                   onResign={resign}
                   onFlip={flipBoard}
                   gameInProgress={status === 'ongoing' && history.length > 0}
+                  coachEnabled={coachEnabled}
+                  onToggleCoach={toggleCoach}
                 />
               </div>
             </div>

@@ -101,9 +101,11 @@ export interface GameState {
   voiceEvent: string | null
   heat: number
   voiceEnabled: boolean
+  coachEnabled: boolean
   makeMove: (uci: string) => void
   newGame: (difficulty?: Difficulty) => void
   resign: () => void
   flipBoard: () => void
   toggleVoice: () => void
+  toggleCoach: () => void
 }

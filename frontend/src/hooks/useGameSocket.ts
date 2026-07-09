@@ -116,9 +116,16 @@ export function useGameSocket(): ExtendedGameState {
   const voiceEnabledRef = useRef(voiceEnabled)
   const historyLenRef = useRef(0)
 
+  // Coach mode gates ALL live analysis (eval bar + suggestion panel).
+  // Default OFF and session-only, so a Play-mode win is provably unassisted:
+  // while off, the client never calls /api/suggest.
+  const [coachEnabled, setCoachEnabled] = useState(false)
+  const coachEnabledRef = useRef(false)
+
   const evalAbortRef = useRef<AbortController | null>(null)
 
   const fetchEval = useCallback(async (currentFen: string) => {
+    if (!coachEnabledRef.current) return
     evalAbortRef.current?.abort()
     const ctrl = new AbortController()
     evalAbortRef.current = ctrl
@@ -221,6 +228,21 @@ export function useGameSocket(): ExtendedGameState {
 
   const flipBoard = useCallback(() => setBoardFlipped((f) => !f), [])
 
+  const toggleCoach = useCallback(() => {
+    const next = !coachEnabledRef.current
+    coachEnabledRef.current = next
+    setCoachEnabled(next)
+    if (next) {
+      // Coach switched on mid-game: analyse the current position now.
+      fetchEval(chessRef.current.fen())
+    } else {
+      // Switched off: cancel in-flight analysis and drop stale hints.
+      evalAbortRef.current?.abort()
+      setEvalScore(null)
+      setEvalMove(null)
+    }
+  }, [fetchEval])
+
   const toggleVoice = useCallback(() => {
     const next = !voiceEnabledRef.current
     voiceEnabledRef.current = next
@@ -249,11 +271,13 @@ export function useGameSocket(): ExtendedGameState {
     voiceEvent,
     heat,
     voiceEnabled,
+    coachEnabled,
     makeMove,
     newGame,
     resign,
     flipBoard,
     toggleVoice,
+    toggleCoach,
     materialAdv: materialAdvantage(capturedPieces),
   }
 }

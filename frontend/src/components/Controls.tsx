@@ -7,6 +7,8 @@ type Props = {
   onResign: () => void
   onFlip: () => void
   gameInProgress: boolean
+  coachEnabled: boolean
+  onToggleCoach: () => void
 }
 
 const LEVELS: { id: Difficulty; label: string; sub: string }[] = [
@@ -24,6 +26,8 @@ export function Controls({
   onResign,
   onFlip,
   gameInProgress,
+  coachEnabled,
+  onToggleCoach,
 }: Props) {
   return (
     <div className="space-y-3">
@@ -82,6 +86,28 @@ export function Controls({
           ⇄ Flip
         </button>
       </div>
+
+      {/* Coach mode — live analysis (eval bar + suggestions). Default OFF so
+          Play-mode games are unassisted. */}
+      <button
+        type="button"
+        onClick={onToggleCoach}
+        className={[
+          'w-full flex items-center justify-between px-3 py-2 rounded border text-sm transition',
+          coachEnabled
+            ? 'bg-ember-500/10 border-ember-500/35 text-ember-400'
+            : 'bg-transparent border-white/5 text-pyro-text-dim hover:text-pyro-text hover:border-white/10',
+        ].join(' ')}
+        title={coachEnabled ? 'Live analysis is ON — this game is assisted' : 'Turn on live eval + move suggestions'}
+      >
+        <span>🎓 Coach</span>
+        <span className="text-xs opacity-70">{coachEnabled ? 'on' : 'off'}</span>
+      </button>
+      {coachEnabled && (
+        <p className="text-[10px] text-pyro-text-muted leading-snug px-0.5 -mt-1.5">
+          Live analysis active — wins with Coach on aren't unassisted.
+        </p>
+      )}
     </div>
   )
 }
