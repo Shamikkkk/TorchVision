@@ -40,7 +40,7 @@ export default function PyroSpeech({ text, event, enabled }: Props) {
   }, [text, event, enabled, isGameEnd])
 
   return (
-    <div className="h-8 flex items-center">
+    <div className="h-9 flex items-center">
       {shown && (
         <div
           className={[
@@ -52,7 +52,7 @@ export default function PyroSpeech({ text, event, enabled }: Props) {
           style={{ transitionDuration: `${FADE_MS}ms` }}
           role="status"
         >
-          <span className="font-display text-xs italic text-pyro-taunt truncate">
+          <span className="font-display text-sm italic text-pyro-taunt truncate">
             &ldquo;{shown}&rdquo;
           </span>
           {isGameEnd && (

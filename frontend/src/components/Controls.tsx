@@ -46,7 +46,7 @@ export function Controls({
                 disabled={gameInProgress}
                 onClick={() => onDifficultyChange(level.id)}
                 className={[
-                  'flex items-center justify-between px-3 py-1.5 rounded border text-sm transition',
+                  'flex items-center justify-between px-3 py-1.5 rounded border text-[15px] transition',
                   selected
                     ? 'bg-ember-500/10 border-ember-500/35 text-ember-400'
                     : 'bg-transparent border-white/5 text-pyro-text-dim hover:text-pyro-text hover:border-white/10',

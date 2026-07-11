@@ -12,14 +12,14 @@ export default function CapturedPiecesRow({ captured, materialAdv, side }: Props
   const adv = side === 'white' ? materialAdv.white : materialAdv.black
 
   if (pieces.length === 0 && adv === 0) {
-    return <div className="h-5" />
+    return <div className="h-6" />
   }
 
   return (
-    <div className="flex items-center gap-0.5 h-5">
-      <span className="text-base leading-none tracking-tight">{pieces.join('')}</span>
+    <div className="flex items-center gap-0.5 h-6">
+      <span className="text-lg leading-none tracking-tight">{pieces.join('')}</span>
       {adv > 0 && (
-        <span className="text-xs text-zinc-400 ml-1 font-mono">+{adv}</span>
+        <span className="text-sm text-zinc-400 ml-1 font-mono">+{adv}</span>
       )}
     </div>
   )

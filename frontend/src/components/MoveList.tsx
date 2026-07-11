@@ -27,7 +27,7 @@ function MoveChip({
     <span className="inline-flex items-center gap-0.5">
       <span
         className={[
-          'inline-block px-2 py-0.5 rounded font-mono text-sm cursor-pointer transition-colors duration-100',
+          'inline-block px-2 py-0.5 rounded font-mono text-[15px] cursor-pointer transition-colors duration-100',
           isCurrent
             ? 'bg-ember-500/15 text-ember-400'
             : 'text-pyro-text hover:bg-pyro-surface hover:text-pyro-cream',
@@ -58,11 +58,13 @@ export default function MoveList({ history, moveSymbols = {} }: Props) {
   const rowCount = Math.ceil(history.length / 2)
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-xl border border-pyro-border-accent bg-pyro-surface/40">
-      <div className="px-3 py-2 text-xs font-semibold text-pyro-text-muted uppercase tracking-widest border-b border-pyro-border">
+    <div className="flex flex-col min-h-0 min-[900px]:flex-1 overflow-hidden rounded-xl border border-pyro-border-accent bg-pyro-surface/40">
+      <div className="px-3 py-2 text-xs font-semibold text-pyro-text-muted uppercase tracking-widest border-b border-pyro-border shrink-0">
         Scoresheet
       </div>
-      <div className="overflow-y-auto" style={{ maxHeight: 220 }}>
+      {/* Scrolls internally; flex-1 stretches to the panel height beside the
+          board at ≥900px, capped when stacked below the board. */}
+      <div className="overflow-y-auto flex-1 min-h-[120px] max-h-[240px] min-[900px]:max-h-none">
         {history.length === 0 ? (
           <p className="text-pyro-text-faint italic text-sm px-3 py-3">No moves yet</p>
         ) : (
@@ -78,17 +80,17 @@ export default function MoveList({ history, moveSymbols = {} }: Props) {
                   isEven ? 'bg-pyro-surface/60' : 'bg-transparent',
                 ].join(' ')}
               >
-                <span className="w-7 text-right text-xs text-pyro-text-faint font-mono select-none shrink-0 pr-1">
+                <span className="w-8 text-right text-xs text-pyro-text-faint font-mono select-none shrink-0 pr-1">
                   {i + 1}.
                 </span>
-                <span className="w-[100px] shrink-0">
+                <span className="w-[108px] shrink-0">
                   <MoveChip
                     move={history[whiteIdx]}
                     isCurrent={whiteIdx === currentIdx}
                     symbol={moveSymbols[whiteIdx]}
                   />
                 </span>
-                <span className="w-[100px] shrink-0">
+                <span className="w-[108px] shrink-0">
                   {history[blackIdx] !== undefined && (
                     <MoveChip
                       move={history[blackIdx]}

@@ -20,7 +20,7 @@ const ARROW_COLOR = 'rgb(255, 170, 0)'
 // Module-level constants so these object references never change between renders.
 const DARK_SQ_STYLE = { backgroundColor: DARK }
 const LIGHT_SQ_STYLE = { backgroundColor: LIGHT }
-const NOTATION_STYLE = { fontSize: '11px', fontWeight: '600', color: 'rgba(0,0,0,0.45)' }
+const NOTATION_STYLE = { fontSize: '13px', fontWeight: '600', color: 'rgba(0,0,0,0.45)' }
 
 // Checked once — static tint instead of pulse for reduced-motion users (G15).
 const REDUCED_MOTION =

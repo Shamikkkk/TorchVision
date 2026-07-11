@@ -15,9 +15,13 @@ import { useGameSocket } from './hooks/useGameSocket'
 import { playGameEnd } from './lib/sounds'
 import type { Difficulty } from './types/game'
 
-const BOARD_SIZE = 520
-
 type Tab = 'play' | 'analyze'
+
+// Board column width: capped by viewport height minus the vertical chrome
+// (header + player bars + speech row + opening row + paddings ≈ 300px) so the
+// board never forces vertical scroll on desktop; flex shrinks it to fit the
+// row when width is the tighter constraint.
+const BOARD_MAX_W = 'min-[900px]:max-w-[max(360px,calc(100dvh-300px))]'
 
 const STORAGE_KEY = 'pyro.difficulty'
 
@@ -38,6 +42,9 @@ function PlayerRow({
   isEngine,
   voiceEnabled,
   onToggleVoice,
+  clockMs,
+  clockActive,
+  showClock,
 }: {
   captured: import('./types/game').CapturedPieces
   materialAdv: { white: number; black: number }
@@ -45,17 +52,20 @@ function PlayerRow({
   isEngine: boolean
   voiceEnabled?: boolean
   onToggleVoice?: () => void
+  clockMs: number
+  clockActive: boolean
+  showClock: boolean
 }) {
   return (
-    <div className="flex items-center justify-between h-8">
-      <div className="flex items-center gap-2.5">
+    <div className="flex items-center justify-between gap-3 h-10">
+      <div className="flex items-center gap-2.5 min-w-0">
         {isEngine ? (
           <>
-            <span className="text-lg animate-pyro-flicker">🔥</span>
-            <span className="font-display text-sm text-ember-500 italic font-semibold">
+            <span className="text-xl animate-pyro-flicker">🔥</span>
+            <span className="font-display text-base text-ember-500 italic font-semibold">
               Pyro
             </span>
-            <span className="text-pyro-text-faint text-xs italic hidden sm:inline font-display">
+            <span className="text-pyro-text-faint text-sm italic hidden sm:inline font-display truncate">
               burns brightest when you're losing
             </span>
             {onToggleVoice && (
@@ -74,11 +84,14 @@ function PlayerRow({
         ) : (
           <>
             <span className="w-3 h-3 rounded-full bg-pyro-cream border border-pyro-border shrink-0" />
-            <span className="text-sm font-medium text-pyro-text">You</span>
+            <span className="text-[15px] font-medium text-pyro-text">You</span>
           </>
         )}
       </div>
-      <CapturedPiecesRow captured={captured} materialAdv={materialAdv} side={side} />
+      <div className="flex items-center gap-3 shrink-0">
+        <CapturedPiecesRow captured={captured} materialAdv={materialAdv} side={side} />
+        {showClock && <Clock ms={clockMs} active={clockActive} />}
+      </div>
     </div>
   )
 }
@@ -205,85 +218,74 @@ export default function App() {
       </div>
 
       {/* ── Content ─────────────────────────────────────────────────────── */}
-      <div className="flex flex-col items-center p-6 gap-4">
+      <div className="flex-1 flex flex-col items-center px-4 py-4 gap-4 min-h-0">
         {/* ── PLAY TAB ─────────────────────────────────────────────────── */}
         {activeTab === 'play' && (
           <>
-            <div className="flex gap-4 items-start">
-              {/* Eval bar — live analysis, only with Coach on */}
-              {coachEnabled && (
-                <div className="flex" style={{ height: BOARD_SIZE + 120 }}>
-                  <EvalBar score={evalScore} boardFlipped={boardFlipped} />
-                </div>
-              )}
-
-              {/* Board column */}
-              <div className="flex flex-col gap-1.5" style={{ width: BOARD_SIZE }}>
-                <PlayerRow
-                  captured={capturedPieces}
-                  materialAdv={materialAdv}
-                  side={topCaptures}
-                  isEngine={topColor === engineColor}
-                  voiceEnabled={voiceEnabled}
-                  onToggleVoice={topColor === engineColor ? toggleVoice : undefined}
-                />
-                {topColor === engineColor && (
-                  <PyroSpeech text={pyroSays} event={voiceEvent} enabled={voiceEnabled} />
+            {/* Row at ≥900px (eval bar + board | panel), stacked below. */}
+            <div className="w-full flex-1 min-h-0 flex flex-col items-center min-[900px]:flex-row min-[900px]:items-stretch min-[900px]:justify-center gap-4 min-[900px]:gap-5">
+              {/* Eval bar + board — always side by side so the bar tracks board height */}
+              <div className="w-full min-[900px]:w-auto min-[900px]:flex-1 min-w-0 flex justify-center gap-3">
+                {/* Eval bar — live analysis, only with Coach on */}
+                {coachEnabled && (
+                  <div className="flex self-stretch">
+                    <EvalBar score={evalScore} boardFlipped={boardFlipped} />
+                  </div>
                 )}
 
-                {clockStarted && (
-                  <Clock
-                    ms={topMs}
-                    active={turn !== bottomSide}
-                    label={topColor === engineColor ? 'Pyro' : topColor === 'white' ? 'White' : 'Black'}
+                {/* Board column — fills width up to the viewport-height cap */}
+                <div className={`w-full min-w-0 flex flex-col gap-2 max-w-[560px] ${BOARD_MAX_W}`}>
+                  <PlayerRow
+                    captured={capturedPieces}
+                    materialAdv={materialAdv}
+                    side={topCaptures}
+                    isEngine={topColor === engineColor}
+                    voiceEnabled={voiceEnabled}
+                    onToggleVoice={topColor === engineColor ? toggleVoice : undefined}
+                    clockMs={topMs}
+                    clockActive={turn !== bottomSide}
+                    showClock={clockStarted}
                   />
-                )}
-
-                <div
-                  style={{
-                    width: BOARD_SIZE,
-                    height: BOARD_SIZE,
-                    ['--heat-transition' as string]: heatDropping ? '150ms' : '1400ms',
-                  } as React.CSSProperties}
-                  className={`rounded-sm overflow-hidden board-heat board-heat-${effectiveHeat}`}
-                >
-                  <Board game={game} />
-                </div>
-
-                {clockStarted && (
-                  <Clock
-                    ms={bottomMs}
-                    active={turn === bottomSide}
-                    label={bottomColor === engineColor ? 'Pyro' : bottomColor === 'white' ? 'White' : 'Black'}
-                  />
-                )}
-
-                <PlayerRow
-                  captured={capturedPieces}
-                  materialAdv={materialAdv}
-                  side={bottomCaptures}
-                  isEngine={bottomColor === engineColor}
-                  voiceEnabled={voiceEnabled}
-                  onToggleVoice={bottomColor === engineColor ? toggleVoice : undefined}
-                />
-                {bottomColor === engineColor && (
-                  <PyroSpeech text={pyroSays} event={voiceEvent} enabled={voiceEnabled} />
-                )}
-
-                <div className="h-7 flex items-center justify-center">
-                  {openingName && (
-                    <span className="text-xs text-pyro-text-dim italic font-display text-center">
-                      {openingName}
-                    </span>
+                  {topColor === engineColor && (
+                    <PyroSpeech text={pyroSays} event={voiceEvent} enabled={voiceEnabled} />
                   )}
+
+                  <div
+                    style={{
+                      ['--heat-transition' as string]: heatDropping ? '150ms' : '1400ms',
+                    } as React.CSSProperties}
+                    className={`w-full aspect-square rounded-sm overflow-hidden board-heat board-heat-${effectiveHeat}`}
+                  >
+                    <Board game={game} />
+                  </div>
+
+                  <PlayerRow
+                    captured={capturedPieces}
+                    materialAdv={materialAdv}
+                    side={bottomCaptures}
+                    isEngine={bottomColor === engineColor}
+                    voiceEnabled={voiceEnabled}
+                    onToggleVoice={bottomColor === engineColor ? toggleVoice : undefined}
+                    clockMs={bottomMs}
+                    clockActive={turn === bottomSide}
+                    showClock={clockStarted}
+                  />
+                  {bottomColor === engineColor && (
+                    <PyroSpeech text={pyroSays} event={voiceEvent} enabled={voiceEnabled} />
+                  )}
+
+                  <div className="h-7 flex items-center justify-center">
+                    {openingName && (
+                      <span className="text-sm text-pyro-text-dim italic font-display text-center">
+                        {openingName}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* Right panel */}
-              <div
-                className="flex flex-col gap-3 rounded-xl border border-pyro-border-accent bg-pyro-surface/40 p-4"
-                style={{ width: 280 }}
-              >
+              {/* Right panel — fixed-width column, full height beside the board */}
+              <div className="w-full max-w-[560px] min-[900px]:w-[320px] min-[900px]:max-w-none shrink-0 flex flex-col gap-3 rounded-xl border border-pyro-border-accent bg-pyro-surface/40 p-4 min-h-0">
                 <MoveList history={history} moveSymbols={moveSymbols} />
                 {/* Live suggestion / best-move panel — only with Coach on */}
                 {coachEnabled && (

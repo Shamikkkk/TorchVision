@@ -1,7 +1,6 @@
 interface Props {
   ms: number
   active: boolean
-  label: string
 }
 
 function format(ms: number): string {
@@ -11,13 +10,13 @@ function format(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-export default function Clock({ ms, active, label }: Props) {
+// Compact clock chip — lives inside the player bar, right of the captures.
+export default function Clock({ ms, active }: Props) {
   const low = ms < 30_000
-  const isPyro = label === 'Pyro'
   return (
     <div
       className={[
-        'flex items-center justify-between px-3 py-2 rounded-lg border transition-colors',
+        'flex items-center px-3 py-1 rounded-lg border transition-colors',
         active
           ? low
             ? 'bg-pyro-surface border-red-800/50'
@@ -27,15 +26,7 @@ export default function Clock({ ms, active, label }: Props) {
     >
       <span
         className={[
-          'text-xs font-sans font-medium',
-          isPyro ? 'text-ember-400' : 'text-pyro-text-dim',
-        ].join(' ')}
-      >
-        {label}
-      </span>
-      <span
-        className={[
-          'font-mono font-semibold text-sm',
+          'font-mono font-semibold text-xl tabular-nums',
           low && active
             ? 'text-red-500 animate-pyro-pulse'
             : active
