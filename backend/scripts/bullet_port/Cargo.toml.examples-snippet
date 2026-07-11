@@ -1,0 +1,11 @@
+# Append these two blocks to the [[example]] list in
+# bullet/crates/bullet_lib/Cargo.toml (alongside the existing
+# "simple" example registration):
+
+[[example]]
+name = "pyro"
+path = "../../examples/pyro.rs"
+
+[[example]]
+name = "pyro_gpu_smoke"
+path = "../../examples/pyro_gpu_smoke.rs"

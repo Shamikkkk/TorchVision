@@ -108,6 +108,8 @@ HISTORY.md. Still do not reopen without explicit sign-off.
 - UCI wrapper: `backend/app/engine/rust_engine.py` (sends `Threads 4` + `--no-nnue` at startup)
 - Gauntlet/scripts: `backend/scripts/gauntlet/`, `backend/scripts/aggression_rate.py`,
   `backend/scripts/validate_nnue_rust.py` (real SPRT, works for any A/B)
+- GPU trainer port: `backend/scripts/bullet_port/` (bullet-submodule local additions;
+  restore procedure in its README)
 - Syzygy tablebases: `backend/data/syzygy/` (WDL+DTZ, ≤6 pieces) — perfect endgames, wired in
 - SF18: `C:\Users\shami\Downloads\stockfish-windows-x86-64-avx2\stockfish\stockfish-windows-x86-64-avx2.exe`
 - cutechess: `C:/tools/cutechess/cutechess-1.3.1-win64/cutechess-cli.exe`
