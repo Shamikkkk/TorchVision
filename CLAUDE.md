@@ -93,10 +93,11 @@ retained. Since LMP-without-IID is catastrophic (June data), LMP and dep-NMP are
 PARKED — the trio only plausibly pays as a tuned package, and Elo-hunting it is
 off-mission. Raw data: backend/scripts/gauntlet/results/iid_experiment/.
 
-**NNUE-as-eval: SHELVED.** First trusted net (expE) lost to PeSTO by ~700 Elo; CPU-only
-hardware can't train a competitive net. Pipeline preserved for when the RTX 3050
-CUDA/cudarc mismatch is fixed. Full diagnostic record in HISTORY.md. Do not reopen
-without explicit sign-off.
+**NNUE-as-eval: SHELVED.** First trusted net (expE) lost to PeSTO by ~700 Elo when
+training was CPU-bound. The hardware blocker is FIXED (July 12, 2026): bullet pinned to
+cebc78a0 (cudarc-free CUDA-13 backend) + driver 610.62 trains on the RTX 3050 —
+SB30 on the 20M-position set in ~6 min (~1.5-4M pos/s). Full diagnostic record in
+HISTORY.md. Still do not reopen without explicit sign-off.
 
 ---
 
@@ -130,8 +131,9 @@ Don't `taskkill` uvicorn — Ctrl+C in its terminal.
 
 ## STANDING CONTEXT
 
-- **Hardware:** Windows 11, 12 cores, 8GB RAM. RTX 3050 unusable for Bullet (CUDA 13.2
-  too new for cudarc 0.17.3) → NNUE training is CPU-only and uncompetitive.
+- **Hardware:** Windows 11, 12 cores, 8GB RAM. RTX 3050 trains Bullet since July 12,
+  2026 (bullet cebc78a0 CUDA-13 backend + driver 610.62): SB30 ≈ 6 min. NNUE stays
+  shelved on Elo grounds, not hardware.
 - **Workflow:** chat-Claude plans, Claude Code executes, user relays and runs git.
   Confirm `git status` shows only `m bullet` before pushing; never stage the submodule.
 - **Git:** branches `feat/`/`fix/`/`chore/`; commits imperative mood.

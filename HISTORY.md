@@ -1945,6 +1945,8 @@ Root cause analysis (rank-ordered bottlenecks):
 All training data, weights, and scripts preserved for D2 ablations:
   - backend/data/selfplay_d6_combined.plain (PeSTO evals, original)
   - C:/torch_data/selfplay_sf18_d12.plain   (SF18 evals)
+    (July 2026: only the SF18-d12 set — .plain + .data — survives in C:/torch_data;
+    the re-encoded selfplay_d6.data was deleted)
   - bullet/checkpoints/pyro-d1v2/           (v2 weights)
   - bullet/checkpoints/pyro-d1v3/           (v3 weights)
 

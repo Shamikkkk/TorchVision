@@ -6,11 +6,12 @@ pydantic-settings>=2.6.0
 python-dotenv>=1.0.0
 
 # ── model_training dependencies (also needed at runtime for neural mode) ──────
-# Install PyTorch separately — use the CPU wheel to avoid a 2 GB CUDA download:
-#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Install PyTorch separately. The dev venv runs the CUDA wheel (2.6.0+cu124) and
+# the RTX 3050's CUDA works (verified July 2026):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
 #
-# Or for CUDA 12.x:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# CPU-only fallback (much smaller download):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
 torch
 
 # Data pipeline (only needed when running model_training scripts)
