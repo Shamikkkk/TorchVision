@@ -17,3 +17,15 @@ path = "../../examples/pyro_gpu_512.rs"
 [[example]]
 name = "pyro_gpu_screlu"
 path = "../../examples/pyro_gpu_screlu.rs"
+
+[[example]]
+name = "pyro_gpu_wdl01"
+path = "../../examples/pyro_gpu_wdl01.rs"
+
+[[example]]
+name = "pyro_gpu_wdl03"
+path = "../../examples/pyro_gpu_wdl03.rs"
+
+[[example]]
+name = "pyro_gpu_wdl05"
+path = "../../examples/pyro_gpu_wdl05.rs"

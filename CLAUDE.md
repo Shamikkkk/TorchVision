@@ -105,6 +105,15 @@ SCReLU +0.213 (expE ref +0.155; bar 0.3). Best rho < 0.25 → pre-committed
 STOP, no SPRT run; live pyro.nnue untouched (md5 verified). Capacity refuted
 as the bottleneck at 20M positions; SCReLU was the only gain. Next session:
 DATA axis with SCReLU as base. Full record in HISTORY.md.
+Session 2a (July 12, 2026): WDL blending on the existing data is DEAD —
+rho monotonically worse (0.1/0.3/0.5 → +0.199/+0.117/+0.008 vs B's +0.213)
+and material calibration inflates (Gate M 1.44 at 0.5). Recon proved the
+result field genuine/STM-correct but noisy: game-level 51% BLACK wins
+(biased April generation corpus) and 48% draw labels from 400-ply cap
+non-conversions. Session 2b: regenerate selfplay with the current T4 engine
+(fewer fake draws; investigate black bias first), scale 20M→50M+, keep
+SCReLU, optionally retry WDL once on the clean corpus. Full record in
+HISTORY.md.
 
 ---
 

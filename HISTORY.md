@@ -2339,3 +2339,76 @@ Integrity: engine/pyro.nnue + target/release/pyro.nnue md5
 all conversions went to scratch). Checkpoints: bullet/checkpoints/
 pyro-gpu-512/, pyro-gpu-screlu/. Gate log: scratchpad gate_run.log
 (gate table reproduced above in full).
+
+## Phase D session 2a — WDL blending: axis DEAD on this data (July 12, 2026)
+
+Question: does blending game-outcome (WDL) signal into the existing 20M
+eval-only SF18-d12 set lift move-ranking? Recon first, then a 3-point WDL
+ladder on the SCReLU-256 base (candidate B config, one variable = WDL weight).
+
+RECON (all premises verified before training):
+- Q1, result-field provenance: the field is REAL and STM-correct. 100k-record
+  stride sample of the .data: 26.1% STM-win / 48.1% draw / 25.8% STM-loss,
+  zero out-of-range bytes. Zero label inversions at |white-POV eval| >= 2500
+  (0/128 white-crushing, 0/551 black-crushing); in-game mate-score
+  trajectories always match the label. Perspective chain verified in code
+  (generation → reeval passthrough → converter STM flip at
+  convert_plain_to_bullet.py:51-58) and empirically (stm-conditioned
+  agreement at ±700).
+  DATA-QUALITY FINDINGS (for Session 2b): (1) game-level results are
+  31% white / 18% draw / 51% BLACK wins — a color bias impossible for
+  fair same-engine selfplay; the generation corpus (April, PeSTO-d6,
+  random openings) is biased. STM-normalized features can't see color, so
+  it acts as label noise, not learnable poison — but it inflates outcome-
+  label noise. (2) MAX_GAME_PLIES=400 cap + 80-ply shuffle rule finalize
+  unconverted wins as draws → 48% of positions carry draw labels; at
+  SF18-eval >= +700 (STM winning), 49% of records are labeled draw.
+  Weak-play outcomes are genuine but very noisy targets.
+- Q2, blend semantics at cebc78a0 (value.rs:115):
+  target = blend * result + (1-blend) * sigmoid(score/SCALE), result
+  STM-relative {0,0.5,1}, blend = ConstantWDL value → the ladder values
+  weight the RESULT. Direction confirmed. LinearWDL/Warmup ramps exist.
+- Q3, gate noise: gate_ladder.py run twice on candidate B → +0.213 both
+  times (0.000 mechanical noise; deterministic position scan + 1-thread
+  SF18 d10). Relevant uncertainty is position-sample SE ≈ 0.05 (15
+  positions, per-position rho spread −0.15…+0.49) → deltas < 0.05
+  treated as ties; thresholds unchanged (same fixed instrument as S1).
+
+LADDER (SCReLU-256, SB30, stock loss, same data; final losses NOT comparable
+to session 1 — different targets = different floor; floors moved DOWN
+(0.0027/0.0016/0.00085), against my predicted direction, because draw-heavy
+blended targets sit near sigmoid 0.5):
+
+| candidate  | WDL | final loss | Gate A | Gate M ratio | rho    |
+|------------|-----|-----------|--------|--------------|--------|
+| B (ref)    | 0.0 | 0.0033    | PASS   | 1.03         | +0.213 |
+| D1         | 0.1 | 0.0027    | PASS   | 1.09         | +0.199 |
+| D2         | 0.3 | 0.0016    | PASS   | 1.24         | +0.117 |
+| D3         | 0.5 | 0.00085   | PASS   | 1.44         | +0.008 |
+
+PREDICTIONS vs outcomes: D2-sweet-spot prediction WRONG — the flagged sharp
+failure mode ("48% draw mass flattens targets → monotonic rho drop") is what
+happened. Gate M drifted OPPOSITE to prediction: not deflated but INFLATED
+(1.44 at WDL 0.5) — material-down positions are near-certain losses in this
+corpus, so outcome targets overshoot SF18's calibration; >20% off at
+WDL >= 0.3, the flagged absolute-eval failure, in mirror image.
+
+D4 (CReLU control at best WDL): SKIPPED — decision table row 3 fired (all
+candidates <= B's +0.213). D4's purpose was isolating whether WDL GAINS stack
+with SCReLU; there are no gains to isolate.
+
+VERDICT (pre-committed): WDL axis DEAD on this data. Best config remains
+candidate B (SCReLU-256, WDL 0.0, rho +0.213). No SPRT (nothing >= 0.3).
+
+SESSION 2b RECOMMENDATION — data volume/variety, specifically fixing the
+two corpus defects found tonight: (1) regenerate selfplay with the CURRENT
+T4 engine (~1820, Syzygy-finished endgames convert wins → far fewer fake
+cap-draws; also investigate the black bias before generating — it may be a
+bug in the April opening randomizer), (2) more positions (20M → 50M+ now
+that GPU trains at ~4M pos/s), (3) re-eval at SF18 d12 as before. WDL
+blending may be worth ONE retry on the new corpus (draw fraction should
+drop sharply), but volume+quality is the primary axis. Carry SCReLU.
+
+Checkpoints: bullet/checkpoints/pyro-gpu-wdl01|03|05/. Gate log:
+scratchpad gate_wdl.log (table above complete). Live nets untouched:
+md5 23BFCD331411B8B9C6A05191D42CAEF5 both locations, before and after.
