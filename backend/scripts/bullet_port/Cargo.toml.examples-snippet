@@ -9,3 +9,11 @@ path = "../../examples/pyro.rs"
 [[example]]
 name = "pyro_gpu_smoke"
 path = "../../examples/pyro_gpu_smoke.rs"
+
+[[example]]
+name = "pyro_gpu_512"
+path = "../../examples/pyro_gpu_512.rs"
+
+[[example]]
+name = "pyro_gpu_screlu"
+path = "../../examples/pyro_gpu_screlu.rs"

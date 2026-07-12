@@ -6,13 +6,14 @@ cover, so this directory is the durable copy.
 
 ## Restore after a fresh clone
 
-1. Copy `pyro.rs` and `pyro_gpu_smoke.rs` into `bullet/examples/`.
+1. Copy `pyro.rs`, `pyro_gpu_smoke.rs`, `pyro_gpu_512.rs`, and
+   `pyro_gpu_screlu.rs` into `bullet/examples/`.
 2. Append the blocks in `Cargo.toml.examples-snippet` to
    `bullet/crates/bullet_lib/Cargo.toml`.
 3. Build (from `bullet/`):
 
    ```bash
-   cargo build --release --package bullet_lib --example pyro --example pyro_gpu_smoke --features cuda
+   cargo build --release --package bullet_lib --example pyro --example pyro_gpu_smoke --example pyro_gpu_512 --example pyro_gpu_screlu --features cuda
    ```
 
 Requires the CUDA 13.2 toolkit (`CUDA_PATH` set) + NVIDIA driver >= r595
@@ -25,5 +26,10 @@ no default features — a no-feature build gives the MockGpu test device, so
   ~6 min on the 3050 (~1.5-4M pos/s).
 - `pyro_gpu_smoke.rs` — 1-superbatch smoke variant, writes only to
   `checkpoints/pyro-gpu-smoke`.
+- `pyro_gpu_512.rs` — capacity-ladder Candidate A (July 12, 2026):
+  HIDDEN=512, otherwise expE config. Writes to `checkpoints/pyro-gpu-512`.
+- `pyro_gpu_screlu.rs` — capacity-ladder Candidate B: SCReLU activation,
+  otherwise expE config. Writes to `checkpoints/pyro-gpu-screlu`.
+  (Neither net is engine-loadable as-is: nnue.rs is 256-wide CReLU.)
 - `pyro.rs.pre-port` — the pre-port (cudarc-era, expE) trainer, kept for
   reference; it exists nowhere in git history besides this copy.

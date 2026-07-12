@@ -98,6 +98,13 @@ training was CPU-bound. The hardware blocker is FIXED (July 12, 2026): bullet pi
 cebc78a0 (cudarc-free CUDA-13 backend) + driver 610.62 trains on the RTX 3050 —
 SB30 on the 20M-position set in ~6 min (~1.5-4M pos/s). Full diagnostic record in
 HISTORY.md. Still do not reopen without explicit sign-off.
+Capacity ladder, session 1 (July 12, 2026): three candidates trained on GPU
+(expE-config parity / HIDDEN=512 / SCReLU-256, one variable each), gated with
+the new backend/scripts/gate_ladder.py — rho: parity +0.125, 512 +0.045,
+SCReLU +0.213 (expE ref +0.155; bar 0.3). Best rho < 0.25 → pre-committed
+STOP, no SPRT run; live pyro.nnue untouched (md5 verified). Capacity refuted
+as the bottleneck at 20M positions; SCReLU was the only gain. Next session:
+DATA axis with SCReLU as base. Full record in HISTORY.md.
 
 ---
 

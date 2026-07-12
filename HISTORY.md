@@ -2271,3 +2271,71 @@ verdict uses only the 82 pre-overlap games (validated against the run log:
 working rule 9 + tasklist guard in run_comp_bonus_gauntlet_finish.sh.
 
 Raw data: backend/scripts/gauntlet/results/comp_bonus_2026-07/.
+
+## Phase D reopened — capacity ladder, session 1 (July 12, 2026)
+
+First training session on the GPU-unblocked pipeline (bullet cebc78a0, RTX
+3050, ~6-15 min per SB30 run). Tested the CAPACITY axis of the expE failure
+hypothesis ("256 neurons + 20M positions is under capacity for move-ranking").
+One variable per candidate vs expE. NNUE remains SHELVED throughout.
+
+CANDIDATES (all: 768→Hx2→1, eval-only WDL=0, stock loss, SB30, batch 16384,
+cosine 1e-3→1e-5, 20M SF18-d12 positions):
+- Candidate 0 — pyro-gpu (last night's GPU parity run of the exact expE
+  config, HIDDEN=256, CReLU). Final loss 0.0033.
+- Candidate A — pyro-gpu-512 (HIDDEN 256→512, only change). Loss 0.0033.
+- Candidate B — pyro-gpu-screlu (CReLU→SCReLU, only change). Loss 0.0033.
+- Candidate C — 512+SB60: NOT TRAINED (gated on A gating well; A did not).
+
+All three converged to per-batch losses identical to 4-5 significant digits —
+the loss floor is target-noise dominated and NONE of the changes fit the data
+better. Loss recorded per protocol but not used for decisions.
+
+GATE TABLE (gate_ladder.py — new width/activation-parameterized suite off
+raw.bin; one shared SF18-d10 cache, 15 midgame positions × ≤25 quiet children):
+
+| candidate            | Gate A (l1w sat) | Gate M (Q-down ratio) | Spearman rho |
+|----------------------|------------------|-----------------------|--------------|
+| 0 (GPU-256-CReLU)    | PASS 0.0%        | PASS 1.03             | +0.125       |
+| A (512-CReLU)        | PASS 0.0%        | PASS 1.03             | +0.045       |
+| B (256-SCReLU)       | PASS 0.0%        | PASS 1.03             | +0.213       |
+| (expE reference)     | PASS             | PASS                  | +0.155       |
+
+PREDICTIONS (written before training) vs outcomes:
+- C0 ≈ expE's +0.155: got +0.125 — held approximately (GPU parity confirmed;
+  rho gate has position-sample noise, same profile).
+- A: "capacity binding → rho > 0.25; data binding → loss flat, rho ~0.15":
+  loss flat AND rho fell to +0.045 — capacity branch REFUTED at this data size.
+- B: "+0.05-0.10 over 0.155": +0.213 — HELD.
+
+VERDICT (pre-committed decision table): best rho +0.213 < 0.25 → STOP, no
+SPRT. Capacity was NOT the (only) bottleneck at 20M positions. Doubling width
+made ranking WORSE (more parameters fitting the same noisy eval targets);
+richer activation (SCReLU) gave the only real improvement (+0.09 rho) and is
+the strongest single-variable lever found so far.
+
+RECOMMENDATION for session 2 — the DATA axis, carrying SCReLU forward:
+more positions and/or a better mix (the 20M set is eval-only d12 self-play);
+consider WDL blending. SCReLU should be the base activation for the next
+ladder (it is strictly better here and is the standard modern choice), with
+one CReLU control. NOTE: a SCReLU net needs an inference change in
+engine/src/nnue.rs before any SPRT (square the clipped accumulator, output
+renormalised /QA — see bullet examples/simple.rs); HIDDEN=256 stays, so it is
+a small, branch-scoped change.
+
+TOOLING added this session (durable in git):
+- backend/scripts/gate_ladder.py — parameterized gate suite (Gate A + DIAG-3
+  material pricing + Spearman) for any width/activation, off raw.bin.
+- bullet_to_pyro_nnue.py --hidden N — converter width parameter (warns that
+  the engine loader is 256-only).
+- bullet_port/pyro_gpu_512.rs, pyro_gpu_screlu.rs — trainer variants (durable
+  copies; also registered in the Cargo.toml snippet).
+- engine/src/nnue.rs finding: HIDDEN_SIZE is a compile-time const (line 12)
+  with const-sized arrays; a 512 build = change the constant in a branch
+  build. Live engine untouched.
+
+Integrity: engine/pyro.nnue + target/release/pyro.nnue md5
+23BFCD331411B8B9C6A05191D42CAEF5 before and after session (never touched;
+all conversions went to scratch). Checkpoints: bullet/checkpoints/
+pyro-gpu-512/, pyro-gpu-screlu/. Gate log: scratchpad gate_run.log
+(gate table reproduced above in full).

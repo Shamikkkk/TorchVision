@@ -29,47 +29,49 @@ import os
 import struct
 
 
-HIDDEN_SIZE  = 256
+HIDDEN_SIZE  = 256   # default; override with --hidden (engine loader is 256-only)
 INPUT_SIZE   = 768
 MAGIC        = b"\x4E\x4E\x55\x45"   # "NNUE"
 VERSION      = 1
 
-EXPECTED_WEIGHTS_BYTES = (
-    INPUT_SIZE * HIDDEN_SIZE * 2   # ft_weights  [768][256] i16
-    + HIDDEN_SIZE * 2              # ft_bias     [256] i16
-    + HIDDEN_SIZE * 2 * 2          # out_weights [512] i16
-    + 2                            # out_bias    [1]  i16
-)
+
+def expected_weights_bytes(hidden: int) -> int:
+    return (
+        INPUT_SIZE * hidden * 2   # ft_weights  [768][hidden] i16
+        + hidden * 2              # ft_bias     [hidden] i16
+        + hidden * 2 * 2          # out_weights [2*hidden] i16
+        + 2                       # out_bias    [1]  i16
+    )
 
 
 BULLET_FOOTER = b"bullet"
 
 
-def strip_bullet_footer(data: bytes) -> bytes:
+def strip_bullet_footer(data: bytes, expected_bytes: int) -> bytes:
     """Strip Bullet's repeated 'bullet' footer signature from weight bytes."""
-    if len(data) == EXPECTED_WEIGHTS_BYTES:
+    if len(data) == expected_bytes:
         return data
-    if len(data) > EXPECTED_WEIGHTS_BYTES:
-        trailer = data[EXPECTED_WEIGHTS_BYTES:]
+    if len(data) > expected_bytes:
+        trailer = data[expected_bytes:]
         # Verify it is all "bullet" repetitions (any partial tail is fine)
         expected_repeat = (BULLET_FOOTER * ((len(trailer) // len(BULLET_FOOTER)) + 1))[:len(trailer)]
         if trailer == expected_repeat:
             print(f"Stripped {len(trailer)}-byte Bullet footer signature.")
-            return data[:EXPECTED_WEIGHTS_BYTES]
+            return data[:expected_bytes]
     raise ValueError(
-        f"File size {len(data):,} does not match expected {EXPECTED_WEIGHTS_BYTES:,} "
+        f"File size {len(data):,} does not match expected {expected_bytes:,} "
         f"and does not appear to have a recognisable Bullet footer."
     )
 
 
-def write_nnue(path: str, payload: bytes) -> None:
+def write_nnue(path: str, payload: bytes, expected_bytes: int) -> None:
     """Write header + weights to path and verify."""
     with open(path, "wb") as fout:
         fout.write(MAGIC)
         fout.write(struct.pack("<I", VERSION))
         fout.write(payload)
     out_size = os.path.getsize(path)
-    assert out_size == 8 + EXPECTED_WEIGHTS_BYTES, "Output size mismatch"
+    assert out_size == 8 + expected_bytes, "Output size mismatch"
     with open(path, "rb") as f:
         magic_read = f.read(4)
         ver_read   = struct.unpack("<I", f.read(4))[0]
@@ -78,23 +80,28 @@ def write_nnue(path: str, payload: bytes) -> None:
     print(f"  Written and verified: {path}  ({out_size:,} bytes)")
 
 
-def convert(input_path: str, output_path: str) -> None:
+def convert(input_path: str, output_path: str, hidden: int = HIDDEN_SIZE) -> None:
+    expected_bytes = expected_weights_bytes(hidden)
     file_size = os.path.getsize(input_path)
-    print(f"Input : {input_path}  ({file_size:,} bytes)")
+    print(f"Input : {input_path}  ({file_size:,} bytes, hidden={hidden})")
 
     with open(input_path, "rb") as fin:
         raw = fin.read()
 
-    weights = strip_bullet_footer(raw)
+    weights = strip_bullet_footer(raw, expected_bytes)
 
-    if len(weights) != EXPECTED_WEIGHTS_BYTES:
+    if len(weights) != expected_bytes:
         raise ValueError(
-            f"Weight block is {len(weights):,} bytes, expected {EXPECTED_WEIGHTS_BYTES:,}. "
-            f"Make sure HIDDEN_SIZE={HIDDEN_SIZE} matches your training config."
+            f"Weight block is {len(weights):,} bytes, expected {expected_bytes:,}. "
+            f"Make sure --hidden {hidden} matches your training config."
         )
 
+    if hidden != 256:
+        print(f"  WARNING: engine/src/nnue.rs loads HIDDEN=256 only — a {hidden}-wide "
+              f"net needs a matching engine build.")
+
     # Write to primary output path
-    write_nnue(output_path, weights)
+    write_nnue(output_path, weights, expected_bytes)
 
     # The engine binary searches for pyro.nnue next to the executable
     # (engine/target/release/pyro.nnue) BEFORE the current directory.
@@ -103,7 +110,7 @@ def convert(input_path: str, output_path: str) -> None:
         os.path.dirname(output_path), "target", "release", "pyro.nnue"
     )
     if os.path.isdir(os.path.dirname(exe_dir_copy)):
-        write_nnue(exe_dir_copy, weights)
+        write_nnue(exe_dir_copy, weights, expected_bytes)
         print(f"  (mirrored to engine binary directory)")
     else:
         print(f"  (skipped mirror: {exe_dir_copy} — directory not found)")
@@ -125,8 +132,14 @@ def main() -> None:
         default="C:/Users/shami/OneDrive/Documents/torch/engine/pyro.nnue",
         help="Output path for pyro.nnue (default: engine/pyro.nnue)",
     )
+    parser.add_argument(
+        "--hidden",
+        type=int,
+        default=HIDDEN_SIZE,
+        help="Hidden size of the trained net (default 256; engine loader is 256-only)",
+    )
     args = parser.parse_args()
-    convert(args.input, args.output)
+    convert(args.input, args.output, args.hidden)
 
 
 if __name__ == "__main__":
