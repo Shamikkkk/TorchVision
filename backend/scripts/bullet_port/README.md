@@ -33,5 +33,7 @@ no default features — a no-feature build gives the MockGpu test device, so
   (Neither net is engine-loadable as-is: nnue.rs is 256-wide CReLU.)
 - `pyro_gpu_wdl01/03/05.rs` — WDL ladder (session 2a, July 12, 2026):
   SCReLU base + ConstantWDL 0.1/0.3/0.5. Own checkpoints/ dirs.
+- `pyro_gpu_wdl01_crelu.rs` — D4 control: CReLU at WDL 0.1 (completes the
+  activation x WDL 2x2). Writes to `checkpoints/pyro-gpu-wdl01-crelu`.
 - `pyro.rs.pre-port` — the pre-port (cudarc-era, expE) trainer, kept for
   reference; it exists nowhere in git history besides this copy.

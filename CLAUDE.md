@@ -107,7 +107,9 @@ as the bottleneck at 20M positions; SCReLU was the only gain. Next session:
 DATA axis with SCReLU as base. Full record in HISTORY.md.
 Session 2a (July 12, 2026): WDL blending on the existing data is DEAD —
 rho monotonically worse (0.1/0.3/0.5 → +0.199/+0.117/+0.008 vs B's +0.213)
-and material calibration inflates (Gate M 1.44 at 0.5). Recon proved the
+and material calibration inflates (Gate M 1.44 at 0.5). D4 CReLU control
+(WDL 0.1 → +0.085 vs C0's +0.125) completed the 2x2: WDL penalizes both
+activations, no interaction; SCReLU's edge widens under label noise. Recon proved the
 result field genuine/STM-correct but noisy: game-level 51% BLACK wins
 (biased April generation corpus) and 48% draw labels from 400-ply cap
 non-conversions. Session 2b: regenerate selfplay with the current T4 engine

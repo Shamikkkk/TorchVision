@@ -29,3 +29,7 @@ path = "../../examples/pyro_gpu_wdl03.rs"
 [[example]]
 name = "pyro_gpu_wdl05"
 path = "../../examples/pyro_gpu_wdl05.rs"
+
+[[example]]
+name = "pyro_gpu_wdl01_crelu"
+path = "../../examples/pyro_gpu_wdl01_crelu.rs"

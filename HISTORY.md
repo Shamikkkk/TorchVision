@@ -2379,12 +2379,14 @@ to session 1 — different targets = different floor; floors moved DOWN
 (0.0027/0.0016/0.00085), against my predicted direction, because draw-heavy
 blended targets sit near sigmoid 0.5):
 
-| candidate  | WDL | final loss | Gate A | Gate M ratio | rho    |
-|------------|-----|-----------|--------|--------------|--------|
-| B (ref)    | 0.0 | 0.0033    | PASS   | 1.03         | +0.213 |
-| D1         | 0.1 | 0.0027    | PASS   | 1.09         | +0.199 |
-| D2         | 0.3 | 0.0016    | PASS   | 1.24         | +0.117 |
-| D3         | 0.5 | 0.00085   | PASS   | 1.44         | +0.008 |
+| candidate  | act    | WDL | final loss | Gate A | Gate M ratio | rho    |
+|------------|--------|-----|-----------|--------|--------------|--------|
+| B (ref)    | SCReLU | 0.0 | 0.0033    | PASS   | 1.03         | +0.213 |
+| D1         | SCReLU | 0.1 | 0.0027    | PASS   | 1.09         | +0.199 |
+| D2         | SCReLU | 0.3 | 0.0016    | PASS   | 1.24         | +0.117 |
+| D3         | SCReLU | 0.5 | 0.00085   | PASS   | 1.44         | +0.008 |
+| D4 (ctrl)  | CReLU  | 0.1 | 0.0027    | PASS   | 1.09         | +0.085 |
+| C0 (ref)   | CReLU  | 0.0 | 0.0033    | PASS   | 1.03         | +0.125 |
 
 PREDICTIONS vs outcomes: D2-sweet-spot prediction WRONG — the flagged sharp
 failure mode ("48% draw mass flattens targets → monotonic rho drop") is what
@@ -2393,9 +2395,16 @@ happened. Gate M drifted OPPOSITE to prediction: not deflated but INFLATED
 corpus, so outcome targets overshoot SF18's calibration; >20% off at
 WDL >= 0.3, the flagged absolute-eval failure, in mirror image.
 
-D4 (CReLU control at best WDL): SKIPPED — decision table row 3 fired (all
-candidates <= B's +0.213). D4's purpose was isolating whether WDL GAINS stack
-with SCReLU; there are no gains to isolate.
+D4 (CReLU control at best-gating WDL = 0.1): initially skipped (decision
+table row 3 had fired), then run on explicit request to complete the
+activation x WDL 2x2. Result rho +0.085 (prediction band +0.10-0.13:
+direction held, magnitude slightly larger). The 2x2 (C0/B/D1/D4) shows WDL
+0.1 is a pure penalty in BOTH activation columns (CReLU −0.040, SCReLU
+−0.014) — no interaction rescue, and SCReLU's advantage WIDENS under
+outcome-label noise (+0.088 → +0.114). Curious replicated detail: per-batch
+loss floors match across activations at fixed WDL to ~5 digits (D4 vs D1,
+C0 vs B) — the floor is a property of the TARGETS, further evidence all
+these nets are target-noise-limited, not fit-limited.
 
 VERDICT (pre-committed): WDL axis DEAD on this data. Best config remains
 candidate B (SCReLU-256, WDL 0.0, rho +0.213). No SPRT (nothing >= 0.3).
@@ -2409,6 +2418,7 @@ that GPU trains at ~4M pos/s), (3) re-eval at SF18 d12 as before. WDL
 blending may be worth ONE retry on the new corpus (draw fraction should
 drop sharply), but volume+quality is the primary axis. Carry SCReLU.
 
-Checkpoints: bullet/checkpoints/pyro-gpu-wdl01|03|05/. Gate log:
+Checkpoints: bullet/checkpoints/pyro-gpu-wdl01|03|05|01-crelu/. Gate log:
 scratchpad gate_wdl.log (table above complete). Live nets untouched:
-md5 23BFCD331411B8B9C6A05191D42CAEF5 both locations, before and after.
+md5 23BFCD331411B8B9C6A05191D42CAEF5 both locations, before and after
+(re-verified again after the D4 addendum).
