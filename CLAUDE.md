@@ -161,26 +161,17 @@ cap games ~0 · end reasons 67.8% resign / 18.8% rules-draw / 10.1% Syzygy / 3.4
   — chess-plausible first-move edge, a label characteristic, not a defect (v1's bug was
   51% *black*).
 
-### ⏳ STAGE 3 — PENDING, PRE-STAGED, AWAITING GO
-Sequence (assets all written and verified; `stage3_resume.cmd` guards on stockfish.exe
-and refuses to run before the dedup output exists):
-1. `dedup_plain.py` over the shards → `selfplay_v2_dedup.plain` (~10 min; gate: ~11-13%
-   dropped per the final audit's replay count — expect ~43.5-44.5M kept; pilot
-   single-segment measured 2.07%).
-2. Launcher swap: `torch_stage3_resume.vbs` → Startup (campaign's already removed).
-3. `reeval_with_sf18.py --workers 10 --depth 12` detached (~1-1.3 days, est. 450-600
-   pos/s). **Depth 12 is mandatory** — it matches the old corpus's labels, so new-vs-old
-   comparisons stay one-variable.
-4. `filter_wdl_clean.py` → WDL-clean subset (drop draw-labeled |SF18| ≥ 400; gate 2-6%).
-5. `convert_plain_to_bullet.py` on BOTH .plains (~2h each) → full + WDL-clean `.data`.
-6. Final audit + 200-record STM spot-check + corpus card. STOP for sign-off.
+### ✅ STAGE 3 COMPLETE (July 24) — corpus is TRAINING-READY
+Every gate passed, every count reconciled exactly (full record: HISTORY.md + the
+corpus card): dedup dropped 14.402% (7,201,170 replay/repetition lines; post-dedup
+variety 0.995, max replay 4 = spot-checked signature collisions, zero identical
+lines); SF18 d12 relabel 42,799,245/42,799,245 written, **0 errors**, 58.7h at
+202 pos/s (true cost of unique positions — April's 320 pos/s was TT-warmth on v1's
+duplicates); WDL split dropped 5.15% (2,203,918 — exactly matching the audit's
+independent count); both conversions 0-skip with size==32×records; STM spot-check
+200/200 on each file. **Phase D is ready to reopen on the new corpus.**
 
-Verification chain: dedup kept+dropped == shard total; relabel written == kept − errors
-(<0.1%); .data size == 32 × records. Peak disk ~17GB (verified to fit).
-Note: SF18 evals carry warm-TT jitter (p50 14cp between runs) — a property of the
-labels, on the card, not a defect.
-
-### ▶ AFTER STAGE 3 — the training ladder (the payoff)
+### ▶ NEXT — the training ladder (fresh session, on explicit go)
 Base: SCReLU, HIDDEN=256, stock loss, SB30, new corpus. One variable each, 6 min/run:
 (a) baseline on new data vs old-data reference; (b) **512 re-test** — its failure is
 only proven on the starved corpus; (c) WDL retry on the clean subset (the one earned
@@ -204,10 +195,18 @@ the fire.
 - Data campaign: `backend/scripts/{generate_selfplay_v2,audit_selfplay_corpus,dedup_plain,filter_wdl_clean,reeval_with_sf18}.py`
 - GPU trainer port: `backend/scripts/bullet_port/` (README = restore procedure)
 - Gates: `backend/scripts/{gate_ladder,spearman_check,validate_nnue_rust}.py`
-- Ops (unsynced): `C:/torch_data/{campaign_watchdog.py, campaign_heartbeat.ps1, stage3_resume.cmd, check_running.ps1, *.log}`
+- Ops (deployed, unsynced): `C:/torch_data/{campaign_watchdog.py, campaign_heartbeat.ps1, stage3_resume.cmd, check_running.ps1, *.log}` ·
+  durable copies + runbook: `backend/scripts/ops/`
 - Syzygy: `backend/data/syzygy/` · SF18 + cutechess: see HISTORY.md
-- Corpora: `C:/torch_data/selfplay_v2.shard*.plain` (new, 50M) ·
-  `selfplay_sf18_d12.{plain,data}` (old 20M anchor — NEVER modify or delete)
+- **TRAINING CORPORA (v2, use these):**
+  `C:/torch_data/selfplay_v2_sf18.data` — FULL, 42,799,245 rec, md5
+  `0f8115f33c19ee7b896e2161cb8e24c5` ·
+  `C:/torch_data/selfplay_v2_sf18_wdlclean.data` — **WDL retry ONLY**, 40,595,327 rec,
+  md5 `7afff9cc3a96d53c3b1c0f7da1684170` ·
+  card: `C:/torch_data/selfplay_v2_corpus_card.md` (read before training)
+- Sources kept: `selfplay_v2.shard*.plain` (raw 50M) · `selfplay_v2_sf18.plain` ·
+  old 20M `selfplay_sf18_d12.{plain,data}` — SUPERSEDED by v2, retained as the
+  comparison anchor; NEVER modify or delete
 
 ---
 

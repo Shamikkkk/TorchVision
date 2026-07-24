@@ -2697,3 +2697,97 @@ Don't `taskkill` uvicorn — Ctrl+C in its terminal.
 - Don't run `uvicorn --workers >1` (in-memory game state).
 - Don't import chess.js in backend or python-chess in frontend.
 - Don't bundle two changes into one experiment.
+## Session 2b Stage 3 + wrap — dedup, SF18 relabel, the training-ready corpus (July 22-25, 2026)
+
+Completes the Session 2b arc. Backstory in the two sections above: the Stage 0
+autopsy (the v1 20M corpus was ~30 distinct games replayed ~10,000x — the root
+cause of every Phase D ceiling) and the Stage 2 campaign record (50,000,415
+positions over July 16-20, with the six-incident ops log: phantom SIGINT,
+EcoQoS launch-context throttling, the Windows-Update reboot, the 8h
+idle-throttle stall, the OneDrive 52GB OOM, the rename-blinded guards).
+
+### Step 0 — dedup (July 22)
+Full-line blake2b-8 exact dedup over the 10 shards: 50,000,415 -> 42,799,245
+kept, 7,201,170 dropped (14.402%), 5.2 min. Gate band 8-16% PASS (prediction
+11-13%: direction held, magnitude under — the signature count was a lower
+bound missing in-game repetition lines and partial replays). Post-dedup full
+audit: variety 0.995 (was 0.894 raw), max replay 4 — spot-checked 3 groups:
+zero byte-identical lines; collisions are stem-length transpositions (same
+board positions, different FEN counters, TT-divergent evals; one group's games
+even had different results). Distinct (FEN,result) pairs measured via numpy
+uint64 digests: 42,799,244 of 42,799,245 — pyro's determinism means same-FEN
+lines had identical evals and were already removed; a post-relabel re-dedup
+has a clean ~zero-drop baseline. Per-shard drift table (full parse): draw%
+20.9-21.4, white share 50.1-50.8, end reasons +-0.4pp — homogeneous, no step
+changes; shards 8-9 (frozen pre-OOM) match 0-7 on every metric.
+
+### Disk remediation (July 22)
+24GB free was under the 25GB bar: deleted pip cache (5.7GB) + npm cache
+(4.9GB) -> 34GB. Protected and untouched: C:/torch_data, backend/data (v1-era
+corpus + Syzygy in the repo tree), checkpoints (expE protected), pagefile
+47.2GB / hiberfil 6.3GB (not authorized; hiberfil noted as the next 6.3GB via
+powercfg /h off if ever needed).
+
+### SF18 relabel (July 22-24) — 58.7 hours, zero errors
+reeval_with_sf18.py (multi-worker since April; hardened this session with
+EcoQoS self-apply on master/workers/each SF18, V2_HEADLESS SIGINT immunity,
+truncate-reconcile resume — live-tested July 17 by kill-mid-chunk + resume,
+line-exact vs an uninterrupted control, including a simulated
+flushed-ahead-of-checkpoint truncation). Run: --workers 10 --depth 12
+(mandatory: matches the old corpus labels), OneDrive quit first (standing
+rule), launched via the stage3_resume.cmd resurrection path with watchdog +
+S3 heartbeat + a new standalone disk monitor (5-min polls, <5GB -> clean
+tree-kill for resume). Result: 42,799,245/42,799,245 written, 0 errors,
+211,479s (202 pos/s), survived nightly shutdowns via logon resurrection.
+
+THE THROUGHPUT LESSON: 202 pos/s at 10 workers vs April's 320 at 6. The
+April rate was flattered by v1's duplication — SF18's TT stayed warm on
+endlessly repeated positions. 42.8M unique positions pay the true cold-TT
+cost of depth 12. Recorded on the corpus card for future relabel estimates.
+
+Mid-relabel incident (July 22): the watchdog died at 02:53 by the same class
+of bug as the pyro_campaign rename — its qos scan bucketed the workers as
+'stockfish-windows-x86-64-avx' while the idle-exit logic looked up the exact
+key 'stockfish'; it logged 10 workers and "no engines" simultaneously, then
+exited (keep-awake unasserted ~9h; no harm — the box stayed active). Fix:
+BOTH engine counts now prefix-match the same bucketed name set the scan
+produces, and every cycle logs "engines: pyro N sf N idle_cycles N/8" so the
+two code paths can never disagree silently again. The auto-resume guard chain
+held during the bug: corpus_total() >= target blocked a spurious campaign
+resume — two independent guards, one saved us.
+
+### WDL-clean split + conversions + verification (July 24-25)
+filter_wdl_clean.py: dropped 2,203,918 draw-labeled positions with
+|white-POV SF18| >= 400 (5.15%; gate 2-6%; zero non-draw lines by
+construction). Cross-check: the final audit independently counts exactly
+2,203,918 such positions. convert_plain_to_bullet.py on both .plains:
+0 skipped on either; size == 32 x records asserted on both. 200-record
+random STM spot-check on EACH .data (score vs eval_stm, result byte under
+STM flip, occupancy popcount, king squares, full piece-nibble mirror
+round-trip): 200/200 and 200/200.
+
+### The deliverables (corpus card: C:/torch_data/selfplay_v2_corpus_card.md)
+- selfplay_v2_sf18.data — FULL corpus, 42,799,245 records, 1,369,575,840
+  bytes, md5 0f8115f33c19ee7b896e2161cb8e24c5. Eval training.
+- selfplay_v2_sf18_wdlclean.data — 40,595,327 records, 1,299,050,464 bytes,
+  md5 7afff9cc3a96d53c3b1c0f7da1684170. THE ONLY FILE THE ONE-SHOT WDL RETRY
+  MAY USE.
+Documented characteristics (on the card, not defects): the variety history
+(six restart boundaries, ~10.6% replays, erased by dedup; sidecar persistence
+prevents the class); the color characteristic (white 50.4-50.5% of decisive,
+z inflated by n, real first-move edge — v1's 51%-black artifact gone); 21.6%
+of draw labels are honest non-conversions (absent from the wdlclean file);
+19,487 thrown-game positions (0.046%, real outcomes); SF18 warm-TT label
+jitter (p50 14cp between hypothetical reruns); the 202-pos/s cold-TT rate.
+
+Wrap: intermediates deleted (dedup/wdlclean .plains, re-derivable), stage3
+launcher out of Startup, armor self-terminated, 26GB free. Sources kept: raw
+shards + selfplay_v2_sf18.plain + the old 20M anchor (superseded by v2,
+retained for one-variable comparisons, still never-delete). Live nets
+untouched through the entire session: pyro.nnue md5
+23bfcd331411b8b9c6a05191d42caef5 at both locations, verified at every stage
+boundary. Ops scripts committed to backend/scripts/ops/ (README = runbook).
+
+Phase D reopens on this corpus: SCReLU-256 baseline, the 512 re-test, the
+earned WDL retry — one variable each, ~6 min/run, rho >= 0.3 earns an SPRT,
+deployment gated on style. Fresh session on explicit go.
