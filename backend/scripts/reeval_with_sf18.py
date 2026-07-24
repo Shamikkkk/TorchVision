@@ -19,10 +19,13 @@ import argparse
 import json
 import multiprocessing as mp
 import os
+import signal
 import subprocess
 import sys
 import time
 from datetime import datetime, timedelta
+
+from scripts.generate_selfplay_v2 import disable_power_throttling
 
 SF18_DEFAULT = r"C:\Users\shami\Downloads\stockfish-windows-x86-64-avx2\stockfish\stockfish-windows-x86-64-avx2.exe"
 INPUT_DEFAULT = "data/selfplay_d6_combined.plain"
@@ -106,6 +109,10 @@ def _eval_fen(proc, fen, depth, movetime):
 
 
 def worker_fn(sf_path, depth, movetime, work_q, result_q):
+    disable_power_throttling()
+    if os.environ.get("V2_HEADLESS"):
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
     proc = None
 
     def restart():
@@ -113,6 +120,7 @@ def worker_fn(sf_path, depth, movetime, work_q, result_q):
         if proc is not None:
             _kill_sf(proc)
         proc = _launch_sf(sf_path)
+        disable_power_throttling(proc.pid)
 
     restart()
 
@@ -167,6 +175,10 @@ def main():
     parser.add_argument("--progress", default=PROGRESS_DEFAULT)
     args = parser.parse_args()
 
+    disable_power_throttling()
+    if os.environ.get("V2_HEADLESS"):
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     os.makedirs(os.path.dirname(os.path.abspath(LOG_DEFAULT)), exist_ok=True)
 
@@ -200,10 +212,32 @@ def main():
         total_written = ckpt["total_written"]
         total_errors = ckpt.get("total_errors", 0)
         log(f"  resume   : skipping {skip_lines:,} input lines ({total_written:,} already written)")
+        # Reconcile: the checkpoint is written AFTER each flush, so a kill
+        # between flush and checkpoint leaves the output AHEAD of the
+        # checkpoint; appending blindly would duplicate lines. Truncate the
+        # output back to exactly total_written lines before resuming.
+        if not os.path.exists(args.output):
+            sys.exit("resume: checkpoint exists but output file is missing — refusing")
+        with open(args.output, "r+", encoding="utf-8") as f:
+            pos = 0
+            for i in range(total_written):
+                if not f.readline():
+                    sys.exit(f"resume: output has only {i:,} lines, checkpoint says "
+                             f"{total_written:,} — corrupt state, refusing")
+            pos = f.tell()
+            extra = sum(1 for _ in f)
+            if extra:
+                log(f"  resume   : truncating {extra:,} unreconciled lines past checkpoint")
+            f.seek(pos)
+            f.truncate()
     elif args.resume:
         log("  resume   : no checkpoint found, starting fresh")
 
     out_mode = "a" if (args.resume and skip_lines > 0) else "w"
+
+    with open(args.input, encoding="utf-8") as f:
+        input_total = sum(1 for _ in f)
+    log(f"  input has {input_total:,} lines")
 
     # Queues — bound work_q to avoid feeding too far ahead
     max_in_flight = args.workers * 16
@@ -325,7 +359,7 @@ def main():
             if new_since_report >= 100_000 or (elapsed > 0 and now - t_last_report >= 300):
                 if total_written > 0:
                     rate = total_written / elapsed if elapsed > 0 else 0
-                    total_target = min(args.limit, 20_000_000) if args.limit else 20_000_000
+                    total_target = min(args.limit, input_total) if args.limit else input_total
                     remaining_pos = max(0, total_target - total_written)
                     eta_s = remaining_pos / rate if rate > 0 else 0
                     eta_str = (datetime.now() + timedelta(seconds=eta_s)).strftime("%Y-%m-%d %H:%M")
