@@ -116,22 +116,18 @@ CUDA directly. Bullet pinned to `cebc78a0`; GeForce driver updated to **610.62 (
 
 ---
 
-## PHASE D (NNUE) — REOPENED, DATA-BOUND
+## PHASE D (NNUE) — TRAINING LADDER COMPLETE; LIVE ENGINE SHELVED
 
-**Session 1 (capacity ladder, old 20M corpus):** 512-wide made move-ranking WORSE
-(rho +0.045 vs 256's +0.125). **SCReLU is the new base activation (+0.213).** All
-candidates hit *identical* loss floors ⇒ the ceiling was the DATA, not the architecture.
+**Champion:** 512-wide SCReLU, full v2 corpus, WDL 0.0; frozen-gate pair mean
+rho **+0.624**. Staged at `C:/torch_data/phase_d_champion/pyro_v2_screlu512_raw.bin`,
+SHA-256 `50e9eb4c1a7c6507d3b77562adde859e3eeb1c7d2efe4e838faabfc292e64184`.
+The starved-corpus Session-1 512/rho verdict is overturned; WDL is permanently closed
+after its clean-data retry also lost. Full ladder record: `HISTORY.md`.
 
-**Session 2a (WDL ladder, old corpus):** every WDL weight hurt (0.1→+0.199, 0.3→+0.117,
-0.5→+0.008; CReLU control +0.085). Mechanism: the old corpus was 48% draws (ply-cap
-non-conversions) with a 51% black bias. WDL earns exactly ONE retry on clean data.
-
-**Stage 0 autopsy — the root cause of everything:** the v1 20M corpus was
-**~30 distinct games replayed ~10,000× each** (37-pair fixed book × deterministic
-engine). Every Phase D ceiling traces here.
-
-**Gate bar for any new net:** Spearman rho vs SF18 ≥ 0.3 earns an SPRT.
-Reference: expE +0.155, GPU-parity +0.125, SCReLU +0.213. Gate is deterministic (±0.000).
+**Status:** SPRT-eligible, NOT validated or shipped. NNUE remains SHELVED for the live
+engine pending SCReLU-512 inference verification → SPRT vs PeSTO → gauntlet + STYLE
+check. The live engine remains PeSTO+Tal via `--no-nnue`. Both v2 `.data` files below
+remain the frozen training assets.
 
 ---
 
@@ -169,19 +165,7 @@ lines); SF18 d12 relabel 42,799,245/42,799,245 written, **0 errors**, 58.7h at
 202 pos/s (true cost of unique positions — April's 320 pos/s was TT-warmth on v1's
 duplicates); WDL split dropped 5.15% (2,203,918 — exactly matching the audit's
 independent count); both conversions 0-skip with size==32×records; STM spot-check
-200/200 on each file. **Phase D is ready to reopen on the new corpus.**
-
-### ▶ NEXT — the training ladder (fresh session, on explicit go)
-Base: SCReLU, HIDDEN=256, stock loss, SB30, new corpus. One variable each, 6 min/run:
-(a) baseline on new data vs old-data reference; (b) **512 re-test** — its failure is
-only proven on the starved corpus; (c) WDL retry on the clean subset (the one earned
-retry); (d) further capacity/data-mix if warranted.
-rho ≥ 0.3 → SPRT vs PeSTO. A SCReLU net needs an inference change in `engine/src/nnue.rs`
-first (square the clipped accumulator, /QA renormalize) — branch-scoped, verified, before
-any SPRT is trustworthy. HIDDEN_SIZE is a compile-time const (nnue.rs:12): width changes
-need a rebuild.
-**Deployment stays gated on STYLE, not just Elo** — a winning net ships only if it keeps
-the fire.
+200/200 on each file. These remain the frozen inputs for the completed Phase D ladder.
 
 ---
 

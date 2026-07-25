@@ -2791,3 +2791,116 @@ boundary. Ops scripts committed to backend/scripts/ops/ (README = runbook).
 Phase D reopens on this corpus: SCReLU-256 baseline, the 512 re-test, the
 earned WDL retry — one variable each, ~6 min/run, rho >= 0.3 earns an SPRT,
 deployment gated on style. Fresh session on explicit go.
+
+## Phase D training ladder on v2 corpus — SCReLU-512 champion (July 25, 2026)
+
+The ladder ran against one frozen, deterministic ruler. Before candidate training,
+`gate_ladder_frozen.py` reproduced the archived Session-1 SCReLU-256 anchor exactly:
+Gate A PASS at 0.0% saturation, Gate M `1.03`, and Spearman rho `+0.213384615`
+(`+0.213`). All five anchor checks passed. The frozen manifest SHA-256 is
+`3479ac0dd90c85447d3ef2bbb32fef56c888cdfc54bb130602cc1cf6119b0046`.
+
+### Experimental control and D0
+
+Every run used the Session-1 schedule: 1,221 batches × 30 superbatches =
+36,630 updates, batch 16,384, 600,145,920 positions consumed, seed 198273612,
+cosine LR `1e-3 → 1e-5`, SCReLU, and final SB30 selection. D0 was the rung-(a)
+matched-seed duplicate, so determinism was measured on the exact headline
+configuration rather than a throwaway preflight.
+
+D0 was NOT byte-deterministic: all 18 checkpoint exports and optimizer-state
+files differed between identical CUDA runs, consistent with GPU `atomicAdd`
+ordering. The rho values were `+0.533230769` and `+0.534205128`, a spread of
+`0.000974359`. That became the measured noise floor; every later rung used a
+matched-seed pair, and a real edge had to clear it.
+
+### Ladder result
+
+| Rung | One variable | Pair rhos | Pair mean | Pair spread | Verdict |
+|---|---|---:|---:|---:|---|
+| (a) SCReLU-256/full v2 | data file vs Session 1 | +0.533231 / +0.534205 | **+0.533718** | 0.000974 | v2 data wins |
+| (b) SCReLU-512/full v2 | hidden 256 → 512 | +0.623487 / +0.623641 | **+0.623564** | 0.000154 | champion |
+| (c0) SCReLU-512/WDL-clean | full → WDL-clean file | +0.616974 / +0.617385 | **+0.617179** | 0.000410 | file is not neutral |
+| (c1) SCReLU-512/WDL-clean | WDL 0.0 → 0.1 | +0.603077 / +0.604564 | **+0.603821** | 0.001487 | WDL permanently closed |
+
+**Rung (a) — corpus effect.** The trainer was the exact Session-1 SCReLU-256
+configuration with only the data path changed to `selfplay_v2_sf18.data`.
+The headline rho rose from `+0.213` to `+0.5332` (pair mean `+0.5337`):
+`+0.320` over the anchor and `+0.233` over the `0.300` SPRT bar. The same
+architecture and compute gained about 2.5× rho from the corpus alone, proving
+the Session-1 diagnosis that data—not architecture or loss floor—was the ceiling.
+
+**Rung (b) — 512 re-test.** The only change from (a) was `HIDDEN_SIZE 256 → 512`.
+Pair mean rho reached `+0.623564`; against the designated rung-(a) run,
+the gain was `+0.090333`, or 92.7× the D0 noise floor. This overturns the
+Session-1 “512 is worse” verdict as a data artifact: on the starved corpus,
+extra capacity memorized noise (`+0.045`); on roughly 913k real games it paid
+decisively (`+0.624`).
+
+**Rung (c0) — the file control caught a real effect.** c0 held the 512-SCReLU,
+WDL-0 configuration fixed and changed only to
+`selfplay_v2_sf18_wdlclean.data`. Its mean was `+0.617179`, so
+`mean(c0) − mean(b) = −0.006385`, 6.5× the noise floor. Dropping the 5.15%
+winning-but-drawn records measurably hurt even eval-target training: those
+positions carried useful evaluation signal. The file was not neutral, which
+is why c0—not rung (b)—is the required attribution control for c1.
+
+**Rung (c1) — the earned WDL retry failed.** The only change from c0 was
+`ConstantWDL 0.0 → 0.1`. Its mean was `+0.603821`, so
+`mean(c1) − mean(c0) = −0.013359`: 13.7× the D0 noise floor in the wrong
+direction, and 9.0× c1's own larger pair spread. Parents 3 and 7 were the
+mechanism-level collapse points, where outcome and SF18 evaluation disagree.
+WDL is DEAD on clean data too: Session 2a's fake-draw explanation has spent
+its one appeal. This is the second and final strike; the WDL axis is
+permanently closed.
+
+### Per-parent pair means
+
+| Parent | (a) 256/full | (b) 512/full | c0 512/clean | c1 512/clean/WDL .1 |
+|---:|---:|---:|---:|---:|
+| 1 | +0.657 | +0.684 | +0.671 | +0.640 |
+| 2 | +0.615 | +0.531 | +0.598 | +0.614 |
+| 3 | +0.345 | +0.528 | +0.542 | +0.430 |
+| 4 | +0.745 | +0.700 | +0.692 | +0.756 |
+| 5 | +0.581 | +0.653 | +0.668 | +0.680 |
+| 6 | +0.635 | +0.674 | +0.560 | +0.604 |
+| 7 | +0.275 | +0.518 | +0.624 | +0.439 |
+| 8 | +0.682 | +0.731 | +0.693 | +0.675 |
+| 9 | +0.031 | +0.238 | +0.232 | +0.223 |
+| 10 | +0.719 | +0.796 | +0.783 | +0.757 |
+| 11 | +0.555 | +0.789 | +0.640 | +0.758 |
+| 12 | +0.391 | +0.443 | +0.561 | +0.509 |
+| 13 | +0.736 | +0.819 | +0.725 | +0.783 |
+| 14 | +0.436 | +0.553 | +0.572 | +0.527 |
+| 15 | +0.602 | +0.695 | +0.698 | +0.661 |
+
+Parent 9 remains the unresolved position type: it improved from only `+0.031`
+at 256 to `+0.238` at 512, then stayed near `+0.23` through c0 and c1.
+Neither added capacity nor clean-data/WDL treatment cracked it. This is a
+future-experiment note, not a reason to reopen this ladder.
+
+### Gate M trend and champion designation
+
+Gate A passed at 0.0% saturation for every net. Gate M also passed throughout,
+but trended `1.03` (Session 1) → `1.36` (256/v2) → `1.38` (512/full) →
+`1.40` (c0/c1). The v2 nets—especially the wider variants—calibrate material
+more steeply versus SF18. WATCH this during engine validation because material
+scaling interacts with search.
+
+**CHAMPION:** rung (b), 512-wide SCReLU trained on the full
+`selfplay_v2_sf18.data` corpus with WDL 0.0, pair mean rho `+0.623564`.
+It wins by a margin far beyond measured noise. The best Session-1 net was
+`+0.213`; the champion is `+0.624`, about 2.9× higher, vindicating the entire
+v2 corpus campaign.
+
+The sole inference-block candidate is staged outside the live engine:
+
+- `C:/torch_data/phase_d_champion/pyro_v2_screlu512_raw.bin`
+- SHA-256 `50e9eb4c1a7c6507d3b77562adde859e3eeb1c7d2efe4e838faabfc292e64184`
+- MD5 `56c14d958057aa23f16103c15b911ec6`
+
+Status is **SPRT-eligible, NOT validated, NOT shipped**. The remaining path is
+SCReLU-512 inference implementation and verification → SPRT versus PeSTO →
+gauntlet plus STYLE check. Per mission, a net that wins the SPRT but costs
+Pyro's beautiful, aggressive, sacrificial style does not ship. The live engine
+continues to run PeSTO+Tal via `--no-nnue`.
