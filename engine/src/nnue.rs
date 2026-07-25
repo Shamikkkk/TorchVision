@@ -9,13 +9,42 @@ use std::io::{Read as IoRead, Write as IoWrite};
 /// 768 input features: 2 colors × 6 piece types × 64 squares
 pub const INPUT_SIZE: usize = 768;
 /// Hidden layer width
-pub const HIDDEN_SIZE: usize = 256;
-/// Quantization parameter for activations (CReLU clamp range)
+pub const HIDDEN_SIZE: usize = 512;
+/// Quantization parameter for activations (SCReLU clamp range)
 pub const QA: i32 = 255;
 /// Quantization parameter for output weights
 pub const QB: i32 = 64;
-/// Centipawn scaling factor — must equal eval_scale in bullet/examples/pyro.rs
+/// Centipawn scaling factor — must equal eval_scale in the champion trainer
 pub const SCALE: i32 = 400;
+
+// ---------------------------------------------------------------------------
+// Quantized SCReLU-512 inference contract
+//
+// Sources:
+//   HIDDEN_SIZE = 512:
+//     backend/scripts/bullet_port/pyro_v2_screlu512.rs
+//   QA = 255, QB = 64, SCALE = 400:
+//     that trainer and bullet/examples/simple.rs
+//   Serialization multipliers:
+//     l0w/l0b × QA, l1w × QB, l1b × (QA·QB), all rounded to i16 by
+//     SavedFormat in the champion trainer.
+//
+// For each accumulator element:
+//   q   = clamp(accumulator, 0, QA)
+//   sum = Σ (q² · l1_weight)       // i64; SCReLU squares the clipped value
+//   sum = sum / QA                 // integer division, truncating toward zero
+//   sum = sum + l1_bias
+//   cp  = sum · SCALE / (QA · QB)  // integer division, truncating toward zero
+//
+// Scale proof:
+//   q²·l1_weight has scale QA²·QB. Dividing by QA yields QA·QB, which
+//   matches the saved l1 bias scale exactly. The final QA·QB division then
+//   restores the trainer's float output before multiplying by eval SCALE.
+//
+// IMPORTANT: the /QA division MUST remain separate and before the bias add.
+// Merging it algebraically with the final SCALE division changes integer
+// truncation, especially for negative sums, and is not trainer-equivalent.
+// ---------------------------------------------------------------------------
 
 // Piece types (must match movegen constants)
 const PAWN: u8 = 0;
@@ -29,10 +58,10 @@ const KING: u8 = 5;
 // Network weights
 // ---------------------------------------------------------------------------
 
-/// NNUE network: 768 → 256×2 (perspectives) → 1
+/// NNUE network: 768 → 512×2 (perspectives) → 1 with SCReLU activation.
 pub struct Network {
     /// First-layer weights: [INPUT_SIZE][HIDDEN_SIZE], stored as i16
-    pub ft_weights: Box<[[i16; HIDDEN_SIZE]; INPUT_SIZE]>,
+    pub ft_weights: Box<[[i16; HIDDEN_SIZE]]>,
     /// First-layer bias: [HIDDEN_SIZE]
     pub ft_bias: [i16; HIDDEN_SIZE],
     /// Output weights: [HIDDEN_SIZE * 2] (STM half ++ NSTM half)
@@ -145,9 +174,9 @@ impl Accumulator {
 impl Network {
     /// Evaluate the position from the accumulator.
     ///
-    /// The output layer takes `[CReLU(STM_acc), CReLU(NSTM_acc)]` (512 values)
-    /// and computes a dot product with `out_weights`, adds `out_bias`,
-    /// then scales to centipawns.
+    /// The output layer takes `[SCReLU(STM_acc), SCReLU(NSTM_acc)]` (1024
+    /// values) and applies the exact two-stage integer normalization documented
+    /// in the inference contract above.
     pub fn evaluate(&self, acc: &Accumulator, side_to_move: bool) -> i32 {
         let (stm, nstm) = if side_to_move {
             (&acc.white, &acc.black)
@@ -155,24 +184,24 @@ impl Network {
             (&acc.black, &acc.white)
         };
 
-        let mut output = self.out_bias as i32;
+        let mut activation_sum = 0i64;
 
         // STM half (first HIDDEN_SIZE weights)
         for i in 0..HIDDEN_SIZE {
-            let clamped = stm[i].clamp(0, QA);
-            output += clamped * self.out_weights[i] as i32;
+            activation_sum += screlu_square(stm[i]) * self.out_weights[i] as i64;
         }
 
         // NSTM half (second HIDDEN_SIZE weights)
         for i in 0..HIDDEN_SIZE {
-            let clamped = nstm[i].clamp(0, QA);
-            output += clamped * self.out_weights[HIDDEN_SIZE + i] as i32;
+            activation_sum +=
+                screlu_square(nstm[i]) * self.out_weights[HIDDEN_SIZE + i] as i64;
         }
 
-        // Stock Bullet scale convention: network learns output ≈ score/SCALE,
-        // so multiply by SCALE to restore centipawns. i64 to avoid overflow
-        // (max output ~16.6M × SCALE=400 = 6.6B exceeds i32::MAX).
-        (output as i64 * SCALE as i64 / (QA as i64 * QB as i64)) as i32
+        // Keep these as two distinct integer divisions. Rust signed integer
+        // division truncates toward zero, which the Python reference mirrors.
+        let normalized = activation_sum / QA as i64;
+        let biased = normalized + self.out_bias as i64;
+        (biased * SCALE as i64 / (QA as i64 * QB as i64)) as i32
     }
 
     /// Create a network with small random weights (for testing only).
@@ -190,7 +219,7 @@ impl Network {
             ((*state >> 16) as i16) % 16
         };
 
-        let mut ft_weights = Box::new([[0i16; HIDDEN_SIZE]; INPUT_SIZE]);
+        let mut ft_weights = vec![[0i16; HIDDEN_SIZE]; INPUT_SIZE].into_boxed_slice();
         for input in 0..INPUT_SIZE {
             for hidden in 0..HIDDEN_SIZE {
                 ft_weights[input][hidden] = next_i16(&mut rng_state);
@@ -215,16 +244,33 @@ impl Network {
     // -----------------------------------------------------------------------
     // Binary file I/O
     //
-    // Format:
-    //   Magic:   [0x4E, 0x4E, 0x55, 0x45]  ("NNUE")
-    //   Version: u32 little-endian = 1
-    //   Data:    all i16 values in little-endian order:
-    //            ft_weights (768*256), ft_bias (256),
-    //            out_weights (512), out_bias (1)
+    // Format v2 (32-byte activation-aware header):
+    //   Magic:       [0x4E, 0x4E, 0x55, 0x45] ("NNUE")
+    //   Version:     u32 LE = 2
+    //   Activation:  u32 LE = 2 (SCReLU)
+    //   Input size:  u32 LE = 768
+    //   Hidden size: u32 LE = 512
+    //   QA:          u32 LE = 255
+    //   QB:          u32 LE = 64
+    //   SCALE:       u32 LE = 400
+    //   Data: all i16 values in little-endian order:
+    //         ft_weights (768*512), ft_bias (512),
+    //         out_weights (1024), out_bias (1)
+    //
+    // Version 1 was implicitly CReLU-256 and had only an 8-byte header. This
+    // binary rejects it. Explicit architecture fields make width, activation,
+    // and quantization mismatches fail closed rather than mis-evaluate.
     // -----------------------------------------------------------------------
 
     const MAGIC: [u8; 4] = [0x4E, 0x4E, 0x55, 0x45];
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
+    const ACTIVATION_SCRELU: u32 = 2;
+    const HEADER_BYTES: u64 = 32;
+
+    fn payload_bytes() -> u64 {
+        ((INPUT_SIZE * HIDDEN_SIZE + HIDDEN_SIZE + HIDDEN_SIZE * 2 + 1)
+            * std::mem::size_of::<i16>()) as u64
+    }
 
     /// Write network weights to a binary file.
     pub fn to_file(&self, path: &str) -> Result<(), String> {
@@ -232,6 +278,12 @@ impl Network {
 
         f.write_all(&Self::MAGIC).map_err(|e| e.to_string())?;
         f.write_all(&Self::VERSION.to_le_bytes()).map_err(|e| e.to_string())?;
+        f.write_all(&Self::ACTIVATION_SCRELU.to_le_bytes()).map_err(|e| e.to_string())?;
+        f.write_all(&(INPUT_SIZE as u32).to_le_bytes()).map_err(|e| e.to_string())?;
+        f.write_all(&(HIDDEN_SIZE as u32).to_le_bytes()).map_err(|e| e.to_string())?;
+        f.write_all(&(QA as u32).to_le_bytes()).map_err(|e| e.to_string())?;
+        f.write_all(&(QB as u32).to_le_bytes()).map_err(|e| e.to_string())?;
+        f.write_all(&(SCALE as u32).to_le_bytes()).map_err(|e| e.to_string())?;
 
         // ft_weights: INPUT_SIZE * HIDDEN_SIZE i16 values
         for row in self.ft_weights.iter() {
@@ -264,12 +316,64 @@ impl Network {
             return Err(format!("bad magic: {:?}", magic));
         }
 
-        // Version
-        let mut ver_bytes = [0u8; 4];
-        f.read_exact(&mut ver_bytes).map_err(|e| format!("read version: {}", e))?;
-        let version = u32::from_le_bytes(ver_bytes);
+        let read_u32 = |file: &mut File, field: &str| -> Result<u32, String> {
+            let mut buf = [0u8; 4];
+            file.read_exact(&mut buf).map_err(|e| format!("read {}: {}", field, e))?;
+            Ok(u32::from_le_bytes(buf))
+        };
+
+        // Architecture-aware v2 header. Every mismatch is fatal.
+        let version = read_u32(&mut f, "version")?;
         if version != Self::VERSION {
-            return Err(format!("unsupported version {}", version));
+            return Err(format!(
+                "unsupported NNUE version {} (expected {}: SCReLU-512)",
+                version,
+                Self::VERSION
+            ));
+        }
+        let activation = read_u32(&mut f, "activation")?;
+        if activation != Self::ACTIVATION_SCRELU {
+            return Err(format!(
+                "activation mismatch: header {} (expected {} = SCReLU)",
+                activation,
+                Self::ACTIVATION_SCRELU
+            ));
+        }
+        let input_size = read_u32(&mut f, "input size")?;
+        if input_size != INPUT_SIZE as u32 {
+            return Err(format!(
+                "input-size mismatch: header {} (expected {})",
+                input_size, INPUT_SIZE
+            ));
+        }
+        let hidden_size = read_u32(&mut f, "hidden size")?;
+        if hidden_size != HIDDEN_SIZE as u32 {
+            return Err(format!(
+                "hidden-size mismatch: header {} (expected {})",
+                hidden_size, HIDDEN_SIZE
+            ));
+        }
+        let qa = read_u32(&mut f, "QA")?;
+        let qb = read_u32(&mut f, "QB")?;
+        let scale = read_u32(&mut f, "SCALE")?;
+        if qa != QA as u32 || qb != QB as u32 || scale != SCALE as u32 {
+            return Err(format!(
+                "quantization mismatch: header QA/QB/SCALE={}/{}/{} \
+                 (expected {}/{}/{})",
+                qa, qb, scale, QA, QB, SCALE
+            ));
+        }
+
+        let actual_bytes = f
+            .metadata()
+            .map_err(|e| format!("read metadata: {}", e))?
+            .len();
+        let expected_bytes = Self::HEADER_BYTES + Self::payload_bytes();
+        if actual_bytes != expected_bytes {
+            return Err(format!(
+                "NNUE file-size mismatch: {} bytes (expected {} for SCReLU-512)",
+                actual_bytes, expected_bytes
+            ));
         }
 
         let read_i16 = |file: &mut File| -> Result<i16, String> {
@@ -279,7 +383,7 @@ impl Network {
         };
 
         // ft_weights
-        let mut ft_weights = Box::new([[0i16; HIDDEN_SIZE]; INPUT_SIZE]);
+        let mut ft_weights = vec![[0i16; HIDDEN_SIZE]; INPUT_SIZE].into_boxed_slice();
         for row in ft_weights.iter_mut() {
             for val in row.iter_mut() {
                 *val = read_i16(&mut f)?;
@@ -303,6 +407,12 @@ impl Network {
 
         Ok(Network { ft_weights, ft_bias, out_weights, out_bias })
     }
+}
+
+#[inline]
+fn screlu_square(value: i32) -> i64 {
+    let q = value.clamp(0, QA) as i64;
+    q * q
 }
 
 // ---------------------------------------------------------------------------
@@ -400,6 +510,115 @@ mod tests {
         }
 
         std::fs::remove_file(path_str).ok();
+    }
+
+    #[test]
+    fn screlu_boundary_values_exact() {
+        let cases = [
+            (-100_000, 0i64),
+            (-1, 0),
+            (0, 0),
+            (1, 1),
+            (QA - 1, (QA as i64 - 1).pow(2)),
+            (QA, (QA as i64).pow(2)),
+            (QA + 1, (QA as i64).pow(2)),
+            (100_000, (QA as i64).pow(2)),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(
+                screlu_square(input),
+                expected,
+                "SCReLU boundary mismatch at accumulator {}",
+                input
+            );
+        }
+    }
+
+    #[test]
+    fn evaluation_preserves_two_division_order() {
+        let mut net = Network::from_random();
+        for weight in net.out_weights.iter_mut() {
+            *weight = 0;
+        }
+        // A deliberately negative activation sum where moving /QA after the
+        // bias add would change truncation.
+        net.out_weights[0] = -1;
+        net.out_bias = 205;
+
+        let mut acc = Accumulator {
+            white: [0; HIDDEN_SIZE],
+            black: [0; HIDDEN_SIZE],
+        };
+        acc.white[0] = 17;
+
+        let activation_sum = -(17i64 * 17);
+        let normalized = activation_sum / QA as i64;
+        let biased = normalized + 205;
+        let expected = (biased * SCALE as i64 / (QA as i64 * QB as i64)) as i32;
+        let merged = ((activation_sum + 205 * QA as i64) * SCALE as i64
+            / (QA as i64 * QA as i64 * QB as i64)) as i32;
+
+        assert_ne!(expected, merged, "test vector must detect merged divisions");
+        assert_eq!(expected, 5);
+        assert_eq!(merged, 4);
+        assert_eq!(net.evaluate(&acc, true), expected);
+    }
+
+    fn write_header_only(path: &str, version: u32, activation: u32, hidden: u32) {
+        let mut f = File::create(path).unwrap();
+        f.write_all(&Network::MAGIC).unwrap();
+        for value in [
+            version,
+            activation,
+            INPUT_SIZE as u32,
+            hidden,
+            QA as u32,
+            QB as u32,
+            SCALE as u32,
+        ] {
+            f.write_all(&value.to_le_bytes()).unwrap();
+        }
+    }
+
+    #[test]
+    fn loader_rejects_v1_crelu_header() {
+        let path = std::env::temp_dir().join("pyro_test_nnue_v1.bin");
+        let mut f = File::create(&path).unwrap();
+        f.write_all(&Network::MAGIC).unwrap();
+        f.write_all(&1u32.to_le_bytes()).unwrap();
+        drop(f);
+
+        let err = Network::from_file(path.to_str().unwrap()).err().unwrap();
+        assert!(err.contains("unsupported NNUE version 1"), "{err}");
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn loader_rejects_wrong_activation_and_width() {
+        let activation_path = std::env::temp_dir().join("pyro_test_nnue_crelu.bin");
+        write_header_only(
+            activation_path.to_str().unwrap(),
+            Network::VERSION,
+            1,
+            HIDDEN_SIZE as u32,
+        );
+        let activation_err =
+            Network::from_file(activation_path.to_str().unwrap()).err().unwrap();
+        assert!(activation_err.contains("activation mismatch"), "{activation_err}");
+
+        let width_path = std::env::temp_dir().join("pyro_test_nnue_256.bin");
+        write_header_only(
+            width_path.to_str().unwrap(),
+            Network::VERSION,
+            Network::ACTIVATION_SCRELU,
+            256,
+        );
+        let width_err = Network::from_file(width_path.to_str().unwrap()).err().unwrap();
+        assert!(width_err.contains("hidden-size mismatch"), "{width_err}");
+
+        std::fs::remove_file(activation_path).ok();
+        std::fs::remove_file(width_path).ok();
     }
 
     #[test]
