@@ -19,6 +19,22 @@ name = "pyro_gpu_screlu"
 path = "../../examples/pyro_gpu_screlu.rs"
 
 [[example]]
+name = "pyro_v2_screlu"
+path = "../../examples/pyro_v2_screlu.rs"
+
+[[example]]
+name = "pyro_v2_screlu512"
+path = "../../examples/pyro_v2_screlu512.rs"
+
+[[example]]
+name = "pyro_v2_screlu512_wdlclean"
+path = "../../examples/pyro_v2_screlu512_wdlclean.rs"
+
+[[example]]
+name = "pyro_v2_screlu512_wdl01"
+path = "../../examples/pyro_v2_screlu512_wdl01.rs"
+
+[[example]]
 name = "pyro_gpu_wdl01"
 path = "../../examples/pyro_gpu_wdl01.rs"
 
