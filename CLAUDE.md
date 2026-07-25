@@ -116,18 +116,18 @@ CUDA directly. Bullet pinned to `cebc78a0`; GeForce driver updated to **610.62 (
 
 ---
 
-## PHASE D (NNUE) — TRAINING LADDER COMPLETE; LIVE ENGINE SHELVED
+## PHASE D (NNUE) — COMPLETE; SCReLU-512 SHIP-ELIGIBLE
 
-**Champion:** 512-wide SCReLU, full v2 corpus, WDL 0.0; frozen-gate pair mean
-rho **+0.624**. Staged at `C:/torch_data/phase_d_champion/pyro_v2_screlu512_raw.bin`,
-SHA-256 `50e9eb4c1a7c6507d3b77562adde859e3eeb1c7d2efe4e838faabfc292e64184`.
-The starved-corpus Session-1 512/rho verdict is overturned; WDL is permanently closed
-after its clean-data retry also lost. Full ladder record: `HISTORY.md`.
+The 512-wide SCReLU v2 champion (full v2 corpus, WDL 0.0, rho **+0.624**) is
+validated and **SHIP-ELIGIBLE**: T1 `+381.7 Elo` vs PeSTO, implied `~1988` on
+the SF-1700 ladder, and T4 production `+177.2 Elo`; all style floors held.
+SCReLU-512 integer inference is verified 10,000/10,000 exact. Implementation:
+`feat/screlu-512-inference` at `f7209ac`.
 
-**Status:** SPRT-eligible, NOT validated or shipped. NNUE remains SHELVED for the live
-engine pending SCReLU-512 inference verification → SPRT vs PeSTO → gauntlet + STYLE
-check. The live engine remains PeSTO+Tal via `--no-nnue`. Both v2 `.data` files below
-remain the frozen training assets.
+Champion: `C:/torch_data/phase_d_champion/pyro_v2_screlu512_raw.bin`, SHA-256
+`50e9eb4c1a7c6507d3b77562adde859e3eeb1c7d2efe4e838faabfc292e64184`.
+The live engine remains PeSTO+Tal via `--no-nnue` pending a separate explicit
+deploy decision; the champion is **not deployed**. Full record: `HISTORY.md`.
 
 ---
 

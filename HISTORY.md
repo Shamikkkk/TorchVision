@@ -2904,3 +2904,63 @@ SCReLU-512 inference implementation and verification → SPRT versus PeSTO →
 gauntlet plus STYLE check. Per mission, a net that wins the SPRT but costs
 Pyro's beautiful, aggressive, sacrificial style does not ship. The live engine
 continues to run PeSTO+Tal via `--no-nnue`.
+
+## Phase D COMPLETE — SCReLU-512 champion validated (July 25, 2026)
+
+Context (all decided; recording, not re-litigating): Phase D is COMPLETE. The
+SCReLU-512 v2 champion is confirmed ship-eligible at production config but NOT yet
+deployed. Full chain:
+
+### TRAINING LADDER (frozen gate, matched-seed pairs, noise floor 0.000974)
+
+- Frozen gate reproduced Session-1 anchor exactly (`+0.213`).
+- Rung (a) SCReLU-256 on v2, SAME schedule as Session 1 (36,630 updates): rho
+  `+0.533`, `+0.320` over anchor. ONE VARIABLE = data. Proves "data was the
+  ceiling."
+- D0: CUDA training non-deterministic (noise `0.000974`); later rungs = matched
+  pairs.
+- Rung (b) 512 re-test: rho `+0.6236`, `+0.090` over (a) = 92.7x noise.
+  OVERTURNS the Session-1 "512 worse" verdict as a starved-data artifact.
+- Rung (c) WDL: c0 (clean file, WDL 0) `+0.6172`; c1 (WDL 0.1) `+0.6038`,
+  `-0.0134` vs c0. WDL DEAD on clean data too -> permanently closed
+  (2nd/final strike). c0 also showed dropping the 5.15% winning-draws slightly
+  HURT (`-0.0064`) -> those positions carry useful eval signal.
+- Gate-M material-scaling trend across ladder: `1.03 -> 1.36 -> 1.38 -> 1.40`
+  (all PASS); flagged for engine validation. It did NOT cause any board-level
+  problem (see T4).
+- Residual: parent-9 rho stuck `~0.23` across ALL nets -> future-experiment note.
+
+**CHAMPION:** 512-SCReLU v2 WDL 0.0, rho `+0.6236`. Staged
+`C:/torch_data/phase_d_champion/pyro_v2_screlu512_raw.bin`, SHA-256
+`50e9eb4c1a7c6507d3b77562adde859e3eeb1c7d2efe4e838faabfc292e64184`.
+
+### INFERENCE (branch feat/screlu-512-inference, commit f7209ac)
+
+- NNUE format v2, 32-byte activation-aware header, FAIL-CLOSED (legacy
+  CReLU-256 rejected exit 2; SCReLU-512 valid exit 0).
+- Exact integer arithmetic
+  (`clip -> square -> /QA -> bias -> *SCALE/(QA*QB)`, two divisions NOT merged)
+  verified: Rust vs independent Python integer ref, 10,000/10,000 exact on raw
+  accumulators AND final cp, plus boundary cases. Independently regenerated
+  payload byte-identical to Bullet's champion `quantised.bin` (789,506
+  meaningful bytes).
+- `--no-nnue` no-op proof: byte-identical bestmove transcript vs pre-branch
+  baseline.
+
+### VALIDATION
+
+- T1 SPRT vs PeSTO (Threads=1, book off): H1 accepted game 45, LLR `3.08 >
+  2.94`, 36-0-9, `+381.7 Elo`.
+- T1 ladder vs SF-1700 (100g): 81-13-6, 84.0%, `+288.1 Elo` -> `~1988 T1`
+  (`~+267` over the `~1721` anchor).
+- T1 style (101g binding): agg 76.2 / kz_sac 28.7 / sacs_pg 1.31 /
+  kz_sacs_pg 0.41 — ALL floors held (kz_sac floor 26, agg 70, sacs_pg 1.05).
+- T4 PRODUCTION (Threads=4, book ON, Syzygy ON, 100g): 57-10-33, 73.5%,
+  `+177.2 Elo`, LOS 100%, 33% draws (book-expected). Style: agg 75.0 /
+  kz_sac 29.0 / sacs_pg 1.26 — ALL floors held. CONFIRMED shippable.
+
+### STATUS
+
+Ship-eligible, NOT deployed. Live engine still PeSTO+Tal `--no-nnue`; both live
+nets remain MD5 `23bfcd331411b8b9c6a05191d42caef5`. The live-net flip is a
+separate explicit decision, not part of this record.
