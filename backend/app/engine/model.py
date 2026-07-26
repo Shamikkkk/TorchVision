@@ -1,14 +1,15 @@
 """
 PyroEngine — chess engine with four modes in priority order:
 
-  1. tablebase — syzygy tablebase lookup (not yet implemented)
+  1. tablebase — Syzygy-perfect move lookup
+  1.5 rust     — SCReLU-512 NNUE (PeSTO+Tal when PYRO_NO_NNUE=1)
   2. neural    — minimax depth-4 with ChessNet value head (when torch_chess.pt exists)
   3. classical — minimax depth-4 with Tal-style PST evaluation (always available)
   4. stockfish — external Stockfish binary (last resort only)
 
 Eval function for minimax (modes 2 & 3): tal_style_eval (fast, pure Python)
-NNUE (768→256→32→32→1) is used only for single-position UI assist via
-/api/suggest — too slow for the search tree until Phase 5 batch eval.
+The older Python NNUE (768→256→32→32→1) is used only for single-position UI
+assist via /api/suggest; it is separate from the Rust SCReLU-512 search eval.
 
 NOTE: MCTS is disabled until the policy head is properly trained via self-play.
 """
@@ -61,7 +62,7 @@ class PyroEngine:
         self._sf_available   = False
         self._rust_engine    = None
 
-        # --- Priority 1.5: Rust engine (Tal-style PST, much faster) ---
+        # --- Priority 1.5: Rust engine (SCReLU-512; PeSTO fallback configurable) ---
         self._rust_engine = try_load_rust_engine()
 
         # --- Priority 2: neural weights (minimax with NNUE eval) ---
@@ -82,7 +83,11 @@ class PyroEngine:
             self.mode = "classical"
 
         if self._rust_engine:
-            logger.info("Pyro ready -- Rust Tal style (depth 4 + NMP + LMR)")
+            logger.info(
+                "Pyro ready -- Rust engine (%s, Threads=%d)",
+                self._rust_engine.eval_mode,
+                self._rust_engine.threads,
+            )
         else:
             logger.info("Pyro ready -- Tal style (depth %d + NMP + LMR + AW)", _MINIMAX_DEPTH)
 
@@ -255,7 +260,7 @@ class PyroEngine:
             logger.debug("Book move: %s", book_move)
             return book_move
 
-        # Priority 1.5: Rust engine (fast, Tal-style PST)
+        # Priority 1.5: Rust engine (SCReLU-512; PeSTO via PYRO_NO_NNUE)
         if self._rust_engine:
             try:
                 uci, score = self._rust_engine.best_move(

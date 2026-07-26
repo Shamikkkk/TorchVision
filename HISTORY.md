@@ -2964,3 +2964,54 @@ deployed. Full chain:
 Ship-eligible, NOT deployed. Live engine still PeSTO+Tal `--no-nnue`; both live
 nets remain MD5 `23bfcd331411b8b9c6a05191d42caef5`. The live-net flip is a
 separate explicit decision, not part of this record.
+
+## Phase D DEPLOYED — SCReLU-512 becomes the live eval (July 26, 2026)
+
+The separately authorized deployment completed the Phase D arc. The verified
+inference branch `feat/screlu-512-inference` (`f7209ac`) was merged into main by
+merge commit `85b4d66`; PeSTO+Tal and `--no-nnue` remain intact.
+
+Before the flip, both identical legacy live nets were MD5
+`23bfcd331411b8b9c6a05191d42caef5`. One canonical tracked revert artifact is
+preserved at `engine/pyro_pesto_era_backup.nnue` with that exact MD5. The
+deployed v2 net is installed at both live locations:
+
+- `engine/pyro.nnue`
+- `engine/target/release/pyro.nnue`
+- bytes `789,538`
+- MD5 `9f01010bfe8b41193f77a9fad88abd56`
+- SHA-256 `a06cfebd7c22d0b45f08ba94a276fd2a7cf8b3cd76c54dd308b2eeaa1a579591`
+
+The deployable payload is the format-v2 form generated from champion raw SHA-256
+`50e9eb4c1a7c6507d3b77562adde859e3eeb1c7d2efe4e838faabfc292e64184`.
+Preflight re-proved valid-v2 exit 0 (`NNUE loaded`) and legacy-v1 rejection
+exit 2. The release build passed, all 74 Rust test executions passed, and the
+post-merge `--no-nnue` canonical transcript remained byte-identical to the
+pre-merge binary (10/10 positions, transcript SHA-256
+`6bb6f5a09d92e113969f85e44dff8c78159513b78bb89664e6dd369927d7d0dc`).
+
+Production startup in `backend/app/engine/rust_engine.py` now launches
+`pyro.exe` without `--no-nnue`, then sends `setoption name Threads value 4`.
+`PYRO_NO_NNUE=1` appends `--no-nnue` as the explicit PeSTO+Tal
+comparison/revert option. The on-wire app-path probe recorded:
+
+```text
+startup command  C:\Users\shami\OneDrive\Documents\torch\engine\target\release\pyro.exe
+engine stderr    NNUE loaded
+UCI startup      uci | setoption name Threads value 4 | isready
+book probe       answered before Rust search
+Syzygy probe     answered before Rust search, WDL +2
+search probe     legal move from the Rust NNUE path
+```
+
+The reverse probe with `PYRO_NO_NNUE=1` recorded the `--no-nnue` command,
+`NNUE disabled (--no-nnue), using PST + Tal`, Threads=4, and a legal move.
+The real FastAPI lifespan started in Rust/SCReLU-512 mode and its health handler
+returned `{"status": "ok"}`. A deterministic app-engine self-play at the
+minimum shipped movetime (100 ms) ran from start position to checkmate in 126
+plies (`0-1`, winner Black); result truth matched, 14 voice events fired, and
+heat exercised every level 0-3. The backend suite passed 40/40, including the
+P0 result, voice, heat, NNUE-default, and PeSTO-fallback tests.
+
+Revert: restore `engine/pyro_pesto_era_backup.nnue` to both live `pyro.nnue`
+locations and set `PYRO_NO_NNUE=1`.

@@ -3,6 +3,9 @@
 Launches engine/target/release/pyro.exe as a subprocess and communicates
 via UCI protocol over stdin/stdout.
 
+SCReLU-512 NNUE is the production default. Set PYRO_NO_NNUE=1 to retain the
+PeSTO+Tal comparison/fallback path.
+
 Falls back gracefully if the binary is not found.
 """
 
@@ -21,17 +24,33 @@ _ENGINE_PATH = os.environ.get(
 )
 
 NODE_LIMIT = 100000
+THREADS = 4
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in _TRUE_VALUES
 
 
 class RustEngine:
     """Manages a persistent UCI engine subprocess."""
 
-    def __init__(self, path: str = _ENGINE_PATH):
+    def __init__(self, path: str = _ENGINE_PATH, no_nnue: bool | None = None):
         if not os.path.isfile(path):
             raise FileNotFoundError(f"Rust engine not found: {path}")
 
+        if no_nnue is None:
+            no_nnue = _env_flag("PYRO_NO_NNUE")
+        command = [path]
+        if no_nnue:
+            command.append("--no-nnue")
+
+        self.no_nnue = no_nnue
+        self.eval_mode = "PeSTO+Tal (--no-nnue)" if no_nnue else "SCReLU-512 NNUE"
+        self.threads = THREADS
+        self.startup_command = subprocess.list2cmdline(command)
         self.proc = subprocess.Popen(
-            [path, "--no-nnue"],
+            command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -40,10 +59,16 @@ class RustEngine:
         )
         self._send("uci")
         self._wait_for("uciok")
-        self._send("setoption name Threads value 4")
+        self._send(f"setoption name Threads value {self.threads}")
         self._send("isready")
         self._wait_for("readyok")
-        logger.info("Rust engine loaded (nodes=%d): %s", NODE_LIMIT, os.path.abspath(path))
+        logger.info(
+            "Rust engine loaded (eval=%s, Threads=%d, nodes=%d, command=%s)",
+            self.eval_mode,
+            self.threads,
+            NODE_LIMIT,
+            self.startup_command,
+        )
 
     def _send(self, cmd: str) -> None:
         self.proc.stdin.write(cmd + "\n")

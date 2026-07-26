@@ -1,16 +1,17 @@
 # CLAUDE.md
 
 Guidance for Claude Code in this repo. AI chess app ("Torch"/"Pyro"): React frontend,
-FastAPI backend, hand-built Rust engine (PeSTO+Tal eval). Full development history and
-resolved investigations live in HISTORY.md — read it only when you need the "why" behind
-a past decision. This file is the live operating context.
+FastAPI backend, hand-built Rust engine (SCReLU-512 NNUE eval; PeSTO+Tal fallback).
+Full development history and resolved investigations live in HISTORY.md — read it only
+when you need the "why" behind a past decision. This file is the live operating context.
 
 ---
 
 ## CURRENT GOAL (reset June 5, 2026)
 
-Pyro plays **beautiful, sensible, dynamic, powerful chess** on the PeSTO+Tal
-hand-crafted-eval base, finished with Syzygy-perfect endgames. NOT a max-Elo race.
+Pyro plays **beautiful, sensible, dynamic, powerful chess** on the validated
+SCReLU-512 NNUE eval, finished with Syzygy-perfect endgames. PeSTO+Tal remains the
+reversible fallback. NOT a max-Elo race.
 
 **DESIGN PRINCIPLE** — every change is measured against this:
 Pyro plays beautiful chess by calculating deeply and accurately, then — among moves the
@@ -40,7 +41,8 @@ forced by a move-ordering thumb.
    wrong on inspection, check before executing (this has saved data twice).
 9. "KILLED"/"COMPLETED" NOTIFICATIONS ARE UNRELIABLE on Windows. Verify process state
    (Get-Process) and file mtimes before acting on any death/completion claim.
-10. The live engine runs PeSTO+Tal via `--no-nnue`. Do not ship NNUE as eval.
+10. The live engine runs SCReLU-512 NNUE. PeSTO+Tal via `--no-nnue` is the protected
+    comparison/revert path; never delete it.
 
 ---
 
@@ -116,18 +118,21 @@ CUDA directly. Bullet pinned to `cebc78a0`; GeForce driver updated to **610.62 (
 
 ---
 
-## PHASE D (NNUE) — COMPLETE; SCReLU-512 SHIP-ELIGIBLE
+## PHASE D (NNUE) — COMPLETE; SCReLU-512 DEPLOYED
 
 The 512-wide SCReLU v2 champion (full v2 corpus, WDL 0.0, rho **+0.624**) is
 validated and **SHIP-ELIGIBLE**: T1 `+381.7 Elo` vs PeSTO, implied `~1988` on
 the SF-1700 ladder, and T4 production `+177.2 Elo`; all style floors held.
 SCReLU-512 integer inference is verified 10,000/10,000 exact. Implementation:
-`feat/screlu-512-inference` at `f7209ac`.
+`feat/screlu-512-inference` at `f7209ac`, merged by `85b4d66`.
 
 Champion: `C:/torch_data/phase_d_champion/pyro_v2_screlu512_raw.bin`, SHA-256
 `50e9eb4c1a7c6507d3b77562adde859e3eeb1c7d2efe4e838faabfc292e64184`.
-The live engine remains PeSTO+Tal via `--no-nnue` pending a separate explicit
-deploy decision; the champion is **not deployed**. Full record: `HISTORY.md`.
+**Deployed July 26, 2026:** live v2 `.nnue` MD5
+`9f01010bfe8b41193f77a9fad88abd56`; the app launches it at Threads=4 by default.
+Set `PYRO_NO_NNUE=1` for the PeSTO+Tal fallback. The legacy net is preserved at
+`engine/pyro_pesto_era_backup.nnue` (MD5
+`23bfcd331411b8b9c6a05191d42caef5`). Full record: `HISTORY.md`.
 
 ---
 
@@ -174,7 +179,10 @@ independent count); both conversions 0-skip with size==32×records; STM spot-che
 - Engine: `engine/target/release/pyro.exe` (loads `pyro.nnue` beside it unless `--no-nnue`)
 - Campaign engine copy (outside OneDrive): `C:/torch_data/pyro_campaign.exe`
 - Engine src: `engine/src/{search.rs, main.rs, movegen.rs, board.rs, nnue.rs}`
-- UCI wrapper: `backend/app/engine/rust_engine.py` (sends `Threads 4` + `--no-nnue`)
+- UCI wrapper: `backend/app/engine/rust_engine.py` (Threads=4; NNUE default;
+  `PYRO_NO_NNUE=1` selects PeSTO+Tal)
+- Live net: `engine/pyro.nnue` · PeSTO-era revert net:
+  `engine/pyro_pesto_era_backup.nnue`
 - Voice: `backend/app/engine/pyro_voice.py` · results: `chess_utils/board.py::result_of`
 - Data campaign: `backend/scripts/{generate_selfplay_v2,audit_selfplay_corpus,dedup_plain,filter_wdl_clean,reeval_with_sf18}.py`
 - GPU trainer port: `backend/scripts/bullet_port/` (README = restore procedure)
@@ -198,6 +206,8 @@ independent count); both conversions 0-skip with size==32×records; STM spot-che
 
 ```bash
 cd engine && cargo build --release
+echo -e "uci\nisready\nposition startpos\ngo depth 8\nquit" | ./target/release/pyro.exe
+# PeSTO+Tal fallback proof:
 echo -e "uci\nisready\nposition startpos\ngo depth 8\nquit" | ./target/release/pyro.exe --no-nnue
 cd backend && source venv/Scripts/activate && uvicorn app.main:app --port 8000
 cd frontend && npm run dev
@@ -250,7 +260,8 @@ Windows: Git Bash or PowerShell, not CMD. venv is `venv/`. Don't `taskkill` uvic
 
 - Don't reopen eval-side sacrifice incentives (DYNAMIC/COMP) — measured closed.
 - Don't reopen IID/LMP/dep-NMP without sign-off.
-- Don't ship NNUE as eval; a net must win an SPRT **and** keep the style.
+- Don't delete the PeSTO+Tal `--no-nnue` fallback or
+  `engine/pyro_pesto_era_backup.nnue`.
 - Don't modify or delete the old 20M anchor corpus, or `pyro-expE*` checkpoints.
 - Don't relabel at any depth but 12 (breaks the anchor comparison).
 - Don't make code decisions on <100-game samples; don't use self-play for depth changes.
