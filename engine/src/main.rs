@@ -7,6 +7,7 @@ use board::Board;
 use nnue::Network;
 use search::{best_move, best_move_nodes, parse_uci_move, set_tune_param, set_iid_enable};
 use std::io::{self, BufRead, Write};
+use std::path::Path;
 
 struct Engine {
     position: Board,
@@ -20,7 +21,13 @@ impl Engine {
             eprintln!("NNUE disabled (--no-nnue), using PST + Tal");
             None
         } else {
-            let net = Self::try_load_nnue();
+            let net = match Self::try_load_nnue() {
+                Ok(net) => net,
+                Err(err) => {
+                    eprintln!("FATAL: NNUE rejected: {}", err);
+                    std::process::exit(2);
+                }
+            };
             match &net {
                 Some(_) => eprintln!("NNUE loaded"),
                 None => eprintln!("NNUE not found, using PST"),
@@ -34,18 +41,29 @@ impl Engine {
         }
     }
 
-    fn try_load_nnue() -> Option<Network> {
+    fn try_load_nnue() -> Result<Option<Network>, String> {
         // Look for pyro.nnue next to the executable
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 let path = dir.join("pyro.nnue");
-                if let Ok(net) = Network::from_file(path.to_str()?) {
-                    return Some(net);
+                if path.is_file() {
+                    let path_str = path
+                        .to_str()
+                        .ok_or_else(|| format!("non-UTF8 NNUE path: {}", path.display()))?;
+                    return Network::from_file(path_str)
+                        .map(Some)
+                        .map_err(|e| format!("{}: {}", path.display(), e));
                 }
             }
         }
         // Also try current working directory
-        Network::from_file("pyro.nnue").ok()
+        let cwd_net = Path::new("pyro.nnue");
+        if cwd_net.is_file() {
+            return Network::from_file("pyro.nnue")
+                .map(Some)
+                .map_err(|e| format!("{}: {}", cwd_net.display(), e));
+        }
+        Ok(None)
     }
 }
 

@@ -7,4 +7,8 @@ edition = "2021"
 name = "pyro"
 path = "src/main.rs"
 
+[[bin]]
+name = "nnue_verify"
+path = "src/bin/nnue_verify.rs"
+
 [dependencies]
