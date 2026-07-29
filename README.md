@@ -202,6 +202,20 @@ The evaluation network is the product of a multi-week training campaign:
 
 ---
 
+## Authorship and provenance
+
+**Pyro Chess is an original project created and maintained by
+[Shamik Basu](https://github.com/Shamikkkk).**
+
+This repository — [Shamikkkk/TorchVision](https://github.com/Shamikkkk/TorchVision)
+— is the canonical upstream source for Pyro's code and development history.
+Forks and redistributions may preserve and extend that history, but they do not
+transfer or replace the original authorship.
+
 ## License
 
-[MIT](LICENSE)
+Copyright © 2026 Shamik Basu.
+
+Released under the [MIT License](https://opensource.org/license/mit). As required
+by that license, copies or substantial portions of the software must retain the
+applicable copyright and permission notices.
