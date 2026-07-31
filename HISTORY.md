@@ -3015,3 +3015,141 @@ P0 result, voice, heat, NNUE-default, and PeSTO-fallback tests.
 
 Revert: restore `engine/pyro_pesto_era_backup.nnue` to both live `pyro.nnue`
 locations and set `PYRO_NO_NNUE=1`.
+
+## Production correctness fix: timed root-iteration completion (July 31, 2026)
+
+### Incident
+
+Lichess game `6Iy2yfnM` (TorchVision29 vs PyroBotTorch, 300+0) exposed a
+genuine, reproducible production correctness failure. Playing Black, Pyro found
+the forced mate after `18...Nh3+` and scored it `+499.95` (mate in three);
+Stockfish 18 independently confirmed the line at depth 24. After White replied
+`19.Kf1`, Pyro had two immediate mates, `Qg1#` and `Qf2#`, but instead played
+`19...dxc4`, evaluated at approximately `+0.21`. Pyro eventually won with
+`47...Qdd8#`, but that later result does not diminish the correctness failure
+after `19.Kf1`.
+
+The initial suspicion that the `+499.95` value itself was corrupt was wrong:
+the mate score was correct. The forensic audit located the actual defect in
+the root iterative-deepening loop's timed-exhaustion handling. Of the two
+post-child budget checks, the pre-score check marked an interrupted iteration
+incomplete only while `best.is_none()`, and the post-score check could break
+without marking it incomplete at all. Once a completed child had populated
+`best`, a later budget expiry could therefore leave the partial iteration
+marked completed, allowing its `(bestmove, score, depth)` tuple to overwrite
+the last fully completed tuple.
+
+The failure was timing- and scheduling-dependent. At the exact post-`19.Kf1`
+production clock, Threads=1 found the immediate mate 0/10 times and returned
+`Nf2` paired with a false mate-range score in 9/10 runs. Threads=2 found the
+mate 8/10 times. This distribution was consistent with interrupted root
+iterations, not a deterministic chess-logic failure.
+
+The audit ruled out the Lichess bridge and PGN conversion, Lazy SMP
+score/move ownership (the result is published as one atomic tuple), and TT
+mate-distance normalization (which round-trips correctly). A separate
+cosmetic finding remains: Pyro emits mate-range values as raw UCI `score cp`
+rather than `score mate N`, which is why the bridge displayed `499.95` rather
+than `#5`. UCI score formatting was intentionally outside this fix.
+
+### Fix
+
+Commit `5469931e6653b58ddec8f068614ab42c4c9422ed` on
+`fix/timed-root-completion`, titled
+`fix(search): preserve completed result on timeout`, corrects only timed and
+node-limited root-iteration completion semantics. Whenever either post-child
+deadline/node-budget check expires, it now unconditionally sets
+`completed = false` before breaking, regardless of whether `best` is already
+populated. The engine therefore preserves the last fully completed
+`(bestmove, score, depth)` tuple.
+
+There is no mate-specific override, heuristic, evaluation, TT, SMP, search
+strength, timing-policy, or UCI-format change. The production change is three
+substantive lines: a loop-syntax adjustment needed to host the test hook and
+the missing `completed = false` handling at the second exhaustion window.
+
+### Verification and isolation audit
+
+- A deterministic `#[cfg(test)]` abort-injection hook exercised 11 root
+  interruption scenarios: first, second, later, and final root moves at the
+  pre-score and post-score checkpoints, plus fail-high, fail-low, and a third
+  full-window re-search. Every case returned the exact known-correct completed
+  depth-1 move/score tuple.
+- The first isolation audit caught a real test-support leak: `_move_index` and
+  `.enumerate()` had been introduced into the production loop without
+  `#[cfg(test)]`. Move-index tracking was moved to a fully test-gated counter.
+  Binary-string scans then found zero hook identifiers in both debug and
+  release production artifacts, while the debug test binary produced five
+  positive-control hits, proving that the scanner was effective.
+- `cargo test` in isolated debug and release targets passed 32 + 43 tests in
+  both profiles.
+- Perft remained exactly `20 / 400 / 8,902` in both profiles.
+- At the exact production clock, the post-`19.Kf1` incident regression passed
+  50/50 times at Threads=1 and 50/50 times at Threads=2. Every result was a
+  legal immediate mate (`Qf2#` or `Qg1#`) with score `49999`; there were no
+  non-mating or illegal results.
+- The preceding `18...Nh3+` position was unaffected: fixed-depth and exact
+  clock searches still returned `Nh3+` with score `49995`.
+- Baseline-versus-candidate final transcripts on the canonical ten-position
+  suite were byte-identical in both NNUE and `--no-nnue` modes.
+- The existing no-op transcript remained byte-identical with SHA-256
+  `6bb6f5a09d92e113969f85e44dff8c78159513b78bb89664e6dd369927d7d0dc`.
+- The complete SCReLU-512 Rust/Python integer-equivalence suite remained
+  10,000/10,000 exact with zero mismatches.
+
+### Deployment
+
+Deployment used an executable-only swap; neither live NNUE file was modified.
+The first swap itself hash-matched, but the separate deployed-path Python
+verifier failed before launching Pyro. Its dynamic import called
+`module_from_spec()` and then `exec_module()` without first registering the
+module in `sys.modules`, so `@dataclass` could not resolve postponed annotations
+through its own module. Per the pre-committed rollback gate, no fix-forward or
+same-attempt retry was made: the pre-fix executable was immediately restored
+and verified at SHA-256
+`3F09FC38D7B89DAA9B86FE965BEAAC511528D63E82FEEEE9F258CB11E03F03F7`.
+
+The harness-only correction inserted
+`sys.modules[spec.name] = module` between module creation and execution. It was
+first re-verified end-to-end against the already-proven isolated candidate.
+The complete deployment sequence was then repeated from a fresh isolated
+build and succeeded.
+
+The actual deployed executable, not merely the isolated candidate, passed all
+four final probes:
+
+- NNUE mode reported `NNUE loaded` and returned a legal move.
+- `--no-nnue` reported the PeSTO+Tal fallback and returned a legal move.
+- Threads=1 returned `Qf2#`, score `49999`, legal immediate mate, exit 0.
+- Threads=2 returned `Qg1#`, score `49999`, legal immediate mate, exit 0.
+
+Final live executable:
+
+- bytes: `313,344`
+- MD5: `275BCC9D86056839A35A71F4D39CDA14`
+- SHA-256:
+  `6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`
+
+Both live NNUE files remained unchanged at `engine/pyro.nnue` and
+`engine/target/release/pyro.nnue`:
+
+- MD5: `9F01010BFE8B41193F77A9FAD88ABD56`
+- SHA-256:
+  `A06CFEBD7C22D0B45F08BA94A276FD2A7CF8B3CD76C54DD308B2EEAA1A579591`
+
+The PeSTO-era net backup remains MD5
+`23BFCD331411B8B9C6A05191D42CAEF5`.
+
+### Merge and status
+
+Branch `fix/timed-root-completion` was pushed, then merged into `main` with
+`git merge --no-ff` using the `ort` strategy. Merge commit
+`203b60856fd0b651c73ce814926fb3266c31bf9d` moved `main` from
+`b6c3277dd1f2ac7415f1a799756602f7b30a0839`. The merged code diff is exactly:
+
+- `engine/src/search.rs` (`+407/-3`)
+- `backend/scripts/verify_timed_root_completion.py` (`+476/-0`)
+
+The fix is live, deployed, verified, merged into `main`, and pushed.
+PyroBotTorch remains offline; restarting the bridge is a separate explicit
+decision.

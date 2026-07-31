@@ -6,6 +6,31 @@ changed. Framing: **strength = NPS × pruning quality**; each effective ply ≈ 
 each 2× NPS ≈ +1 ply. Pyro is deficient on BOTH axes, which is good news: two independent
 lanes of headroom, each gated by our existing SPRT + style methodology.
 
+## STANDING REGRESSION GATE: TIMED ROOT COMPLETION
+
+`backend/scripts/verify_timed_root_completion.py` is now a **MANDATORY**
+regression gate. Its incident case is the post-`19.Kf1` position
+`r4rk1/p4ppp/Q1p5/2qpp3/2P5/P6n/2P1B1PP/RR3K2 b - - 3 19` at the exact
+production clock:
+
+```text
+go wtime 137330 btime 190309 winc 0 binc 0
+```
+
+The engine must return an immediate legal mate (`Qf2#` or `Qg1#`) with zero
+exceptions at both Threads=1 and Threads=2 across repeated fresh-process runs.
+The minimum is 10 repetitions per thread count; 50 per thread count is
+preferred.
+
+The underlying defect was timing- and scheduling-dependent. Every future
+change that can alter the search timing profile must therefore rerun this exact
+incident regression in addition to its existing equivalence, SPRT, and style
+gates. This explicitly includes incremental NNUE accumulation (#1), time
+management (#10), SIMD NNUE (#14), magic bitboards (#15), and in general every
+Tier 1 or Tier 2 roadmap change. Passing a change's own equivalence check
+without rerunning this incident regression does **not** clear it for
+deployment.
+
 **Measured baseline (this audit, single thread, midgame FEN, 300k nodes):**
 - NNUE path: **~106k nps** · PeSTO path: **~242k nps** → the current NNUE integration
   costs ~56% of total search time.

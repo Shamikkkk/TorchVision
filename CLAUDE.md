@@ -134,6 +134,13 @@ Set `PYRO_NO_NNUE=1` for the PeSTO+Tal fallback. The legacy net is preserved at
 `engine/pyro_pesto_era_backup.nnue` (MD5
 `23bfcd331411b8b9c6a05191d42caef5`). Full record: `HISTORY.md`.
 
+**Production correctness fix (July 31, 2026):** timed root-iteration completion
+is LIVE and merged to main. Fix commit
+`5469931e6653b58ddec8f068614ab42c4c9422ed`, merge
+`203b60856fd0b651c73ce814926fb3266c31bf9d`; live executable MD5
+`275BCC9D86056839A35A71F4D39CDA14`. PyroBotTorch is offline pending a separate
+restart decision. See `HISTORY.md` for the incident, proof, and deployment record.
+
 ---
 
 ## SESSION 2b — THE v2 DATA CAMPAIGN
