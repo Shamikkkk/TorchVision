@@ -1,73 +1,73 @@
 # Pyro concise handoff
 
-Verified: July 31, 2026.
+Verified: August 1, 2026.
 
-## Current objective
+## Current state
 
-Maintain the deployed timed-root-completion fix and repository-backed context
-without changing engine/runtime state. No strength experiment is currently
-authorized.
+- Repository: `C:\Users\shami\OneDrive\Documents\torch`, branch `main`,
+  committed context baseline `1ecbc83842941e00c006f31fa718af97f618f6ac`.
+- The deployed engine defaults to the style-gated SCReLU-512 NNUE. The
+  application uses Threads=4; `PYRO_NO_NNUE=1` retains the protected
+  PeSTO+Tal `--no-nnue` fallback.
+- PyroBotTorch is online through the external native Python lichess-bot bridge
+  at `C:\lichess-bot`. The bridge intentionally uses Threads=2, accepts one
+  game at a time, and remains running while idle. No `pyro.exe` process is
+  expected until an eligible game begins.
+- There is no persistent watchdog or autostart. Sleep, logout, reboot, or a
+  process failure will take the bot offline.
 
-## Latest completed work
+## Live correctness shakedown passed
 
-- Timed-root fix `5469931e6653b58ddec8f068614ab42c4c9422ed` preserves the last
-  fully completed root result when deadline/node budget expires.
-- It entered `main` through merge
-  `203b60856fd0b651c73ce814926fb3266c31bf9d`.
-- Documentation commit
-  `181f679709c82625172355d1ef34f9d8685fb654` recorded the incident,
-  verification, deployment, and mandatory standing regression gate.
+The first complete post-fix live shakedown passed in casual 5+0 standard Blitz
+game [`SS1KiMLB`](https://lichess.org/SS1KiMLB) against the allow-listed human
+TorchVision29. PyroBotTorch played White and won `1-0` by `39.Rxh7#` after 77
+plies. The GM book supplied Pyro's first two moves; Syzygy was enabled but not
+relevant.
 
-## Verified evidence
+Independent python-chess validation found all 77 plies legal, all 39 Pyro
+moves legal, zero PGN parser errors, and a checkmated final position. There was
+no engine or bridge crash, protocol error, timeout, timed-root-completion
+symptom, duplicate engine, or orphaned engine. The game process exited cleanly,
+and the bridge returned to awaiting challenges.
 
-- Git: `main` and local `origin/main` are both `181f679...`; tracking count
-  `0 0`. Current worktree: the pre-existing ` m bullet` plus untracked
-  `AGENTS.md` and `docs/`; nothing is staged and no ref was changed.
-- `bullet` is a nested repository stored as gitlink `cebc78a...`; its HEAD is
-  unchanged while its nested worktree contains one tracked modification and
-  untracked trainer examples. Do not touch it.
-- Live `pyro.exe`: 313344 bytes, MD5 `275BCC9D86056839A35A71F4D39CDA14`,
-  SHA-256 `6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`.
-- Both live NNUEs: SHA-256
-  `A06CFEBD7C22D0B45F08BA94A276FD2A7CF8B3CD76C54DD308B2EEAA1A579591`.
-- Runtime reports preserve 50/50 passing incident runs at Threads=1 and 50/50
-  at Threads=2; deployed smoke returns `Qf2#`/`Qg1#`, score `49999`.
-- App default is SCReLU-512 NNUE at Threads=4. `PYRO_NO_NNUE=1` selects the
-  protected PeSTO+Tal `--no-nnue` fallback.
-- No Pyro/lichess-bot process is running; Docker is stopped. PyroBotTorch is
-  offline.
+Pinned shakedown artifacts:
 
-## Historical or unavailable evidence
+- `engine/target/release/pyro.exe`: SHA-256
+  `6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`
+- `engine/target/release/pyro.nnue`: SHA-256
+  `A06CFEBD7C22D0B45F08BA94A276FD2A7CF8B3CD76C54DD308B2EEAA1A579591`
 
-- `HISTORY.md` is the authoritative historical account of game `6Iy2yfnM`,
-  the pre-fix reproduction, the test-hook isolation correction, and the first
-  deployment rollback. This documentation-only reconciliation did not replay
-  those events.
-- The exact first-attempt failure transcript was not present among the three
-  referenced deployment JSON files; the corrected harness report and verified
-  rollback artifacts do exist.
-- Local `origin/main` was inspected without fetching; no fresh remote-server
-  query was performed.
+The timed-root fix is commit
+`5469931e6653b58ddec8f068614ab42c4c9422ed`, merged into `main` by
+`203b60856fd0b651c73ce814926fb3266c31bf9d`. It is now validated through a
+complete real Lichess game, not only harnesses and local probes. No engine or
+bridge defect was observed.
 
-## Relevant files
+## Next authorized engineering task
+
+The sole authorized next task is `STRENGTH_AUDIT.md` ticket #19:
+
+- deterministic `bench`;
+- completed-search `info nodes ... nps ...` instrumentation;
+- no intended search, evaluation, timing-policy, TT, move-ordering, or
+  production-default change;
+- exact decision-tuple equivalence and deterministic benchmark node
+  count/checksum;
+- mandatory timed-root regression at Threads=1 and Threads=2;
+- no gauntlet unless behavior changes unexpectedly or an Elo claim is made.
+
+Ticket #19 must remain instrumentation-only and must not be combined with an
+optimization. This documentation update does not implement it.
+
+Old merged branch references may be cleaned up later, but deletion is optional
+and non-urgent. Bridge upstream updates, README corrections, persistent
+autostart, and all other strength tickets remain separate decisions.
+
+## Governing references
 
 - Current truth: `docs/PROJECT_STATE.md`
 - Operating rules: `AGENTS.md`
 - Detailed history: `HISTORY.md`
-- Live context: `CLAUDE.md`
-- Candidate roadmap and standing gates: `STRENGTH_AUDIT.md`, `docs/ROADMAP.md`
-- Verifier: `backend/scripts/verify_timed_root_completion.py`
-- Deployment reports:
-  `C:\torch_data\pyro_timed_root_redeploy_20260731_5469931_r2\reports`
-- Full 50+50 reports:
-  `C:\torch_data\pyro_root_fix_20260730_9d61d3f2\reports\timed_runtime_final`
-
-## One decision requiring approval
-
-Review and either accept or reject the four untracked context documents. If
-accepted, the user may preserve them through the user's own Git workflow; no
-Codex Git operation is authorized.
-
-Restarting PyroBotTorch remains a separate blocked operational action. No
-engine change, strength experiment, deployment, or service restart is
-currently authorized.
+- Strength audit and ticket definitions: `STRENGTH_AUDIT.md`
+- Authorization-aware roadmap: `docs/ROADMAP.md`
+- Timed-root verifier: `backend/scripts/verify_timed_root_completion.py`

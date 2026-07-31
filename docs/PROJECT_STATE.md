@@ -1,7 +1,8 @@
 # Pyro project state
 
-Verification snapshot: **July 31, 2026** at
-`181f679709c82625172355d1ef34f9d8685fb654`.
+Verification snapshot: **August 1, 2026** at
+`1ecbc83842941e00c006f31fa718af97f618f6ac`, before the documentation-only
+working-tree updates that record the live shakedown.
 
 Labels used below:
 
@@ -16,15 +17,16 @@ Labels used below:
 
 - **Verified current fact:** repository
   `C:\Users\shami\OneDrive\Documents\torch` is on branch `main` at
-  `181f679709c82625172355d1ef34f9d8685fb654`.
-- **Verified current fact:** local `origin/main` points to the same commit;
-  `HEAD...origin/main` is `0 0`. No fetch was performed, so this describes the
-  local remote-tracking ref rather than a fresh query of the server.
-- **Verified current fact:** the exact ancestry is
+  `1ecbc83842941e00c006f31fa718af97f618f6ac`.
+- **Verified current fact:** local `origin/main` and the actual remote `main`
+  were independently verified at the same commit; `HEAD...origin/main` is
+  `0 0`.
+- **Verified current fact:** the relevant ancestry is
   `b6c3277dd1f2ac7415f1a799756602f7b30a0839` -> fix
   `5469931e6653b58ddec8f068614ab42c4c9422ed` -> merge
-  `203b60856fd0b651c73ce814926fb3266c31bf9d` -> docs
-  `181f679709c82625172355d1ef34f9d8685fb654`.
+  `203b60856fd0b651c73ce814926fb3266c31bf9d` -> incident docs
+  `181f679709c82625172355d1ef34f9d8685fb654` -> context baseline
+  `1ecbc83842941e00c006f31fa718af97f618f6ac`.
 - **Verified current fact:** `203b608...` is a two-parent merge of
   `b6c3277...` and `5469931...`; therefore the timed-root fix is present in
   current `main`.
@@ -36,10 +38,9 @@ Labels used below:
   The checkout has its own `.git` directory but the parent has no
   `.gitmodules`, so it is a nested Git repository represented by a
   submodule-style gitlink, not an ordinary directory.
-- **Verified current fact:** this reconciliation intentionally adds untracked
-  `AGENTS.md`, `docs/PROJECT_STATE.md`, `docs/HANDOFF.md`, and
-  `docs/ROADMAP.md`. Nothing is staged; Git history and refs are unchanged by
-  this task.
+- **Verified current fact:** `AGENTS.md`, `docs/PROJECT_STATE.md`,
+  `docs/HANDOFF.md`, and `docs/ROADMAP.md` are committed by the context-baseline
+  commit `1ecbc838...`; they are no longer untracked review artifacts.
 
 ## Timed-root-completion fix
 
@@ -94,6 +95,35 @@ Labels used below:
   `PYRO_NO_NNUE=1`; it configures Threads=4. Older documents describing live
   PeSTO nets are historical and superseded by the July 26 deployment record.
 
+## Live Lichess state and shakedown
+
+- **Verified current fact:** PyroBotTorch is online through the external native
+  Python lichess-bot bridge at `C:\lichess-bot`. Windows represents the one
+  logical bridge as a venv-launcher/interpreter process chain. There is no
+  persistent watchdog or autostart; sleep, logout, reboot, or process failure
+  will take the bot offline.
+- **Verified current fact:** the bridge uses the same deployed SCReLU-512 NNUE
+  executable but configures Threads=2. This is intentional and separate from
+  the application's Threads=4 default. While waiting for challenges, no
+  `pyro.exe` process is expected; the bridge creates one game-engine process
+  for the single active game and releases it afterward.
+- **Verified current fact:** the first post-fix live shakedown passed in casual
+  5+0 standard Blitz game [`SS1KiMLB`](https://lichess.org/SS1KiMLB) against
+  the allow-listed human TorchVision29. PyroBotTorch played White and won
+  `1-0` by `39.Rxh7#` after 77 plies. The GM book supplied Pyro's first two
+  moves; Syzygy was enabled but not relevant.
+- **Verified current fact:** independent python-chess validation found all 77
+  plies legal, 39 legal Pyro moves, zero parser errors, and a checkmated final
+  position. There was no engine or bridge crash, illegal move, protocol error,
+  timeout, timed-root-completion symptom, duplicate engine, or orphan after
+  completion. The engine exited cleanly and the bridge returned to awaiting
+  challenges.
+- **Verified current fact:** the shakedown used executable SHA-256
+  `6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`
+  and NNUE SHA-256
+  `A06CFEBD7C22D0B45F08BA94A276FD2A7CF8B3CD76C54DD308B2EEAA1A579591`.
+  The live game is correctness and operational evidence, not an Elo result.
+
 ## Verification evidence
 
 - **Verified current fact:** all three referenced deployment JSON reports
@@ -133,32 +163,29 @@ Labels used below:
 
 ## Current status and unresolved items
 
-- **Verified current fact:** no `pyro.exe`, native lichess-bot, or
-  PyroBotTorch process is running. Docker is stopped/unavailable, with no
-  running related container. PyroBotTorch is offline.
-- **Verified current fact:** `README.md` describes the deployed Lichess-bot
-  capability and also says it is online only while the bridge runs. Its
-  checked roadmap item is not evidence that the bridge is currently running;
-  the process audit is authoritative for current availability.
-- **Verified current fact:** the latest committed task is the July 31
-  timed-root-completion historical record and standing regression gate at
-  `181f679...`. This reconciliation adds only uncommitted context documents.
+- **Verified current fact:** the native lichess-bot bridge is running and
+  PyroBotTorch is online. No game-engine `pyro.exe` is expected while the bot
+  is idle. Docker remains unused for this deployment.
+- **Verified current fact:** the latest committed repository context is
+  `1ecbc838...`. This documentation task records the subsequently verified
+  live shakedown but does not implement or run an engine experiment.
 - **Verified current fact:** open, unscheduled product issues remain in
   `CLAUDE.md`: eager loading of an unused Python NNUE model, client-only voice
   state, and the old `python-chess` dependency.
 - **Historically reported fact:** Pyro still emits mate-range UCI scores as
   centipawns rather than `score mate N`; this cosmetic issue was outside the
   timed-root fix.
-- **Candidate, not authorized:** the strength and data work in
-  `STRENGTH_AUDIT.md` and `docs/ROADMAP.md` is planning material, not an active
-  implementation mandate.
+- **Authorized next engineering task:** `STRENGTH_AUDIT.md` ticket #19,
+  deterministic `bench` plus completed-search `info nodes ... nps ...`
+  instrumentation. It must remain instrumentation-only and isolated from every
+  optimization. This documentation task does not implement it.
 
 ## Next decision
 
-- **Immediate pending decision:** the user reviews and either accepts or rejects
-  the four untracked context documents. If accepted, only the user may preserve
-  them through the user's Git workflow; no agent Git action is authorized.
-- **Separate blocked operational decision:** PyroBotTorch remains offline unless
-  the user explicitly authorizes restarting the external lichess-bot bridge.
-  Accepting these documents does not authorize a bot restart, deployment, or
-  engine experiment.
+- **Authorized next work:** plan and implement ticket #19 as one isolated
+  instrumentation change with deterministic benchmark accounting,
+  decision-tuple equivalence, and the mandatory Threads=1/2 timed-root
+  regression. No other strength ticket is authorized.
+- Branch cleanup, lichess-bot upstream updates, README corrections, persistent
+  autostart/watchdog work, and all other roadmap items remain separate,
+  non-authorized decisions.

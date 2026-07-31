@@ -3153,3 +3153,32 @@ Branch `fix/timed-root-completion` was pushed, then merged into `main` with
 The fix is live, deployed, verified, merged into `main`, and pushed.
 PyroBotTorch remains offline; restarting the bridge is a separate explicit
 decision.
+
+## First post-fix live Lichess shakedown passed (August 1, 2026)
+
+PyroBotTorch's first independently audited live game after deployment of the
+timed-root-completion fix passed end to end. In casual 5+0 standard Blitz game
+[`SS1KiMLB`](https://lichess.org/SS1KiMLB), PyroBotTorch played White against
+the allow-listed human account TorchVision29 from a Polish Opening and won
+`1-0` by `39.Rxh7#` after 77 plies (39 Pyro moves).
+
+The external lichess-bot bridge ran the deployed SCReLU-512 NNUE executable at
+Threads=2. The GM opening book supplied Pyro's first two moves; Syzygy was
+enabled but was not relevant. Independent python-chess parsing found 0 illegal
+moves and 0 PGN errors, and classified the final position as checkmate. The
+engine completed every move normally, delivered the mating move with about
+1:19 remaining, exited cleanly after the game, and left no duplicate or
+orphaned engine process. There was no engine or bridge crash, protocol error,
+timeout, or timed-root-completion symptom. The bridge remained online and
+returned to awaiting challenges.
+
+Pinned live artifacts for the shakedown were:
+
+- `engine/target/release/pyro.exe`: SHA-256
+  `6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`
+- `engine/target/release/pyro.nnue`: SHA-256
+  `A06CFEBD7C22D0B45F08BA94A276FD2A7CF8B3CD76C54DD308B2EEAA1A579591`
+
+This game validates the deployed correctness fix through a complete real
+Lichess lifecycle. It is correctness and operational evidence, not an Elo
+measurement.

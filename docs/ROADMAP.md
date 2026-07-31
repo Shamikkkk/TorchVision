@@ -7,33 +7,45 @@ timed-root-completion regression gate.
 
 ## Authorized next work
 
-No Codex implementation or operational work is authorized. The only pending
-action is user review of the four untracked context documents and, if accepted,
-preservation through the user's own Git workflow. This review does not
-authorize an engine change, experiment, deployment, Docker start, or bot
-restart.
+The sole authorized next engineering task is `STRENGTH_AUDIT.md` ticket #19:
+
+1. Add a deterministic `bench` command over a fixed internal position suite.
+2. Add completed-search `info nodes ... nps ...` instrumentation.
+3. Make no intended change to search decisions, evaluation, timing policy,
+   transposition-table behavior, move ordering, or production defaults.
+4. Require exact baseline/candidate decision-tuple equivalence in NNUE and
+   `--no-nnue` modes.
+5. Require repeated benchmark runs with an identical total node count and
+   deterministic checksum; wall-clock NPS may vary.
+6. Run the timed-root incident regression with fresh processes at Threads=1
+   and Threads=2, with zero non-mating results.
+7. Do not run a gauntlet unless behavior changes unexpectedly or an Elo claim
+   is made.
+
+Ticket #19 is instrumentation-only. It must not be bundled with incremental
+NNUE, move-ordering, Zobrist, or any other optimization. This documentation
+task records the authorization but does not implement ticket #19.
 
 ## Candidate future work
 
 These are documented candidates, not approved tasks:
 
-1. Add `bench` and `info nodes nps` instrumentation (#19).
-2. Incremental NNUE accumulator updates (#1), with 10000-position exact eval
+1. Incremental NNUE accumulator updates (#1), with 10000-position exact eval
    equivalence and timed-root regression.
-3. Remove move-order scoring inside the sort comparator (#2), then incremental
+2. Remove move-order scoring inside the sort comparator (#2), then incremental
    Zobrist (#16), each under controlled equivalence gates.
-4. Search improvements in the documented dependency order: log LMR (#3), RFP
+3. Search improvements in the documented dependency order: log LMR (#3), RFP
    (#4), dynamic-R NMP (#6), QS TT/delta/captures-only work (#5), gradual
    aspiration (#7), TT/Hash improvements (#11), continuation history (#8), SEE
    pruning (#9), and time-management work (#10).
-5. Tier 2 speed infrastructure: SIMD NNUE (#14), magic bitboards (#15), staged
+4. Tier 2 speed infrastructure: SIMD NNUE (#14), magic bitboards (#15), staged
    MovePicker (#17), and TT prefetch (#18).
-6. NNUE/data candidates: output buckets (#20), then a 150-300M corpus (#21),
+5. NNUE/data candidates: output buckets (#20), then a 150-300M corpus (#21),
    followed by architecture experiments only when their data gates are met.
-7. Unscheduled product maintenance from `CLAUDE.md`: lazy/remove the unused
+6. Unscheduled product maintenance from `CLAUDE.md`: lazy/remove the unused
    Python NNUE import, server-side voice settings, and a careful
    `python-chess` upgrade.
-8. Always-on hosting for the optional Lichess bot.
+7. Always-on hosting for the optional Lichess bot.
 
 These candidates are not interchangeable with authorization. Each experiment
 must isolate one conceptual variable, state a prediction, preserve fixed
@@ -41,7 +53,6 @@ comparison configuration, and use the existing game-count and style gates.
 
 ## Blocked work
 
-- Restarting PyroBotTorch is blocked pending explicit user approval.
 - King buckets and horizontal mirroring (#22) are data-blocked until at least
   several hundred million positions exist.
 - Deeper/bigger nets (#23) share the corpus and inference-speed gate.
@@ -51,10 +62,16 @@ comparison configuration, and use the existing game-count and style gates.
 - 24/7 hosting is blocked pending an explicitly chosen hosting/deployment
   plan and authorization.
 
+Branch deletion, lichess-bot upstream updates, README corrections, persistent
+autostart/watchdog work, and all candidate tickets above are outside ticket
+#19 authorization.
+
 ## Closed, rejected, or completed work
 
 - Completed and shipped: SCReLU-512 NNUE inference/deployment, protected PeSTO
-  fallback, G2 Lazy SMP, and the timed-root-completion correctness fix.
+  fallback, G2 Lazy SMP, and the timed-root-completion correctness fix. The
+  fix also passed complete live Lichess shakedown game `SS1KiMLB` on August 1,
+  2026; PyroBotTorch remains online through the external bridge.
 - Rejected and closed: G9 sacrifice ordering bonus, DYNAMIC_BONUS, and
   COMP_BONUS as style mechanisms.
 - Permanently closed by its second/final strike: WDL blending for the Phase D
