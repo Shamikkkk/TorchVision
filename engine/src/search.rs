@@ -1558,6 +1558,152 @@ fn smp_worker(
 /// Increases depth until the node budget is exhausted.
 /// Returns the best move + score from the last completed depth.
 /// TT persists across depths for move ordering benefit.
+#[cfg(test)]
+mod root_budget_test_hook {
+    use std::sync::Mutex;
+    use std::thread::{self, ThreadId};
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) enum Checkpoint {
+        BeforeScore,
+        AfterScore,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) enum MoveTarget {
+        Index(usize),
+        Final,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) enum ScoreScript {
+        HoldAlpha,
+        FailHighFirst,
+        FailLowFirst,
+        FailHighThenFailLow,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    pub(super) struct Config {
+        pub depth: u32,
+        pub abort_attempt: usize,
+        pub move_target: MoveTarget,
+        pub checkpoint: Checkpoint,
+        pub score_script: ScoreScript,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(super) struct Event {
+        pub depth: u32,
+        pub attempt: usize,
+        pub move_index: usize,
+        pub checkpoint: Checkpoint,
+        pub window_alpha: i32,
+        pub window_beta: i32,
+    }
+
+    #[derive(Debug)]
+    pub(super) struct State {
+        owner: ThreadId,
+        config: Config,
+        pub hit: Option<Event>,
+        pub max_attempt: usize,
+    }
+
+    static CONTROL: Mutex<Option<State>> = Mutex::new(None);
+
+    fn lock_control() -> std::sync::MutexGuard<'static, Option<State>> {
+        CONTROL.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(super) fn install(config: Config) {
+        let mut control = lock_control();
+        assert!(control.is_none(), "root budget test hook already installed");
+        *control = Some(State {
+            owner: thread::current().id(),
+            config,
+            hit: None,
+            max_attempt: 0,
+        });
+    }
+
+    pub(super) fn clear() {
+        *lock_control() = None;
+    }
+
+    pub(super) fn take() -> State {
+        lock_control()
+            .take()
+            .expect("root budget test hook was not installed")
+    }
+
+    pub(super) fn adjust_score(
+        depth: u32,
+        attempt: usize,
+        score: i32,
+        alpha: i32,
+        beta: i32,
+    ) -> i32 {
+        let mut control = lock_control();
+        let Some(state) = control.as_mut() else {
+            return score;
+        };
+        if state.owner != thread::current().id() || state.config.depth != depth {
+            return score;
+        }
+
+        state.max_attempt = state.max_attempt.max(attempt);
+        match state.config.score_script {
+            ScoreScript::HoldAlpha => alpha,
+            ScoreScript::FailHighFirst if attempt == 1 => beta,
+            ScoreScript::FailLowFirst if attempt == 1 => alpha,
+            ScoreScript::FailHighThenFailLow if attempt == 1 => beta,
+            ScoreScript::FailHighThenFailLow if attempt == 2 => alpha,
+            _ => score,
+        }
+    }
+
+    pub(super) fn should_abort(
+        depth: u32,
+        attempt: usize,
+        move_index: usize,
+        move_count: usize,
+        checkpoint: Checkpoint,
+        window_alpha: i32,
+        window_beta: i32,
+    ) -> bool {
+        let mut control = lock_control();
+        let Some(state) = control.as_mut() else {
+            return false;
+        };
+        if state.owner != thread::current().id() || state.config.depth != depth {
+            return false;
+        }
+
+        state.max_attempt = state.max_attempt.max(attempt);
+        let target_index = match state.config.move_target {
+            MoveTarget::Index(index) => index,
+            MoveTarget::Final => move_count.saturating_sub(1),
+        };
+        if state.hit.is_none()
+            && attempt == state.config.abort_attempt
+            && move_index == target_index
+            && checkpoint == state.config.checkpoint
+        {
+            state.hit = Some(Event {
+                depth,
+                attempt,
+                move_index,
+                checkpoint,
+                window_alpha,
+                window_beta,
+            });
+            return true;
+        }
+        false
+    }
+}
+
 pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::time::Instant>, network: Option<&nnue::Network>, num_threads: usize) -> Option<(Move, i32, u32)> {
     let asp_delta = TUNE_ASPIRATION_DELTA.load(Ordering::Relaxed);
     const MATE_THRESHOLD: i32 = CHECKMATE - 1000;
@@ -1615,7 +1761,13 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
 
             // Re-search loop: widen window on fail-low or fail-high.
             let nodes = AtomicU64::new(0);
+            #[cfg(test)]
+            let mut root_attempt = 0usize;
             let (iter_best, iter_completed) = loop {
+                #[cfg(test)]
+                {
+                    root_attempt += 1;
+                }
                 let mut killers: Killers = [[None; 2]; MAX_DEPTH];
                 let mut ordered_moves = moves.clone();
 
@@ -1628,7 +1780,16 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                 let mut completed = true;
                 let mut fail_high = false;
 
-                for mv in &ordered_moves {
+                #[cfg(test)]
+                let mut test_move_index = 0usize;
+                for mv in ordered_moves.iter() {
+                    #[cfg(test)]
+                    let move_index = {
+                        let index = test_move_index;
+                        test_move_index += 1;
+                        index
+                    };
+
                     let new_board = make_move(board, mv);
                     let score = -ab_search(
                         &new_board, depth - 1, -beta, -alpha, 1,
@@ -1636,10 +1797,32 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                         &nodes, node_limit, deadline, &stop, &tt,
                     );
 
-                    if (nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop)) && best.is_none() {
+                    let budget_exhausted =
+                        nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop);
+                    #[cfg(test)]
+                    let budget_exhausted = budget_exhausted
+                        || root_budget_test_hook::should_abort(
+                            depth,
+                            root_attempt,
+                            move_index,
+                            ordered_moves.len(),
+                            root_budget_test_hook::Checkpoint::BeforeScore,
+                            alpha_init,
+                            beta_init,
+                        );
+                    if budget_exhausted {
                         completed = false;
                         break;
                     }
+
+                    #[cfg(test)]
+                    let score = root_budget_test_hook::adjust_score(
+                        depth,
+                        root_attempt,
+                        score,
+                        alpha,
+                        beta,
+                    );
 
                     // Fail-high at root: score == beta under fail-hard.
                     // Record the move, break, and re-search with wider beta.
@@ -1654,7 +1837,21 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                         best = Some((mv.clone(), score));
                     }
 
-                    if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop) {
+                    let budget_exhausted =
+                        nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop);
+                    #[cfg(test)]
+                    let budget_exhausted = budget_exhausted
+                        || root_budget_test_hook::should_abort(
+                            depth,
+                            root_attempt,
+                            move_index,
+                            ordered_moves.len(),
+                            root_budget_test_hook::Checkpoint::AfterScore,
+                            alpha_init,
+                            beta_init,
+                        );
+                    if budget_exhausted {
+                        completed = false;
                         break;
                     }
                 }
@@ -1846,5 +2043,209 @@ mod tests {
             "Queen should move, got {}",
             mv.to_uci()
         );
+    }
+
+    struct RootHookReset;
+
+    impl Drop for RootHookReset {
+        fn drop(&mut self) {
+            root_budget_test_hook::clear();
+        }
+    }
+
+    #[test]
+    fn interrupted_root_iterations_keep_last_completed_tuple() {
+        use root_budget_test_hook::{
+            Checkpoint, Config, MoveTarget, ScoreScript,
+        };
+
+        let board = Board::startpos();
+        let (depth_one_move, depth_one_score) =
+            best_move(&board, 1, None).expect("startpos must have a depth-1 move");
+        let expected_uci = depth_one_move.to_uci();
+        let legal_moves = generate_moves(&board);
+
+        let cases = [
+            (
+                "first_root_move_before_score",
+                Config {
+                    depth: 2,
+                    abort_attempt: 1,
+                    move_target: MoveTarget::Index(0),
+                    checkpoint: Checkpoint::BeforeScore,
+                    score_script: ScoreScript::HoldAlpha,
+                },
+            ),
+            (
+                "first_root_move_after_score",
+                Config {
+                    depth: 2,
+                    abort_attempt: 1,
+                    move_target: MoveTarget::Index(0),
+                    checkpoint: Checkpoint::AfterScore,
+                    score_script: ScoreScript::HoldAlpha,
+                },
+            ),
+            (
+                "second_root_move_before_score",
+                Config {
+                    depth: 2,
+                    abort_attempt: 1,
+                    move_target: MoveTarget::Index(1),
+                    checkpoint: Checkpoint::BeforeScore,
+                    score_script: ScoreScript::HoldAlpha,
+                },
+            ),
+            (
+                "second_root_move_after_score",
+                Config {
+                    depth: 2,
+                    abort_attempt: 1,
+                    move_target: MoveTarget::Index(1),
+                    checkpoint: Checkpoint::AfterScore,
+                    score_script: ScoreScript::HoldAlpha,
+                },
+            ),
+            (
+                "later_root_move_before_score",
+                Config {
+                    depth: 2,
+                    abort_attempt: 1,
+                    move_target: MoveTarget::Index(3),
+                    checkpoint: Checkpoint::BeforeScore,
+                    score_script: ScoreScript::HoldAlpha,
+                },
+            ),
+            (
+                "later_root_move_after_score",
+                Config {
+                    depth: 2,
+                    abort_attempt: 1,
+                    move_target: MoveTarget::Index(3),
+                    checkpoint: Checkpoint::AfterScore,
+                    score_script: ScoreScript::HoldAlpha,
+                },
+            ),
+            (
+                "final_root_move_before_score",
+                Config {
+                    depth: 2,
+                    abort_attempt: 1,
+                    move_target: MoveTarget::Final,
+                    checkpoint: Checkpoint::BeforeScore,
+                    score_script: ScoreScript::HoldAlpha,
+                },
+            ),
+            (
+                "final_root_move_after_score",
+                Config {
+                    depth: 2,
+                    abort_attempt: 1,
+                    move_target: MoveTarget::Final,
+                    checkpoint: Checkpoint::AfterScore,
+                    score_script: ScoreScript::HoldAlpha,
+                },
+            ),
+            (
+                "fail_high_research",
+                Config {
+                    depth: 2,
+                    abort_attempt: 2,
+                    move_target: MoveTarget::Index(0),
+                    checkpoint: Checkpoint::BeforeScore,
+                    score_script: ScoreScript::FailHighFirst,
+                },
+            ),
+            (
+                "fail_low_research",
+                Config {
+                    depth: 2,
+                    abort_attempt: 2,
+                    move_target: MoveTarget::Index(0),
+                    checkpoint: Checkpoint::BeforeScore,
+                    score_script: ScoreScript::FailLowFirst,
+                },
+            ),
+            (
+                "full_window_research",
+                Config {
+                    depth: 2,
+                    abort_attempt: 3,
+                    move_target: MoveTarget::Index(0),
+                    checkpoint: Checkpoint::BeforeScore,
+                    score_script: ScoreScript::FailHighThenFailLow,
+                },
+            ),
+        ];
+
+        for (label, config) in cases {
+            root_budget_test_hook::install(config);
+            let reset = RootHookReset;
+
+            let (actual_move, actual_score, actual_depth) =
+                best_move_nodes(&board, u64::MAX, None, None, 1)
+                    .unwrap_or_else(|| panic!("{label}: expected preserved depth-1 result"));
+            let state = root_budget_test_hook::take();
+            drop(reset);
+
+            let event = state
+                .hit
+                .unwrap_or_else(|| panic!("{label}: test hook never reached its abort point"));
+            assert_eq!(
+                state.max_attempt, config.abort_attempt,
+                "{label}: unexpected re-search attempt count"
+            );
+            assert_eq!(event.depth, config.depth, "{label}: wrong abort depth");
+            assert_eq!(
+                event.attempt, config.abort_attempt,
+                "{label}: wrong abort attempt"
+            );
+            assert_eq!(
+                event.checkpoint, config.checkpoint,
+                "{label}: wrong abort checkpoint"
+            );
+            match config.move_target {
+                MoveTarget::Index(index) => assert_eq!(
+                    event.move_index, index,
+                    "{label}: wrong root move index"
+                ),
+                MoveTarget::Final => assert_eq!(
+                    event.move_index + 1,
+                    legal_moves.len(),
+                    "{label}: abort was not on the final root move"
+                ),
+            }
+
+            match label {
+                "fail_high_research" => {
+                    assert_ne!(event.window_alpha, -INF);
+                    assert_eq!(event.window_beta, INF);
+                }
+                "fail_low_research" => {
+                    assert_eq!(event.window_alpha, -INF);
+                    assert_ne!(event.window_beta, INF);
+                }
+                "full_window_research" => {
+                    assert_eq!(event.window_alpha, -INF);
+                    assert_eq!(event.window_beta, INF);
+                }
+                _ => {}
+            }
+
+            assert_eq!(actual_depth, 1, "{label}: partial depth replaced depth 1");
+            assert_eq!(
+                actual_move.to_uci(),
+                expected_uci,
+                "{label}: move did not come from completed depth 1"
+            );
+            assert_eq!(
+                actual_score, depth_one_score,
+                "{label}: score did not come from completed depth 1"
+            );
+            assert!(
+                legal_moves.iter().any(|mv| mv.to_uci() == actual_move.to_uci()),
+                "{label}: preserved move is illegal"
+            );
+        }
     }
 }
