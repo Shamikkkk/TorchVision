@@ -1,8 +1,9 @@
 # Pyro project state
 
-Verification snapshot: **August 1, 2026** at
-`1ecbc83842941e00c006f31fa718af97f618f6ac`, before the documentation-only
-working-tree updates that record the live shakedown.
+Pre-commit verification baseline: **August 2, 2026** at
+`46d8c36c5d2a910b55e060db83c0cecedb8471a8`. This identifies the repository
+immediately before Git preservation of the reviewed Ticket #19 set; it is not
+an enduring statement of the latest committed HEAD.
 
 Labels used below:
 
@@ -15,32 +16,69 @@ Labels used below:
 
 ## Repository
 
-- **Verified current fact:** repository
-  `C:\Users\shami\OneDrive\Documents\torch` is on branch `main` at
-  `1ecbc83842941e00c006f31fa718af97f618f6ac`.
-- **Verified current fact:** local `origin/main` and the actual remote `main`
-  were independently verified at the same commit; `HEAD...origin/main` is
-  `0 0`.
+- **August 2, 2026 pre-commit verification fact:** repository
+  `C:\Users\shami\OneDrive\Documents\torch` was on branch `main` at
+  `46d8c36c5d2a910b55e060db83c0cecedb8471a8`. Current branch and HEAD must be
+  checked from Git after preservation.
+- **Historically reported fact:** local and remote `main` matched at the prior
+  context-baseline audit. This task did not query the remote repository.
 - **Verified current fact:** the relevant ancestry is
   `b6c3277dd1f2ac7415f1a799756602f7b30a0839` -> fix
   `5469931e6653b58ddec8f068614ab42c4c9422ed` -> merge
   `203b60856fd0b651c73ce814926fb3266c31bf9d` -> incident docs
   `181f679709c82625172355d1ef34f9d8685fb654` -> context baseline
-  `1ecbc83842941e00c006f31fa718af97f618f6ac`.
+  `1ecbc83842941e00c006f31fa718af97f618f6ac` -> live-shakedown docs
+  `46d8c36c5d2a910b55e060db83c0cecedb8471a8`.
 - **Verified current fact:** `203b608...` is a two-parent merge of
   `b6c3277...` and `5469931...`; therefore the timed-root fix is present in
   current `main`.
-- **Verified current fact:** the worktree began this audit with exactly
-  ` m bullet` and nothing staged. The parent index stores `bullet` as gitlink
-  mode `160000` at `cebc78a093d92cbc87e56cfef049184c225270b0`; its nested HEAD
-  is unchanged at that commit. The lowercase `m` means the nested worktree has
-  modified tracked content. Porcelain v2 also reports untracked nested files.
-  The checkout has its own `.git` directory but the parent has no
-  `.gitmodules`, so it is a nested Git repository represented by a
-  submodule-style gitlink, not an ordinary directory.
+- **August 2, 2026 pre-commit verification fact:** the worktree contained the
+  five reviewed Ticket #19 implementation files, these five documentation
+  updates, and the pre-existing ` m bullet`, with nothing staged. The parent
+  index stores `bullet` as gitlink mode `160000` at
+  `cebc78a093d92cbc87e56cfef049184c225270b0`;
+  its nested HEAD is unchanged at that commit. The lowercase `m` means the
+  nested worktree has modified tracked content. Porcelain v2 also reports
+  untracked nested files. The checkout has its own `.git` directory but the
+  parent has no `.gitmodules`, so it is a nested Git repository represented by
+  a submodule-style gitlink, not an ordinary directory.
 - **Verified current fact:** `AGENTS.md`, `docs/PROJECT_STATE.md`,
   `docs/HANDOFF.md`, and `docs/ROADMAP.md` are committed by the context-baseline
   commit `1ecbc838...`; they are no longer untracked review artifacts.
+
+## Ticket #19 search-throughput instrumentation
+
+- **Verified current fact:** Ticket #19 is complete and received the final
+  independent Review Agent verdict **VERIFIED SUCCESS**.
+- **Verified current fact:** the implementation adds aggregate search-call
+  accounting across main-thread depth attempts, aspiration re-searches,
+  incomplete final iterations, and joined Lazy SMP helpers. A completed search
+  emits exactly one `info depth D score cp S nodes N time T nps P` line.
+- **Verified current fact:** deterministic `bench` v1 uses the canonical ten
+  positions at depth 8, forced Threads=1, fresh search state per position, and
+  an FNV-1a-64 checksum that excludes elapsed time and NPS.
+- **Verified fact:** these five implementation files passed final review
+  together and retained their reviewed hashes through documentation validation;
+  their current Git preservation status must be checked from the repository:
+  - `engine/src/search.rs`
+  - `engine/src/main.rs`
+  - `engine/src/bench.rs`
+  - `backend/scripts/verify_search_throughput.py`
+  - `backend/scripts/verify_timed_root_completion.py`
+- **Verified current fact:** fixed-depth equivalence passed 40/40 legal decision
+  tuples. Benchmark totals were deterministic at 5,065,087 nodes / checksum
+  `a8df66621c8eb452` for NNUE and 4,900,866 nodes / checksum
+  `18bd8f3c9614b0db` for PeSTO.
+- **Verified current fact:** the hardened false-pass harness passed 26/26 cases;
+  debug and release tests each passed 32/32 + 46/46; perft remained
+  `20 / 400 / 8,902`; SCReLU verification remained 10,000/10,000 exact; and
+  retained timed-root results remained 50/50 legal immediate mates at each of
+  Threads=1 and Threads=2.
+- **Verified current fact:** reports and immutable candidate artifacts are under
+  `C:\torch_data\pyro_ticket19_20260801_46d8c36`. The isolated candidate is
+  327,168 bytes, SHA-256
+  `906E06247DE3D68D80639E7CDF63519DFD7167D191BB1E401FC0D2CB551ABF00`.
+  It has not been deployed. Ticket #19 makes no Elo or speed-improvement claim.
 
 ## Timed-root-completion fix
 
@@ -166,26 +204,33 @@ Labels used below:
 - **Verified current fact:** the native lichess-bot bridge is running and
   PyroBotTorch is online. No game-engine `pyro.exe` is expected while the bot
   is idle. Docker remains unused for this deployment.
-- **Verified current fact:** the latest committed repository context is
-  `1ecbc838...`. This documentation task records the subsequently verified
-  live shakedown but does not implement or run an engine experiment.
+- **August 2, 2026 pre-commit verification fact:** HEAD was `46d8c36...` and
+  the reviewed Ticket #19 implementation and documentation had not yet been
+  preserved in Git. That hash is a verification baseline, not an enduring
+  latest-HEAD claim; current preservation status must be checked from Git.
+- **Verified current fact:** the live bot remains on executable SHA-256
+  `6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`;
+  the Ticket #19 candidate was not deployed.
+- **Verified current fact:** deterministic search-throughput measurement is now
+  available for future exact-work comparisons.
 - **Verified current fact:** open, unscheduled product issues remain in
   `CLAUDE.md`: eager loading of an unused Python NNUE model, client-only voice
   state, and the old `python-chess` dependency.
 - **Historically reported fact:** Pyro still emits mate-range UCI scores as
   centipawns rather than `score mate N`; this cosmetic issue was outside the
   timed-root fix.
-- **Authorized next engineering task:** `STRENGTH_AUDIT.md` ticket #19,
-  deterministic `bench` plus completed-search `info nodes ... nps ...`
-  instrumentation. It must remain instrumentation-only and isolated from every
-  optimization. This documentation task does not implement it.
+- **Not started:** Ticket #1 incremental SCReLU-512 NNUE accumulator
+  integration. It is the next separate Plan-mode investigation only after the
+  reviewed Ticket #19 implementation and documentation are preserved.
 
 ## Next decision
 
-- **Authorized next work:** plan and implement ticket #19 as one isolated
-  instrumentation change with deterministic benchmark accounting,
-  decision-tuple equivalence, and the mandatory Threads=1/2 timed-root
-  regression. No other strength ticket is authorized.
+- **Immediate check:** confirm from Git that the complete reviewed Ticket #19
+  implementation and documentation set has been preserved. If it has not,
+  review and preserve it through user-controlled staging, commit, and push.
+- **Once preservation is confirmed:** the next engineering phase is a
+  separate Plan-mode investigation for Ticket #1. Planning does not authorize
+  implementation, and incremental NNUE work has not begun.
 - Branch cleanup, lichess-bot upstream updates, README corrections, persistent
   autostart/watchdog work, and all other roadmap items remain separate,
   non-authorized decisions.

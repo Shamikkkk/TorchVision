@@ -48,6 +48,21 @@ pub fn set_tune_param(name: &str, value: i32) {
 const INF: i32 = 100_000;
 const CHECKMATE: i32 = 50_000;
 
+/// Completed root-search result plus observational search-call accounting.
+///
+/// `nodes` counts entries into `ab_search` and `quiescence` across the main
+/// thread and all Lazy-SMP helpers.  It includes TT cutoffs and work from an
+/// incomplete final root iteration, and excludes the root position itself.
+/// The counter's existing increment points and node-budget semantics are left
+/// unchanged; this type only makes the already-recorded work observable.
+#[derive(Debug)]
+pub struct SearchOutcome {
+    pub best_move: Move,
+    pub score: i32,
+    pub depth: u32,
+    pub nodes: u64,
+}
+
 // ---------------------------------------------------------------------------
 // Transposition table
 // ---------------------------------------------------------------------------
@@ -1461,7 +1476,7 @@ fn ab_search(
 
 /// Search for the best move at the given depth.
 /// Returns None if no legal moves exist (checkmate or stalemate).
-pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> Option<(Move, i32)> {
+pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> Option<SearchOutcome> {
     let mut moves = generate_moves(board);
     if moves.is_empty() {
         return None;
@@ -1492,7 +1507,12 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
         }
     }
 
-    best
+    best.map(|(best_move, score)| SearchOutcome {
+        best_move,
+        score,
+        depth,
+        nodes: nodes.load(Ordering::Relaxed),
+    })
 }
 
 /// Worker thread for Lazy SMP. Runs a simplified iterative-deepening
@@ -1506,14 +1526,14 @@ fn smp_worker(
     node_limit: u64,
     network: Option<&nnue::Network>,
     thread_id: usize,
-) {
+) -> u64 {
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
     let mut history: History = [[[0i32; 64]; 64]; 2];
     let mut counter_moves: CounterMoves = [[None; 64]; 2];
     let nodes = AtomicU64::new(0);
     let moves = generate_moves(board);
     if moves.is_empty() {
-        return;
+        return 0;
     }
 
     // Each worker starts at a slightly different depth to ensure
@@ -1536,7 +1556,7 @@ fn smp_worker(
 
         for mv in &ordered_moves {
             if stop.load(Ordering::Relaxed) {
-                return;
+                return nodes.load(Ordering::Relaxed);
             }
             let new_board = make_move(board, mv);
             let score = -ab_search(
@@ -1552,6 +1572,8 @@ fn smp_worker(
             }
         }
     }
+
+    nodes.load(Ordering::Relaxed)
 }
 
 /// Iterative deepening search with a node limit and aspiration windows.
@@ -1704,7 +1726,7 @@ mod root_budget_test_hook {
     }
 }
 
-pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::time::Instant>, network: Option<&nnue::Network>, num_threads: usize) -> Option<(Move, i32, u32)> {
+pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::time::Instant>, network: Option<&nnue::Network>, num_threads: usize) -> Option<SearchOutcome> {
     let asp_delta = TUNE_ASPIRATION_DELTA.load(Ordering::Relaxed);
     const MATE_THRESHOLD: i32 = CHECKMATE - 1000;
 
@@ -1716,6 +1738,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
     let tt = TTable::new();
     let stop = AtomicBool::new(false);
     let mut best_overall: Option<(Move, i32, u32)> = None;
+    let mut total_nodes = 0u64;
 
     // thread::scope lets workers borrow board, tt, stop, network from
     // this stack frame without requiring 'static lifetimes.
@@ -1727,10 +1750,11 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
         let tt_ref   = &tt;
         let stop_ref = &stop;
         let num_workers = num_threads.saturating_sub(1);
+        let mut worker_handles = Vec::with_capacity(num_workers);
         for thread_id in 1..=num_workers {
-            s.spawn(move || {
-                smp_worker(board, tt_ref, stop_ref, deadline, node_limit, network, thread_id);
-            });
+            worker_handles.push(s.spawn(move || {
+                smp_worker(board, tt_ref, stop_ref, deadline, node_limit, network, thread_id)
+            }));
         }
 
         // ---- Main thread: full aspiration-window ID loop ----
@@ -1738,6 +1762,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
         let mut counter_moves: CounterMoves = [[None; 64]; 2];
         let root_hash = board.zobrist_hash();
         let mut prev_score: Option<i32> = None;
+        let mut main_nodes = 0u64;
 
         for depth in 1..=MAX_DEPTH as u32 {
             // Soft check: don't start a new iteration if the deadline has
@@ -1882,6 +1907,11 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                 break (best, true);
             };
 
+            // The main-thread counter is intentionally still per depth so
+            // `go nodes` retains its historical budget behavior.  Aggregate
+            // it only after the iteration/re-search work has finished.
+            main_nodes = main_nodes.saturating_add(nodes.load(Ordering::Relaxed));
+
             if iter_completed {
                 if let Some((mv, score)) = iter_best {
                     best_overall = Some((mv, score, depth));
@@ -1901,9 +1931,20 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
 
         // Signal workers to stop. The scope join point below waits for them.
         stop.store(true, Ordering::Relaxed);
+
+        let helper_nodes = worker_handles
+            .into_iter()
+            .map(|handle| handle.join().expect("Lazy-SMP worker panicked"))
+            .fold(0u64, u64::saturating_add);
+        total_nodes = main_nodes.saturating_add(helper_nodes);
     });
 
-    best_overall
+    best_overall.map(|(best_move, score, depth)| SearchOutcome {
+        best_move,
+        score,
+        depth,
+        nodes: total_nodes,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1972,9 +2013,10 @@ mod tests {
         let board = Board::from_fen("4k3/8/8/3q4/8/8/8/3QK3 w - - 0 1").unwrap();
         let result = best_move(&board, 2, None);
         assert!(result.is_some());
-        let (mv, score) = result.unwrap();
-        assert_eq!(mv.to_uci(), "d1d5", "Should capture the queen");
-        assert!(score > 800, "Score should reflect queen capture, got {}", score);
+        let outcome = result.unwrap();
+        assert_eq!(outcome.best_move.to_uci(), "d1d5", "Should capture the queen");
+        assert!(outcome.score > 800, "Score should reflect queen capture, got {}", outcome.score);
+        assert!(outcome.nodes > 0, "Search should report visited nodes");
     }
 
     #[test]
@@ -1983,8 +2025,8 @@ mod tests {
         let board = Board::from_fen("6k1/5ppp/8/8/8/8/8/4K2Q w - - 0 1").unwrap();
         let result = best_move(&board, 2, None);
         assert!(result.is_some());
-        let (_, score) = result.unwrap();
-        assert!(score > 40_000, "Should find checkmate, score={}", score);
+        let outcome = result.unwrap();
+        assert!(outcome.score > 40_000, "Should find checkmate, score={}", outcome.score);
     }
 
     #[test]
@@ -1993,9 +2035,9 @@ mod tests {
         let board = Board::from_fen("rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq g3 0 2").unwrap();
         let result = best_move(&board, 1, None);
         assert!(result.is_some());
-        let (mv, score) = result.unwrap();
-        assert_eq!(mv.to_uci(), "d8h4", "Should find Qh4# checkmate");
-        assert!(score > 40_000, "Should return mate score, got {}", score);
+        let outcome = result.unwrap();
+        assert_eq!(outcome.best_move.to_uci(), "d8h4", "Should find Qh4# checkmate");
+        assert!(outcome.score > 40_000, "Should return mate score, got {}", outcome.score);
     }
 
     #[test]
@@ -2036,12 +2078,12 @@ mod tests {
         let board = Board::from_fen("4k3/8/8/8/3p4/4Q3/8/4K3 w - - 0 1").unwrap();
         let result = best_move(&board, 3, None);
         assert!(result.is_some());
-        let (mv, _) = result.unwrap();
+        let outcome = result.unwrap();
         // Queen should not stay on e3 where it gets captured
         assert!(
-            mv.from_sq == 20, // e3
+            outcome.best_move.from_sq == 20, // e3
             "Queen should move, got {}",
-            mv.to_uci()
+            outcome.best_move.to_uci()
         );
     }
 
@@ -2060,9 +2102,10 @@ mod tests {
         };
 
         let board = Board::startpos();
-        let (depth_one_move, depth_one_score) =
-            best_move(&board, 1, None).expect("startpos must have a depth-1 move");
-        let expected_uci = depth_one_move.to_uci();
+        let depth_one = best_move(&board, 1, None)
+            .expect("startpos must have a depth-1 move");
+        let expected_uci = depth_one.best_move.to_uci();
+        let depth_one_score = depth_one.score;
         let legal_moves = generate_moves(&board);
 
         let cases = [
@@ -2182,9 +2225,8 @@ mod tests {
             root_budget_test_hook::install(config);
             let reset = RootHookReset;
 
-            let (actual_move, actual_score, actual_depth) =
-                best_move_nodes(&board, u64::MAX, None, None, 1)
-                    .unwrap_or_else(|| panic!("{label}: expected preserved depth-1 result"));
+            let actual = best_move_nodes(&board, u64::MAX, None, None, 1)
+                .unwrap_or_else(|| panic!("{label}: expected preserved depth-1 result"));
             let state = root_budget_test_hook::take();
             drop(reset);
 
@@ -2232,20 +2274,21 @@ mod tests {
                 _ => {}
             }
 
-            assert_eq!(actual_depth, 1, "{label}: partial depth replaced depth 1");
+            assert_eq!(actual.depth, 1, "{label}: partial depth replaced depth 1");
             assert_eq!(
-                actual_move.to_uci(),
+                actual.best_move.to_uci(),
                 expected_uci,
                 "{label}: move did not come from completed depth 1"
             );
             assert_eq!(
-                actual_score, depth_one_score,
+                actual.score, depth_one_score,
                 "{label}: score did not come from completed depth 1"
             );
             assert!(
-                legal_moves.iter().any(|mv| mv.to_uci() == actual_move.to_uci()),
+                legal_moves.iter().any(|mv| mv.to_uci() == actual.best_move.to_uci()),
                 "{label}: preserved move is illegal"
             );
+            assert!(actual.nodes > 0, "{label}: node total was not reported");
         }
     }
 }

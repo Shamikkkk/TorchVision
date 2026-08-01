@@ -1,3 +1,4 @@
+mod bench;
 mod board;
 mod movegen;
 mod nnue;
@@ -116,16 +117,31 @@ fn main() {
             }
             "go" => {
                 let white_to_move = engine.position.side_to_move; // true = white
+                let duration = parse_go_deadline(&tokens, white_to_move);
+                let node_limit = if duration.is_none() {
+                    parse_go_nodes(&tokens)
+                } else {
+                    None
+                };
+                let fixed_depth = if duration.is_none() && node_limit.is_none() {
+                    Some(parse_go_depth(&tokens))
+                } else {
+                    None
+                };
+                let started = std::time::Instant::now();
 
                 let result =
-                    if let Some(duration) = parse_go_deadline(&tokens, white_to_move) {
+                    if let Some(duration) = duration {
                         // Time-based: unlimited nodes, hard deadline.
-                        let deadline = std::time::Instant::now() + duration;
+                        // `started` is the same clock read that historically
+                        // established the deadline, so instrumentation adds no
+                        // extra pre-search timer call on the timed path.
+                        let deadline = started + duration;
                         best_move_nodes(
                             &engine.position, u64::MAX, Some(deadline),
                             engine.network.as_ref(), engine.num_threads,
                         )
-                    } else if let Some(node_limit) = parse_go_nodes(&tokens) {
+                    } else if let Some(node_limit) = node_limit {
                         // Node-limited (existing behaviour).
                         best_move_nodes(
                             &engine.position, node_limit, None,
@@ -133,16 +149,62 @@ fn main() {
                         )
                     } else {
                         // Fixed depth (existing behaviour).
-                        let depth = parse_go_depth(&tokens);
-                        best_move(&engine.position, depth, engine.network.as_ref())
-                            .map(|(mv, score)| (mv, score, depth))
+                        best_move(
+                            &engine.position,
+                            fixed_depth.expect("fixed-depth go must have a depth"),
+                            engine.network.as_ref(),
+                        )
                     };
+                let time_ms = started.elapsed().as_millis();
 
-                if let Some((mv, score, depth)) = result {
-                    println!("info depth {} score cp {}", depth, score);
-                    println!("bestmove {}", mv.to_uci());
+                if let Some(outcome) = result {
+                    let nps = bench::nodes_per_second(outcome.nodes, time_ms);
+                    println!(
+                        "info depth {} score cp {} nodes {} time {} nps {}",
+                        outcome.depth, outcome.score, outcome.nodes, time_ms, nps
+                    );
+                    println!("bestmove {}", outcome.best_move.to_uci());
                 } else {
                     println!("bestmove (none)");
+                }
+                io::stdout().flush().ok();
+            }
+            "bench" => {
+                match bench::run(engine.network.as_ref()) {
+                    Ok(report) => {
+                        println!(
+                            "info string bench start version {} mode {} threads 1 positions {} depth {}",
+                            bench::BENCH_VERSION,
+                            report.mode,
+                            report.positions.len(),
+                            bench::BENCH_DEPTH,
+                        );
+                        for position in &report.positions {
+                            println!(
+                                "info string bench position {} label {} bestmove {} score {} depth {} nodes {}",
+                                position.index,
+                                position.label,
+                                position.best_move,
+                                position.score,
+                                position.depth,
+                                position.nodes,
+                            );
+                        }
+                        println!(
+                            "info string bench complete version {} mode {} threads 1 positions {} depth {} nodes {} time {} nps {} checksum {:016x}",
+                            bench::BENCH_VERSION,
+                            report.mode,
+                            report.positions.len(),
+                            bench::BENCH_DEPTH,
+                            report.nodes,
+                            report.time_ms,
+                            report.nps,
+                            report.checksum,
+                        );
+                    }
+                    Err(error) => {
+                        println!("info string bench error {}", error);
+                    }
                 }
                 io::stdout().flush().ok();
             }

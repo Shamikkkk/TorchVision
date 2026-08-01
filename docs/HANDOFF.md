@@ -1,11 +1,13 @@
 # Pyro concise handoff
 
-Verified: August 1, 2026.
+Verified: August 2, 2026.
 
 ## Current state
 
-- Repository: `C:\Users\shami\OneDrive\Documents\torch`, branch `main`,
-  committed context baseline `1ecbc83842941e00c006f31fa718af97f618f6ac`.
+- Repository: `C:\Users\shami\OneDrive\Documents\torch`. At the August 2
+  pre-commit baseline it was on branch `main` at
+  `46d8c36c5d2a910b55e060db83c0cecedb8471a8`; check Git for the current branch,
+  HEAD, and Ticket #19 preservation status.
 - The deployed engine defaults to the style-gated SCReLU-512 NNUE. The
   application uses Threads=4; `PYRO_NO_NNUE=1` retains the protected
   PeSTO+Tal `--no-nnue` fallback.
@@ -43,25 +45,40 @@ The timed-root fix is commit
 complete real Lichess game, not only harnesses and local probes. No engine or
 bridge defect was observed.
 
-## Next authorized engineering task
+## Ticket #19 completed and reviewed
 
-The sole authorized next task is `STRENGTH_AUDIT.md` ticket #19:
+Ticket #19 passed final independent review with verdict **VERIFIED SUCCESS**.
+The reviewed implementation added aggregate main/helper search-node
+accounting, one completed-search `nodes/time/nps` report, deterministic depth-8
+`bench` v1, and strict baseline/candidate verification. Independent review
+confirmed no search-policy, evaluation, ordering, TT, budget/deadline,
+timing-policy, or UCI-default change.
 
-- deterministic `bench`;
-- completed-search `info nodes ... nps ...` instrumentation;
-- no intended search, evaluation, timing-policy, TT, move-ordering, or
-  production-default change;
-- exact decision-tuple equivalence and deterministic benchmark node
-  count/checksum;
-- mandatory timed-root regression at Threads=1 and Threads=2;
-- no gauntlet unless behavior changes unexpectedly or an Elo claim is made.
+Deterministic fixed-work anchors:
 
-Ticket #19 must remain instrumentation-only and must not be combined with an
-optimization. This documentation update does not implement it.
+- NNUE: 5,065,087 nodes, checksum `a8df66621c8eb452`;
+- PeSTO: 4,900,866 nodes, checksum `18bd8f3c9614b0db`.
 
-Old merged branch references may be cleaned up later, but deletion is optional
-and non-urgent. Bridge upstream updates, README corrections, persistent
-autostart, and all other strength tickets remain separate decisions.
+The isolated candidate is 327,168 bytes, SHA-256
+`906E06247DE3D68D80639E7CDF63519DFD7167D191BB1E401FC0D2CB551ABF00`.
+It was not deployed during validation, and deployment remains a separate
+explicit action. The live executable remained SHA-256
+`6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`.
+
+## Immediate action and next planning item
+
+If the complete reviewed Ticket #19 implementation and documentation set has
+not yet been committed and pushed, preserve it first through user-controlled
+review, staging, commit, and push. Confirm preservation from Git rather than
+assuming the August 2 pre-commit snapshot is still current.
+
+Once Ticket #19 preservation is confirmed, Ticket #1 — incremental SCReLU-512
+NNUE accumulator integration — is the sole next planning item. It must begin as
+a separate planning task; implementation is not automatically authorized and
+has not begun. No other strength ticket is authorized.
+
+Old merged branch references, bridge upstream updates, README corrections,
+persistent autostart, and deployment remain separate decisions.
 
 ## Governing references
 

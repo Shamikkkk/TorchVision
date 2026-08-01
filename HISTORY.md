@@ -3182,3 +3182,56 @@ Pinned live artifacts for the shakedown were:
 This game validates the deployed correctness fix through a complete real
 Lichess lifecycle. It is correctness and operational evidence, not an Elo
 measurement.
+
+## Ticket #19 COMPLETE — deterministic search-throughput instrumentation (August 2, 2026)
+
+Ticket #19 established the measurement layer required before attempting pure
+search-throughput optimization. The reviewed Ticket #19 implementation added
+aggregate search-call accounting across main-thread depth attempts, aspiration
+re-searches, incomplete final iterations, and joined Lazy SMP helpers. Every
+completed search now reports exactly one line in this form:
+
+```text
+info depth D score cp S nodes N time T nps P
+```
+
+It also adds deterministic `bench` v1: the canonical ten-position suite at
+depth 8, forced Threads=1, with fresh search state per position and an
+architecture-stable FNV-1a-64 checksum over deterministic result/work fields.
+Elapsed time and NPS are deliberately excluded from the checksum.
+
+The Python verification was hardened to reject identical or incorrectly pinned
+baseline/candidate artifacts, incomplete or additional search transcript
+output, malformed or missing metrics, incorrect NPS arithmetic, missing,
+duplicated, reordered, or non-depth-8 benchmark rows, incorrect aggregate
+nodes, and stale checksums. Python independently recomputes every benchmark
+checksum. The final false-pass regression harness passed 26/26 cases.
+
+Final independent Review Agent verdict: **VERIFIED SUCCESS**. The review found
+no change to recursive node increments, node-budget or deadline behavior,
+search policy, evaluation, move ordering, TT behavior, timing policy, or UCI
+defaults. Principal validation results:
+
+- fixed-depth baseline/candidate equivalence: 40/40 legal decision tuples;
+- deterministic NNUE bench: 5,065,087 nodes, checksum `a8df66621c8eb452`;
+- deterministic PeSTO bench: 4,900,866 nodes, checksum `18bd8f3c9614b0db`;
+- debug tests: 32/32 + 46/46; release tests: 32/32 + 46/46;
+- perft: `20 / 400 / 8,902`;
+- SCReLU integer verification: 10,000/10,000 exact;
+- retained timed-root campaign: 50/50 legal immediate mates at Threads=1 and
+  50/50 at Threads=2, with zero illegal or non-mating results;
+- fresh verifier-correction smokes passed at Threads=1 and Threads=2, and the
+  preceding-position fixed-depth and production-clock checks passed.
+
+The isolated candidate is 327,168 bytes with SHA-256
+`906E06247DE3D68D80639E7CDF63519DFD7167D191BB1E401FC0D2CB551ABF00`.
+Reports and immutable artifacts are retained under
+`C:\torch_data\pyro_ticket19_20260801_46d8c36`.
+
+The candidate was not deployed. The live executable remained SHA-256
+`6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`,
+and both live NNUE files remained SHA-256
+`A06CFEBD7C22D0B45F08BA94A276FD2A7CF8B3CD76C54DD308B2EEAA1A579591`.
+Ticket #19 is instrumentation-only: it makes no Elo claim and no
+speed-improvement claim. Benchmark wall-time outliers reflected host
+contention and are not optimization evidence.

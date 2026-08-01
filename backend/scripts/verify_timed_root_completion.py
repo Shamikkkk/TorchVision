@@ -33,7 +33,16 @@ PREVIOUS_GO = "go wtime 139530 btime 197818 winc 0 binc 0"
 PREVIOUS_MOVE = "f2h3"
 
 MATE_THRESHOLD = 49_000
-INFO_RE = re.compile(r"\bdepth\s+(\d+)\b.*\bscore\s+cp\s+(-?\d+)\b")
+BASELINE_INFO_RE = re.compile(
+    r"^info depth (?P<depth>\d+) score cp (?P<score>-?\d+)$"
+)
+CANDIDATE_INFO_RE = re.compile(
+    r"^info depth (?P<depth>\d+) score cp (?P<score>-?\d+) "
+    r"nodes (?P<nodes>\d+) time (?P<time>\d+) nps (?P<nps>\d+)$"
+)
+BESTMOVE_RE = re.compile(r"^bestmove (?P<move>\S+)$")
+U64_MAX = (1 << 64) - 1
+U128_MAX = (1 << 128) - 1
 
 SUITE = [
     ("startpos", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
@@ -64,9 +73,13 @@ class SearchResult:
     fen: str
     go: str
     elapsed_seconds: float
+    search_lines: str
     info_lines: str
     depth: int | None
     score_cp: int | None
+    nodes: int | None
+    time_ms: int | None
+    nps: int | None
     bestmove: str
     san: str
     legal: bool
@@ -75,7 +88,108 @@ class SearchResult:
     stderr: str
 
     def transcript(self) -> str:
-        return f"{self.info_lines}\nbestmove {self.bestmove}\n"
+        return "\n".join(deserialize_lines(self.search_lines)) + "\n"
+
+
+@dataclass(frozen=True)
+class CompletedInfo:
+    depth: int
+    score: int
+    nodes: int | None
+    time_ms: int | None
+    nps: int | None
+
+
+def deserialize_lines(value: str) -> list[str]:
+    return value.split(" || ") if value else []
+
+
+def rust_nps(nodes: int, time_ms: int) -> int:
+    if not 0 <= nodes <= U64_MAX:
+        raise AssertionError(f"nodes outside Rust u64 range: {nodes}")
+    if not 0 <= time_ms <= U128_MAX:
+        raise AssertionError(f"time outside Rust u128 range: {time_ms}")
+    product = min(nodes * 1_000, U128_MAX)
+    return min(product // max(time_ms, 1), U64_MAX)
+
+
+def parse_search_transcript(
+    lines: list[str], *, require_metrics: bool
+) -> CompletedInfo:
+    completed_indices = [
+        index for index, line in enumerate(lines) if line.startswith("info depth ")
+    ]
+    bestmove_indices = [
+        index for index, line in enumerate(lines) if line.startswith("bestmove ")
+    ]
+    if len(completed_indices) != 1:
+        raise AssertionError(
+            f"expected exactly one completed-search info line, got "
+            f"{len(completed_indices)}: {lines!r}"
+        )
+    if len(bestmove_indices) != 1:
+        raise AssertionError(
+            f"expected exactly one bestmove line, got {len(bestmove_indices)}: {lines!r}"
+        )
+    if len(lines) != 2 or completed_indices[0] != 0 or bestmove_indices[0] != 1:
+        raise AssertionError(
+            "search transcript must contain only the completed-search info line "
+            f"followed by bestmove: {lines!r}"
+        )
+    if BESTMOVE_RE.fullmatch(lines[bestmove_indices[0]]) is None:
+        raise AssertionError(f"malformed bestmove line: {lines[bestmove_indices[0]]!r}")
+
+    info_line = lines[completed_indices[0]]
+    matcher = CANDIDATE_INFO_RE if require_metrics else BASELINE_INFO_RE
+    match = matcher.fullmatch(info_line)
+    if match is None:
+        expected = (
+            "info depth D score cp S nodes N time T nps P"
+            if require_metrics
+            else "info depth D score cp S"
+        )
+        raise AssertionError(
+            f"malformed completed-search info line; expected {expected}: {info_line!r}"
+        )
+
+    values = match.groupdict()
+    depth = int(values["depth"])
+    score = int(values["score"])
+    if not require_metrics:
+        return CompletedInfo(depth, score, None, None, None)
+
+    nodes = int(values["nodes"])
+    time_ms = int(values["time"])
+    nps = int(values["nps"])
+    if not 0 <= nps <= U64_MAX:
+        raise AssertionError(f"nps outside Rust u64 range: {nps}")
+    expected_nps = rust_nps(nodes, time_ms)
+    if nps != expected_nps:
+        raise AssertionError(
+            f"incorrect NPS arithmetic: nodes={nodes} time={time_ms} "
+            f"reported={nps} expected={expected_nps}"
+        )
+    return CompletedInfo(depth, score, nodes, time_ms, nps)
+
+
+def compare_search_transcripts(
+    baseline_lines: list[str], candidate_lines: list[str]
+) -> tuple[CompletedInfo, CompletedInfo]:
+    """Compare complete transcripts after removing only candidate metrics."""
+    baseline_info = parse_search_transcript(baseline_lines, require_metrics=False)
+    candidate_info = parse_search_transcript(candidate_lines, require_metrics=True)
+    normalized_candidate = list(candidate_lines)
+    normalized_candidate[0] = (
+        f"info depth {candidate_info.depth} score cp {candidate_info.score}"
+    )
+    if baseline_lines != normalized_candidate:
+        raise AssertionError(
+            "search transcript changed outside permitted nodes/time/nps fields\n"
+            f"baseline: {baseline_lines!r}\n"
+            f"candidate: {candidate_lines!r}\n"
+            f"normalized candidate: {normalized_candidate!r}"
+        )
+    return baseline_info, candidate_info
 
 
 def digest(path: Path, algorithm: str) -> str:
@@ -183,15 +297,14 @@ def run_search(
         send("ucinewgame")
         send(f"position fen {fen}")
 
-        info_lines: list[str] = []
+        search_lines: list[str] = []
         started = time.monotonic()
         send(go_command)
         bestmove = ""
         while not bestmove:
             line = read_line()
-            if line.startswith("info "):
-                info_lines.append(line)
-            elif line.startswith("bestmove "):
+            search_lines.append(line)
+            if line.startswith("bestmove "):
                 parts = line.split()
                 bestmove = parts[1] if len(parts) > 1 else ""
         elapsed = time.monotonic() - started
@@ -201,17 +314,38 @@ def run_search(
         process.wait(timeout=max(1.0, deadline - time.monotonic()))
         stdout_thread.join(timeout=1)
         stderr_thread.join(timeout=1)
+        if stdout_thread.is_alive() or stderr_thread.is_alive():
+            raise RuntimeError(f"{label}: output pump did not drain after engine exit")
+        while True:
+            try:
+                trailing_line = stdout_queue.get_nowait()
+            except queue.Empty:
+                break
+            if trailing_line is None:
+                break
+            search_lines.append(trailing_line)
     except Exception:
         _stop_owned_process(process)
         raise
 
     depth = None
     score_cp = None
+    nodes = None
+    time_ms = None
+    nps = None
+    info_lines = [line for line in search_lines if line.startswith("info ")]
     for line in info_lines:
-        match = INFO_RE.search(line)
+        candidate_match = CANDIDATE_INFO_RE.fullmatch(line)
+        baseline_match = BASELINE_INFO_RE.fullmatch(line)
+        match = candidate_match or baseline_match
         if match:
-            depth = int(match.group(1))
-            score_cp = int(match.group(2))
+            values = match.groupdict()
+            depth = int(values["depth"])
+            score_cp = int(values["score"])
+            if candidate_match is not None:
+                nodes = int(values["nodes"])
+                time_ms = int(values["time"])
+                nps = int(values["nps"])
 
     board = chess.Board(fen)
     legal = False
@@ -235,9 +369,13 @@ def run_search(
         fen=fen,
         go=go_command,
         elapsed_seconds=round(elapsed, 6),
+        search_lines=" || ".join(search_lines),
         info_lines=" || ".join(info_lines),
         depth=depth,
         score_cp=score_cp,
+        nodes=nodes,
+        time_ms=time_ms,
+        nps=nps,
         bestmove=bestmove,
         san=san,
         legal=legal,
@@ -260,9 +398,20 @@ def write_tsv(path: Path, rows: Iterable[SearchResult]) -> None:
             writer.writerows(asdict(row) for row in materialized)
 
 
-def assert_search_ok(result: SearchResult) -> None:
+def assert_search_ok(result: SearchResult, *, require_metrics: bool = True) -> None:
     if result.exit_code != 0:
         raise AssertionError(f"{result.label}: engine exited {result.exit_code}")
+    parsed = parse_search_transcript(
+        deserialize_lines(result.search_lines), require_metrics=require_metrics
+    )
+    if (result.depth, result.score_cp) != (parsed.depth, parsed.score):
+        raise AssertionError(f"{result.label}: stored decision fields disagree with stdout")
+    if require_metrics and (result.nodes, result.time_ms, result.nps) != (
+        parsed.nodes,
+        parsed.time_ms,
+        parsed.nps,
+    ):
+        raise AssertionError(f"{result.label}: stored metric fields disagree with stdout")
     if not result.legal:
         raise AssertionError(
             f"{result.label}: illegal bestmove {result.bestmove!r}\n{result.info_lines}"
@@ -327,15 +476,20 @@ def verify_semantic_transcripts(
                 no_nnue,
                 timeout_seconds,
             )
-            assert_search_ok(baseline_result)
-            assert_search_ok(candidate_result)
+            assert_search_ok(baseline_result, require_metrics=False)
+            assert_search_ok(candidate_result, require_metrics=True)
             rows.extend((baseline_result, candidate_result))
-            if baseline_result.transcript() != candidate_result.transcript():
+            try:
+                compare_search_transcripts(
+                    deserialize_lines(baseline_result.search_lines),
+                    deserialize_lines(candidate_result.search_lines),
+                )
+            except AssertionError as error:
                 raise AssertionError(
-                    f"{mode}/{label}: fixed-depth transcript changed\n"
+                    f"{mode}/{label}: strict transcript comparison failed\n{error}\n"
                     f"baseline:\n{baseline_result.transcript()}"
                     f"candidate:\n{candidate_result.transcript()}"
-                )
+                ) from error
     return rows
 
 
@@ -460,7 +614,8 @@ def main() -> None:
             "sha256": digest(args.net, "sha256"),
         },
         "semantic_positions_per_mode": len(SUITE),
-        "semantic_transcripts_byte_identical": True,
+        "semantic_transcripts_strictly_equivalent_after_metric_normalization": True,
+        "candidate_metric_structure_and_arithmetic_valid": True,
         "incident_fixed_depths": list(range(1, 13)),
         "incident_repetitions": timed_counts,
         "incident_allowed_moves": sorted(INCIDENT_MATES),

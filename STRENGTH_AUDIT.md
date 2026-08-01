@@ -31,11 +31,40 @@ Tier 1 or Tier 2 roadmap change. Passing a change's own equivalence check
 without rerunning this incident regression does **not** clear it for
 deployment.
 
-**Measured baseline (this audit, single thread, midgame FEN, 300k nodes):**
+**Historical measured baseline (original audit, single thread, midgame FEN,
+300k nodes):**
 - NNUE path: **~106k nps** · PeSTO path: **~242k nps** → the current NNUE integration
   costs ~56% of total search time.
-- No `bench` command exists; `info` lines emit neither `nodes` nor `nps` (worth adding
-  for future measurement hygiene).
+- Ticket #19 has since supplied deterministic fixed-work measurement. The
+  historical wall-clock sample remains motivation, not a current controlled
+  benchmark or optimization result.
+
+## TICKET #19 COMPLETE — measurement infrastructure
+
+Ticket #19 is completed and independently reviewed. Final Review Agent verdict:
+**VERIFIED SUCCESS**. It adds aggregate node accounting, completed-search
+`nodes/time/nps` reporting, deterministic `bench` v1, and strict
+baseline/candidate throughput verification without changing search decisions,
+evaluation, ordering, TT behavior, budget/deadline semantics, timing policy, or
+UCI defaults.
+
+The fixed depth-8 ten-position benchmark is deterministic at:
+
+- NNUE: **5,065,087 nodes**, checksum `a8df66621c8eb452`;
+- PeSTO: **4,900,866 nodes**, checksum `18bd8f3c9614b0db`.
+
+Future pure-throughput changes must use this infrastructure to require:
+
+1. identical per-position `(bestmove, score, depth)` tuples, node totals, and
+   checksums at fixed work;
+2. paired elapsed-time and NPS comparisons over identical work;
+3. the existing timed-root incident gate at Threads=1 and Threads=2.
+
+Ticket #19 makes no Elo or speed-improvement claim. Its wall-time outliers were
+host-contamination evidence, not optimization evidence. Ticket #1,
+incremental SCReLU-512 NNUE accumulator integration, is the next candidate for
+a separate planning task; it is not implemented and its implementation is not
+automatically authorized.
 
 ---
 
@@ -200,7 +229,7 @@ and with depth): **+250-400 Elo.**
 | 16 | **Incremental Zobrist** in make_move | +10-20 | S | Low (perft-hash check) |
 | 17 | Staged MovePicker (TT → good captures → killers → quiets by history), stack-allocated move list | +20-40 | L | Medium |
 | 18 | TT prefetch after make_move | +3-8 | S | Trivial |
-| 19 | Add `bench` + `info nodes nps` output (measurement hygiene; free) | 0 | S | — |
+| 19 | **COMPLETE, independently reviewed:** deterministic `bench` v1 + aggregate `info nodes time nps` measurement | 0 | S | No decision-policy change verified |
 
 Tier 2 realistic sum: **+100-180 Elo** (mostly via the ~2 plies the speed buys).
 
@@ -222,8 +251,8 @@ per our rules (≥100 games verdicts, style floor checked on every search change
 Speed-only changes (marked ⚡) are verified by equivalence (identical best-move/score on
 a fixed position suite + perft) and can batch into one SPRT since behavior is untouched.
 
-1. ⚡ `bench` + nps output (#19) — instrument before optimizing.
-2. ⚡ Incremental accumulator (#1) — biggest single win, zero behavior change.
+1. ⚡ `bench` + aggregate nodes/time/NPS output (#19) — **COMPLETE** and independently reviewed.
+2. ⚡ Incremental accumulator (#1) — next separate planning candidate; this record does not authorize implementation.
 3. ⚡ Ordering-cost fix (#2), incremental Zobrist (#16). One equivalence-SPRT for 1-3.
 4. Log-LMR (#3) — **style-gated gauntlet**.
 5. RFP (#4).
@@ -269,7 +298,8 @@ constraint, which is exactly what the gauntlet + style floor already measure.
 
 ---
 
-*Audit complete. No code, nets, or configs were modified; nothing was committed. Live
-nets verified untouched: `pyro.nnue` (SCReLU-512 champion) md5
-`9f01010bfe8b41193f77a9fad88abd56` at both locations; PeSTO-era backup
-`23bfcd331411b8b9c6a05191d42caef5` intact.*
+*The original July 26 audit modified no code, nets, or configs. Ticket #19
+measurement infrastructure was completed and independently verified on August
+2, 2026. At the August 2, 2026 pre-commit verification snapshot, it had not yet
+been preserved in Git or deployed; current Git preservation must be checked
+from the repository, and deployment remains a separate explicit action.*

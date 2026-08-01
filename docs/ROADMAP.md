@@ -5,47 +5,51 @@ Detailed technical rationale and estimates remain in `STRENGTH_AUDIT.md`.
 Every future engine change remains subject to `AGENTS.md` and the mandatory
 timed-root-completion regression gate.
 
-## Authorized next work
+## Next planning item after Ticket #19 preservation
 
-The sole authorized next engineering task is `STRENGTH_AUDIT.md` ticket #19:
+The sole next planning item is Ticket #1: incremental SCReLU-512 NNUE
+accumulator integration. Planning is authorized only after Git confirms
+preservation of the reviewed Ticket #19 implementation and documentation.
+Implementation is not automatically authorized and must not begin from this
+roadmap entry.
 
-1. Add a deterministic `bench` command over a fixed internal position suite.
-2. Add completed-search `info nodes ... nps ...` instrumentation.
-3. Make no intended change to search decisions, evaluation, timing policy,
-   transposition-table behavior, move ordering, or production defaults.
-4. Require exact baseline/candidate decision-tuple equivalence in NNUE and
-   `--no-nnue` modes.
-5. Require repeated benchmark runs with an identical total node count and
-   deterministic checksum; wall-clock NPS may vary.
-6. Run the timed-root incident regression with fresh processes at Threads=1
-   and Threads=2, with zero non-mating results.
-7. Do not run a gauntlet unless behavior changes unexpectedly or an Elo claim
-   is made.
+The separate plan must determine exact accumulator ownership, lifetime, copy,
+and update semantics for:
 
-Ticket #19 is instrumentation-only. It must not be bundled with incremental
-NNUE, move-ordering, Zobrist, or any other optimization. This documentation
-task records the authorization but does not implement ticket #19.
+- ordinary moves;
+- captures;
+- en passant;
+- promotions;
+- castling;
+- null moves;
+- search copies;
+- Lazy SMP helpers.
+
+Required proof must include 10,000-position exact agreement on raw accumulator
+lanes and final centipawn output, deterministic bench node/checksum and decision
+equivalence, reduced paired elapsed time, perft, and the timed-root regression
+at Threads=1 and Threads=2.
+
+No other strength ticket is authorized.
 
 ## Candidate future work
 
 These are documented candidates, not approved tasks:
 
-1. Incremental NNUE accumulator updates (#1), with 10000-position exact eval
-   equivalence and timed-root regression.
-2. Remove move-order scoring inside the sort comparator (#2), then incremental
+1. Remove move-order scoring inside the sort comparator (#2), then incremental
    Zobrist (#16), each under controlled equivalence gates.
-3. Search improvements in the documented dependency order: log LMR (#3), RFP
+2. Search improvements in the documented dependency order: log LMR (#3), RFP
    (#4), dynamic-R NMP (#6), QS TT/delta/captures-only work (#5), gradual
    aspiration (#7), TT/Hash improvements (#11), continuation history (#8), SEE
    pruning (#9), and time-management work (#10).
-4. Tier 2 speed infrastructure: SIMD NNUE (#14), magic bitboards (#15), staged
+3. Tier 2 speed infrastructure: SIMD NNUE (#14), magic bitboards (#15), staged
    MovePicker (#17), and TT prefetch (#18).
-5. NNUE/data candidates: output buckets (#20), then a 150-300M corpus (#21),
+4. NNUE/data candidates: output buckets (#20), then a 150-300M corpus (#21),
    followed by architecture experiments only when their data gates are met.
-6. Unscheduled product maintenance from `CLAUDE.md`: lazy/remove the unused
+5. Unscheduled product maintenance from `CLAUDE.md`: lazy/remove the unused
    Python NNUE import, server-side voice settings, and a careful
    `python-chess` upgrade.
-7. Always-on hosting for the optional Lichess bot.
+6. Always-on hosting for the optional Lichess bot.
 
 These candidates are not interchangeable with authorization. Each experiment
 must isolate one conceptual variable, state a prediction, preserve fixed
@@ -63,8 +67,8 @@ comparison configuration, and use the existing game-count and style gates.
   plan and authorization.
 
 Branch deletion, lichess-bot upstream updates, README corrections, persistent
-autostart/watchdog work, and all candidate tickets above are outside ticket
-#19 authorization.
+autostart/watchdog work, deployment, and all candidate tickets above remain
+outside the current authorization.
 
 ## Closed, rejected, or completed work
 
@@ -72,6 +76,13 @@ autostart/watchdog work, and all candidate tickets above are outside ticket
   fallback, G2 Lazy SMP, and the timed-root-completion correctness fix. The
   fix also passed complete live Lichess shakedown game `SS1KiMLB` on August 1,
   2026; PyroBotTorch remains online through the external bridge.
+- Completed and independently reviewed: Ticket #19 deterministic `bench` v1,
+  aggregate node accounting, completed-search `nodes/time/nps` reporting, and
+  strict throughput verification. Its current Git preservation status must be
+  checked from the repository; the candidate was not deployed during
+  validation. Fixed-work anchors are NNUE 5,065,087 / `a8df66621c8eb452` and
+  PeSTO 4,900,866 / `18bd8f3c9614b0db`. Ticket #19 makes no Elo or
+  speed-improvement claim.
 - Rejected and closed: G9 sacrifice ordering bonus, DYNAMIC_BONUS, and
   COMP_BONUS as style mechanisms.
 - Permanently closed by its second/final strike: WDL blending for the Phase D
@@ -85,6 +96,8 @@ autostart/watchdog work, and all candidate tickets above are outside ticket
 - Fixed-ladder comparisons for depth/SMP changes; preserve all non-variable
   configuration.
 - No-op/equivalence proof where behavior should be unchanged.
+- Pure-throughput work must preserve deterministic per-position decisions,
+  nodes, and checksum, then use paired elapsed-time/NPS comparisons.
 - Strength gauntlet plus style floors where behavior may change.
 - Exact incident clock at Threads=1 and Threads=2, minimum 10 fresh processes
   each and preferably 50, with zero non-mating results, for every change that
