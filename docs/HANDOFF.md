@@ -5,9 +5,10 @@ Verified: August 2, 2026.
 ## Current state
 
 - Repository: `C:\Users\shami\OneDrive\Documents\torch`. At the August 2
-  pre-commit baseline it was on branch `main` at
-  `46d8c36c5d2a910b55e060db83c0cecedb8471a8`; check Git for the current branch,
-  HEAD, and Ticket #19 preservation status.
+  Ticket #1 pre-commit baseline it was on branch
+  `feat/incremental-screlu512-accumulators` at
+  `1bf38f449b5efe1879818522a4a5771a10e8eb32`; check Git for the current branch,
+  HEAD, and Ticket #1 preservation status.
 - The deployed engine defaults to the style-gated SCReLU-512 NNUE. The
   application uses Threads=4; `PYRO_NO_NNUE=1` retains the protected
   PeSTO+Tal `--no-nnue` fallback.
@@ -65,17 +66,48 @@ It was not deployed during validation, and deployment remains a separate
 explicit action. The live executable remained SHA-256
 `6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`.
 
+## Ticket #1 completed and reviewed
+
+Ticket #1 passed final independent review with no findings. The implementation
+maintains SCReLU-512 accumulators from authoritative parent/child piece-bitboard
+differences: each searched child clones its parent, removes parent-only
+features, adds child-only features, and updates both fixed perspectives. There
+is one full construction per independent NNUE root, private stacks for the main
+search and every Lazy SMP helper, child reuse across PVS/LMR re-searches, and
+raw-lane reuse across null moves. PeSTO performs no NNUE accumulator work, and
+recursive production evaluation performs no full reconstruction.
+
+Three-way Rust-incremental/Rust-full/independent-Python verification was exact
+over 10,577,920 raw lanes and 10,330 final-cp comparisons. Fixed-work anchors
+remained unchanged:
+
+- NNUE: 5,065,087 nodes, checksum `a8df66621c8eb452`;
+- PeSTO: 4,900,866 nodes, checksum `18bd8f3c9614b0db`.
+
+Across ten paired identical-work NNUE runs, median elapsed time improved from
+18,945 ms to 10,711 ms (**43.463%**), median NPS rose from 267,362 to
+472,918.5, and the candidate won 10/10 comparisons. PeSTO showed no regression.
+All fixed decisions, scores, depths, nodes, and checksums remained exact; the
+full timed-root gate passed 50/50 at Threads=1 and 50/50 at Threads=2.
+
+This is a verified throughput result, not an Elo result. No chess gauntlet was
+run. The 356,864-byte isolated candidate has SHA-256
+`D9B378DFCD61225311C94FB481E7FC8FB9582D9F3AE358892B812E222E009119`
+and was not deployed during validation. The live executable and NNUE files
+remained unchanged; deployment is still a separate explicit decision.
+
 ## Immediate action and next planning item
 
-If the complete reviewed Ticket #19 implementation and documentation set has
+If the complete reviewed Ticket #1 implementation and documentation set has
 not yet been committed and pushed, preserve it first through user-controlled
 review, staging, commit, and push. Confirm preservation from Git rather than
 assuming the August 2 pre-commit snapshot is still current.
 
-Once Ticket #19 preservation is confirmed, Ticket #1 — incremental SCReLU-512
-NNUE accumulator integration — is the sole next planning item. It must begin as
-a separate planning task; implementation is not automatically authorized and
-has not begun. No other strength ticket is authorized.
+Once Ticket #1 preservation is confirmed, Ticket #2 — removing repeated move
+scoring inside the sort comparator — is the sole next planning item. It must
+begin as a separate planning task; implementation is not automatically
+authorized and has not begun. Ticket #16 and every other strength change remain
+separate and unauthorized.
 
 Old merged branch references, bridge upstream updates, README corrections,
 persistent autostart, and deployment remain separate decisions.

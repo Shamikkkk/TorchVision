@@ -61,10 +61,38 @@ Future pure-throughput changes must use this infrastructure to require:
 3. the existing timed-root incident gate at Threads=1 and Threads=2.
 
 Ticket #19 makes no Elo or speed-improvement claim. Its wall-time outliers were
-host-contamination evidence, not optimization evidence. Ticket #1,
-incremental SCReLU-512 NNUE accumulator integration, is the next candidate for
-a separate planning task; it is not implemented and its implementation is not
-automatically authorized.
+host-contamination evidence, not optimization evidence.
+
+## TICKET #1 COMPLETE — incremental SCReLU-512 accumulators
+
+Ticket #1 is completed, independently reviewed, and accepted as a same-work
+throughput optimization. Parent/child piece-bitboard deltas now maintain both
+fixed accumulator perspectives on private per-thread search stacks. Each
+independent NNUE root performs one full construction; searched children clone
+and update that state, null moves reuse unchanged raw lanes, Lazy SMP helpers
+own independent roots and stacks, and PeSTO performs no NNUE accumulator work.
+No recursive production evaluation reconstructs an accumulator from the board.
+
+The final corpus contains 10,107 canonical non-null positions and 128 canonical
+null sources (64 per side to move). Rust incremental, Rust full, and independent
+Python full reconstruction agreed on 10,577,920 raw lanes and 10,330 final-cp
+comparisons with zero mismatch. Fixed-work anchors remained exact:
+
+- NNUE: **5,065,087 nodes**, checksum `a8df66621c8eb452`;
+- PeSTO: **4,900,866 nodes**, checksum `18bd8f3c9614b0db`.
+
+In ten paired identical-work NNUE comparisons, median elapsed time improved
+from 18,945 ms to 10,711 ms (**43.463%**) and median NPS rose from 267,362 to
+472,918.5; the candidate won 10/10 pairs and cleared the precommitted timing
+noise threshold. PeSTO improved 2.609% with no regression. All fixed decisions,
+scores, depths, nodes, and checksums remained exact, and the full timed-root
+gate passed 50/50 at Threads=1 and 50/50 at Threads=2.
+
+This is measured throughput evidence, not Elo evidence. No gauntlet was run,
+the historical estimated Ticket #1 Elo range is not added to current strength,
+and the candidate was not deployed during validation. Ticket #2 — removing
+repeated move scoring inside the sort comparator — is the next separate
+planning candidate. Planning does not authorize implementation.
 
 ---
 
@@ -77,12 +105,12 @@ automatically authorized.
 | Transposition table | **PARTIAL** | `search.rs:55-205`. 1M entries / **16MB fixed** — no UCI `Hash` option (main.rs:90 exposes only `Threads`). XOR-checksum lockless (correct Lazy-SMP pattern). Depth-or-newer-gen replacement (`search.rs:183-189`). Mate-score ply adjustment present (`search.rs:208-227`). **Weaknesses:** scores only trusted from the *current generation* (`search.rs:1221` — cross-iteration cutoffs discarded); TT cutoffs return hard `beta`/`alpha` not the entry score (`search.rs:1225-1230`); **no TT probe/store in quiescence at all**. |
 | Iterative deepening + aspiration | **PRESENT/PARTIAL** | `search.rs:1596-1703`. Aspiration ±50cp (`TUNE_ASPIRATION_DELTA`), but fail-high/low widens **straight to ±INF** (`search.rs:1668-1682`) — no gradual widening. |
 | PVS | **PRESENT** | `search.rs:1382-1403`: first move full window, rest null-window + re-search. Genuine PVS. |
-| Quiescence | **PARTIAL** | `search.rs:1095-1161`. Captures only, SEE < 0 pruned (`:1124`). **Missing:** TT interaction, delta pruning, check evasions/quiet checks, and it calls full `generate_moves` then filters (`:1098` — full movegen cost per QS node, incl. a mate/stalemate legality pass that is only needed when in check). Stand-pat = **full NNUE rebuild** (`:1109`). |
+| Quiescence | **PARTIAL** | Original-audit locations: `search.rs:1095-1161`. Captures only, SEE < 0 pruned (`:1124`). **Missing:** TT interaction, delta pruning, check evasions/quiet checks, and it calls full `generate_moves` then filters (`:1098` — full movegen cost per QS node, incl. a mate/stalemate legality pass that is only needed when in check). The original stand-pat full rebuild was removed by Ticket #1. |
 | Null-move pruning | **PARTIAL** | `search.rs:1246-1253`. Static R=2, no depth-scaled R (strong engines: R = 3 + depth/3 + eval-margin term), no verification search, disabled below 10 total pieces (crude zugzwang guard; standard is "STM has a non-pawn piece"). |
 | LMR | **PARTIAL — barely** | `search.rs:1390-1394`. Fixed reduction of **exactly 1 ply** (`depth-2`), only for move_index > 3, quiet, non-killer, not-in-check. **No log formula** (`R ≈ 0.77 + ln(d)·ln(m)/2.36` class), no history/PV/improving adjustments. This is the single biggest search gap: real LMR reduces late moves by 3-5 plies at depth 12+. |
 | RFP / static NMP | **ABSENT** | No `eval - margin·depth ≥ beta` fast-fail anywhere. |
 | LMP + improving | **ABSENT** | Parked June 2026 ("catastrophic without IID" vs PeSTO — see §4 for re-open case). No `improving` tracking exists (no eval stack). |
-| Futility pruning | **PRESENT** | `search.rs:1328-1345, 1366-1368`. Depth ≤ 2, margins 100/300, sane mate guards. Cost bug: computes the (full-rebuild) static eval even when depth > 2 short-circuits... actually gated correctly, but each check costs a full NNUE rebuild at d≤2 nodes. |
+| Futility pruning | **PRESENT** | Original-audit locations: `search.rs:1328-1345, 1366-1368`. Depth ≤ 2, margins 100/300, sane mate guards. Its static-eval calls now use Ticket #1 incremental accumulator state rather than rebuilding from the board. |
 | Razoring | **ABSENT** | — |
 | IIR | **ABSENT** (IID dormant) | IID exists behind `IID_ENABLE=false` (`search.rs:1259-1262`, measured neutral vs PeSTO). Modern replacement IIR (just `depth -= 1` on no-TT-move) is simpler and cheaper. |
 | SEE | **PRESENT** | `search.rs:935-985`. Correct swap algorithm. **Used only in QS filtering and move ordering** — no SEE pruning of losing captures/quiets in the main search (PVS SEE pruning is standard: skip quiets with SEE < -50·depth, captures < -90·depth at shallow depth). |
@@ -113,7 +141,7 @@ automatically authorized.
 | Magic bitboards | **ABSENT** | `movegen.rs:111-144`: sliding attacks are **ray loops walking square by square** on every call. This sits under movegen, `attackers_to`, SEE, and check detection — the hottest paths in the engine. Magics (or even Kindergarten/rotating lookups) are a 5-20× speedup *of this function*. |
 | Movegen | **PARTIAL** | Legal-only generation via make-and-test (`movegen.rs:262` comment, per pseudo-legal move: full board clone + check test). No captures-only generator for QS. `Vec` allocation per node. |
 | Zobrist | **PARTIAL** | Keys exist (`board.rs:212-271`) but `zobrist_hash()` is **recomputed from scratch at every node** (`board.rs:282-283` "Compute Zobrist hash from scratch"; called `search.rs:1211`) — a 32-piece loop per node instead of an incremental XOR in make_move. |
-| **NNUE accumulator: incremental?** | **NO — full rebuild every eval** | See §2. The single largest finding of this audit. |
+| **NNUE accumulator: incremental?** | **YES — Ticket #1 complete** | The original July 26 audit found a full rebuild at every eval; Ticket #1 replaced it with exact parent/child delta maintenance and measured a 43.463% median NNUE elapsed-time improvement at identical work. |
 | SIMD | **ABSENT** | See §2. All NNUE math is scalar loops over 512/1024 lanes. |
 | TT prefetch | **ABSENT** | — |
 | Copy-make | PRESENT (by design) | `movegen.rs:344-345` clones the Board per move. Fine at this size; the allocations (move Vecs) hurt more. |
@@ -143,10 +171,10 @@ automatically authorized.
 
 ## 2. THE NPS QUESTION (answered specifically)
 
-**Q: Is NNUE inference incremental or full-recompute?** **Full recompute, at every
-single eval site.** The incremental primitives exist (`add_feature`/`remove_feature`,
-`nnue.rs:119-136`) and are tested (`nnue.rs:479-493`) — but nothing in the search calls
-them. Every evaluation does this instead:
+**Q: Is NNUE inference incremental or full-recompute?** **Incremental since
+Ticket #1.** At the original July 26 audit it was a full recompute at every eval
+site: the primitives existed, but search did not call them. The following code
+and cost analysis preserve that superseded finding for historical context:
 
 ```rust
 // search.rs:1108-1110 (quiescence stand-pat; same pattern at :1192-1194,
@@ -167,12 +195,12 @@ for i in 0..HIDDEN_SIZE {
 }
 ```
 
-That is ~32 × 2 × 512 ≈ **33,000 adds per eval** where an incremental engine does
-~2-4 features × 2 × 512 ≈ **2-4k adds per move** (and zero on eval-less nodes). A move
-touches at most 4 features (from, to, capture, promo/castle rook). The measured
-106k-vs-242k NPS split says the NNUE path consumes ~56% of all search time; incremental
-updates make that term nearly vanish. **Expected: ~2× NPS ≈ +1 ply ≈ +50-70 Elo, from
-wiring up functions that already exist and already pass a round-trip test.**
+At that snapshot, this meant ~32 × 2 × 512 ≈ **33,000 adds per eval** versus
+roughly 2-4 changed features × 2 × 512 updates per move. The historical
+106k-vs-242k sample motivated Ticket #1 but was not its controlled baseline.
+Ticket #1 later measured a 43.463% median NNUE elapsed-time improvement at
+identical fixed work. That is a throughput result only; it does not establish
+the audit's historical Elo estimate.
 
 **Q: Is there any SIMD?** **No.** The accumulator loops above and the output layer
 (`nnue.rs:190-198`: 1024 scalar `i64` multiply-adds per eval) are plain scalar Rust.
@@ -203,7 +231,7 @@ kz_sac/aggression floors (every gauntlet keeps the style gate regardless).
 
 | # | Change | Est. Elo | Effort | Risk | Style risk |
 |---|---|---|---|---|---|
-| 1 | **Incremental NNUE accumulator** (thread acc stack through make_move path) | +50-90 (speed) | M | Low — primitives exist + tested; verify vs `from_board` on 10k random positions (we have that harness pattern) | None (identical evals) |
+| 1 | **COMPLETE, independently reviewed:** incremental NNUE accumulator | Historical estimate only; no Elo claim | M | Exact same-work implementation verified; 43.463% median NNUE elapsed-time improvement | None (identical evals) |
 | 2 | **Fix move-ordering cost** (score once per node, not per comparison) | +10-25 (speed) | S | Trivial | None |
 | 3 | **Log-formula LMR** + re-search on fail-high above reduced depth | +50-90 | S-M | Low; biggest single search gap | **Yes — flag.** Deeper reductions of "quiet junk" can prune speculative attacking quiets. Gauntlet must check kz_sac. |
 | 4 | **RFP** (eval − 70·depth ≥ beta → return, depth ≤ ~7, not in PV/check) | +25-50 | S | Low | Mild — prunes when *winning*, rarely style-relevant |
@@ -252,8 +280,8 @@ Speed-only changes (marked ⚡) are verified by equivalence (identical best-move
 a fixed position suite + perft) and can batch into one SPRT since behavior is untouched.
 
 1. ⚡ `bench` + aggregate nodes/time/NPS output (#19) — **COMPLETE** and independently reviewed.
-2. ⚡ Incremental accumulator (#1) — next separate planning candidate; this record does not authorize implementation.
-3. ⚡ Ordering-cost fix (#2), incremental Zobrist (#16). One equivalence-SPRT for 1-3.
+2. ⚡ Incremental accumulator (#1) — **COMPLETE**, independently reviewed, 43.463% median NNUE elapsed-time improvement at identical fixed work.
+3. ⚡ Ordering-cost fix (#2) — next separate planning candidate after Git preservation; planning does not authorize implementation. Incremental Zobrist (#16) remains a later, isolated change.
 4. Log-LMR (#3) — **style-gated gauntlet**.
 5. RFP (#4).
 6. NMP dynamic R (#6).
@@ -299,7 +327,8 @@ constraint, which is exactly what the gauntlet + style floor already measure.
 ---
 
 *The original July 26 audit modified no code, nets, or configs. Ticket #19
-measurement infrastructure was completed and independently verified on August
-2, 2026. At the August 2, 2026 pre-commit verification snapshot, it had not yet
-been preserved in Git or deployed; current Git preservation must be checked
-from the repository, and deployment remains a separate explicit action.*
+measurement infrastructure and Ticket #1 incremental SCReLU-512 accumulators
+were completed and independently verified on August 2, 2026. Ticket #1 produced
+a 43.463% median NNUE elapsed-time improvement at identical fixed work, not an
+Elo result. Its Git preservation must be checked from the repository, and its
+deployment remains a separate explicit action.*

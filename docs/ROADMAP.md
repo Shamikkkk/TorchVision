@@ -5,39 +5,32 @@ Detailed technical rationale and estimates remain in `STRENGTH_AUDIT.md`.
 Every future engine change remains subject to `AGENTS.md` and the mandatory
 timed-root-completion regression gate.
 
-## Next planning item after Ticket #19 preservation
+## Next planning item after Ticket #1 preservation
 
-The sole next planning item is Ticket #1: incremental SCReLU-512 NNUE
-accumulator integration. Planning is authorized only after Git confirms
-preservation of the reviewed Ticket #19 implementation and documentation.
+The sole next planning candidate is Ticket #2: remove repeated move-order
+scoring inside the sort comparator. Planning may begin only after Git confirms
+preservation of the reviewed Ticket #1 implementation and documentation.
 Implementation is not automatically authorized and must not begin from this
 roadmap entry.
 
-The separate plan must determine exact accumulator ownership, lifetime, copy,
-and update semantics for:
+Ticket #2 must be a one-variable change. Its plan and any later implementation
+must remain isolated from incremental Zobrist (#16), pruning, LMR, SIMD, NNUE
+changes, or any other optimization. Required proof must preserve exact
+fixed-work decisions, scores, completed depths, node totals, and checksums in
+both NNUE and PeSTO modes; preserve strict PeSTO transcript behavior; pass the
+timed-root incident gate at Threads=1 and Threads=2; and retain the standing
+style safeguards for any subsequent game validation.
 
-- ordinary moves;
-- captures;
-- en passant;
-- promotions;
-- castling;
-- null moves;
-- search copies;
-- Lazy SMP helpers.
-
-Required proof must include 10,000-position exact agreement on raw accumulator
-lanes and final centipawn output, deterministic bench node/checksum and decision
-equivalence, reduced paired elapsed time, perft, and the timed-root regression
-at Threads=1 and Threads=2.
-
-No other strength ticket is authorized.
+Ticket #16 and every later change remain separate. No strength implementation
+or deployment is authorized.
 
 ## Candidate future work
 
 These are documented candidates, not approved tasks:
 
-1. Remove move-order scoring inside the sort comparator (#2), then incremental
-   Zobrist (#16), each under controlled equivalence gates.
+1. Incremental Zobrist (#16), only after Ticket #2 is separately planned,
+   implemented, reviewed, and preserved; it requires its own controlled
+   equivalence gates.
 2. Search improvements in the documented dependency order: log LMR (#3), RFP
    (#4), dynamic-R NMP (#6), QS TT/delta/captures-only work (#5), gradual
    aspiration (#7), TT/Hash improvements (#11), continuation history (#8), SEE
@@ -83,6 +76,13 @@ outside the current authorization.
   validation. Fixed-work anchors are NNUE 5,065,087 / `a8df66621c8eb452` and
   PeSTO 4,900,866 / `18bd8f3c9614b0db`. Ticket #19 makes no Elo or
   speed-improvement claim.
+- Completed and independently reviewed: Ticket #1 incremental SCReLU-512
+  accumulators. Parent/child piece-bitboard deltas preserve exact evaluation,
+  deterministic fixed-work anchors remain NNUE 5,065,087 /
+  `a8df66621c8eb452` and PeSTO 4,900,866 / `18bd8f3c9614b0db`, and paired NNUE
+  median elapsed time improved 43.463% with 10/10 wins. This is a same-work
+  throughput result, not an Elo claim. Git preservation must be checked from
+  the repository; the isolated candidate was not deployed during validation.
 - Rejected and closed: G9 sacrifice ordering bonus, DYNAMIC_BONUS, and
   COMP_BONUS as style mechanisms.
 - Permanently closed by its second/final strike: WDL blending for the Phase D
