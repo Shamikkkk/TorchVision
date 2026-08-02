@@ -894,6 +894,125 @@ fn eval_king(
 // ---------------------------------------------------------------------------
 
 const MAX_DEPTH: usize = 64;
+const ACCUMULATOR_STACK_CAPACITY: usize = MAX_DEPTH + 16;
+
+/// Search-local evaluation state. The generic search body is monomorphised
+/// for PeSTO and NNUE so the PeSTO path carries no accumulator storage.
+trait SearchEvaluation: Send + Sized {
+    fn evaluate(&self, board: &Board) -> i32;
+    fn push_child(&mut self, parent: &Board, child: &Board);
+    fn pop_child(&mut self);
+    fn fork_root(&self) -> Self;
+    fn stack_depth(&self) -> usize;
+}
+
+#[derive(Clone, Copy)]
+struct PestoSearchState;
+
+impl SearchEvaluation for PestoSearchState {
+    #[inline]
+    fn evaluate(&self, board: &Board) -> i32 {
+        evaluate(board)
+    }
+
+    #[inline]
+    fn push_child(&mut self, _parent: &Board, _child: &Board) {}
+
+    #[inline]
+    fn pop_child(&mut self) {}
+
+    #[inline]
+    fn fork_root(&self) -> Self {
+        *self
+    }
+
+    #[inline]
+    fn stack_depth(&self) -> usize {
+        0
+    }
+}
+
+struct NnueSearchState<'n> {
+    network: &'n nnue::Network,
+    accumulators: Vec<nnue::Accumulator>,
+}
+
+impl<'n> NnueSearchState<'n> {
+    fn from_root(network: &'n nnue::Network, board: &Board) -> Self {
+        let mut accumulators = Vec::with_capacity(ACCUMULATOR_STACK_CAPACITY);
+        accumulators.push(nnue::Accumulator::from_board(network, board));
+        Self { network, accumulators }
+    }
+}
+
+impl SearchEvaluation for NnueSearchState<'_> {
+    #[inline]
+    fn evaluate(&self, board: &Board) -> i32 {
+        self.network.evaluate(
+            self.accumulators
+                .last()
+                .expect("NNUE accumulator stack must contain the current position"),
+            board.side_to_move,
+        )
+    }
+
+    #[inline]
+    fn push_child(&mut self, parent: &Board, child: &Board) {
+        let child_accumulator = self
+            .accumulators
+            .last()
+            .expect("NNUE accumulator stack must contain the parent position")
+            .updated_for_child(self.network, parent, child);
+        self.accumulators.push(child_accumulator);
+    }
+
+    #[inline]
+    fn pop_child(&mut self) {
+        assert!(
+            self.accumulators.len() > 1,
+            "cannot pop the NNUE root accumulator"
+        );
+        self.accumulators.pop();
+    }
+
+    fn fork_root(&self) -> Self {
+        debug_assert_eq!(self.accumulators.len(), 1);
+        let mut accumulators = Vec::with_capacity(ACCUMULATOR_STACK_CAPACITY);
+        accumulators.push(self.accumulators[0].clone());
+        Self {
+            network: self.network,
+            accumulators,
+        }
+    }
+
+    #[inline]
+    fn stack_depth(&self) -> usize {
+        self.accumulators.len()
+    }
+}
+
+/// Push one authoritative real-child state for the duration of all searches
+/// of that child, then restore the parent state before returning its result.
+#[inline]
+fn with_real_child<E, R>(
+    eval_state: &mut E,
+    parent: &Board,
+    child: &Board,
+    search: impl FnOnce(&mut E) -> R,
+) -> R
+where
+    E: SearchEvaluation,
+{
+    let parent_depth = eval_state.stack_depth();
+    eval_state.push_child(parent, child);
+    let child_depth = parent_depth + usize::from(parent_depth != 0);
+    debug_assert_eq!(eval_state.stack_depth(), child_depth);
+    let result = search(eval_state);
+    debug_assert_eq!(eval_state.stack_depth(), child_depth);
+    eval_state.pop_child();
+    debug_assert_eq!(eval_state.stack_depth(), parent_depth);
+    result
+}
 
 // Simple piece values for MVV-LVA ordering (not PeSTO — just for sorting)
 const MVV_LVA_VAL: [i32; 6] = [100, 320, 330, 500, 900, 20_000];
@@ -1107,7 +1226,7 @@ fn time_up(deadline: Option<std::time::Instant>, stop: &AtomicBool) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Search captures only until the position is quiet.
-fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Option<&nnue::Network>, nodes: &AtomicU64, node_limit: u64, deadline: Option<std::time::Instant>, stop: &AtomicBool) -> i32 {
+fn quiescence<E: SearchEvaluation>(board: &Board, mut alpha: i32, beta: i32, ply: usize, eval_state: &mut E, nodes: &AtomicU64, node_limit: u64, deadline: Option<std::time::Instant>, stop: &AtomicBool) -> i32 {
     nodes.fetch_add(1, Ordering::Relaxed);
 
     let all_moves = generate_moves(board);
@@ -1120,12 +1239,7 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Opt
         return 0;
     }
 
-    let stand_pat = if let Some(net) = network {
-        let acc = nnue::Accumulator::from_board(net, board);
-        net.evaluate(&acc, board.side_to_move)
-    } else {
-        evaluate(board)
-    };
+    let stand_pat = eval_state.evaluate(board);
     if stand_pat >= beta {
         return beta;
     }
@@ -1163,7 +1277,9 @@ fn quiescence(board: &Board, mut alpha: i32, beta: i32, ply: usize, network: Opt
             break;
         }
         let new_board = make_move(board, mv);
-        let score = -quiescence(&new_board, -beta, -alpha, ply + 1, network, nodes, node_limit, deadline, stop);
+        let score = with_real_child(eval_state, board, &new_board, |child_state| {
+            -quiescence(&new_board, -beta, -alpha, ply + 1, child_state, nodes, node_limit, deadline, stop)
+        });
         if score >= beta {
             return beta;
         }
@@ -1187,15 +1303,16 @@ pub fn alpha_beta(board: &Board, depth: u32, alpha: i32, beta: i32) -> i32 {
     let nodes = AtomicU64::new(0);
     let tt = TTable::new();
     let stop = AtomicBool::new(false);
-    ab_search(board, depth, alpha, beta, 0, &mut killers, &mut history, &mut counter_moves, None, None, true, &nodes, u64::MAX, None, &stop, &tt)
+    let mut eval_state = PestoSearchState;
+    ab_search(board, depth, alpha, beta, 0, &mut killers, &mut history, &mut counter_moves, None, &mut eval_state, true, &nodes, u64::MAX, None, &stop, &tt)
 }
 
 /// Recursive alpha-beta with move ordering, killer heuristic, history, NMP, LMR, and TT.
-fn ab_search(
+fn ab_search<E: SearchEvaluation>(
     board: &Board, depth: u32, mut alpha: i32, beta: i32,
     ply: usize, killers: &mut Killers, history: &mut History,
     counter_moves: &mut CounterMoves, prev_move: Option<(u8, u8)>,
-    network: Option<&nnue::Network>,
+    eval_state: &mut E,
     allow_null: bool, nodes: &AtomicU64, node_limit: u64,
     deadline: Option<std::time::Instant>,
     stop: &AtomicBool,
@@ -1204,22 +1321,17 @@ fn ab_search(
     nodes.fetch_add(1, Ordering::Relaxed);
 
     if nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, stop) {
-        return if let Some(net) = network {
-            let acc = nnue::Accumulator::from_board(net, board);
-            net.evaluate(&acc, board.side_to_move)
-        } else {
-            evaluate(board)
-        };
+        return eval_state.evaluate(board);
     }
 
     if depth == 0 {
-        return quiescence(board, alpha, beta, ply, network, nodes, node_limit, deadline, stop);
+        return quiescence(board, alpha, beta, ply, eval_state, nodes, node_limit, deadline, stop);
     }
 
     // Hard ply cap: prevents stack overflow from unlimited check extensions
     // in perpetual-check positions. Any position at this depth is quiesced.
     if ply >= 2 * MAX_DEPTH {
-        return quiescence(board, alpha, beta, ply, network, nodes, node_limit, deadline, stop);
+        return quiescence(board, alpha, beta, ply, eval_state, nodes, node_limit, deadline, stop);
     }
 
     // --- TT probe ---
@@ -1261,7 +1373,7 @@ fn ab_search(
     if allow_null && !in_check && depth >= 3 && board.occupied().count_ones() >= 10 {
         let null_board = board.make_null_move();
         let r = TUNE_NMP_REDUCTION.load(Ordering::Relaxed) as u32;
-        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, counter_moves, None, network, false, nodes, node_limit, deadline, stop, tt);
+        let score = -ab_search(&null_board, depth - 1 - r, -beta, -beta + 1, ply + 1, killers, history, counter_moves, None, eval_state, false, nodes, node_limit, deadline, stop, tt);
         if score >= beta {
             return beta;
         }
@@ -1272,7 +1384,7 @@ fn ab_search(
     // allow_null=false keeps the sub-search cheap. original_tt_entry (captured above)
     // ensures SE doesn't fire on the shallow entry IID writes.
     if IID_ENABLE.load(Ordering::Relaxed) && tt_move.is_none() && depth >= 4 && !in_check {
-        ab_search(board, depth - 2, alpha, beta, ply, killers, history, counter_moves, prev_move, network, false, nodes, node_limit, deadline, stop, tt);
+        ab_search(board, depth - 2, alpha, beta, ply, killers, history, counter_moves, prev_move, eval_state, false, nodes, node_limit, deadline, stop, tt);
         tt_move = tt.probe(hash).and_then(|e| e.best_move());
     }
 
@@ -1299,11 +1411,13 @@ fn ab_search(
                         continue;
                     }
                     let new_board = make_move(board, mv);
-                    let se_score = -ab_search(
-                        &new_board, se_depth.saturating_sub(1), -se_beta, -se_beta + 1,
-                        ply + 1, killers, history, counter_moves, None, network, false,
-                        nodes, node_limit, deadline, stop, tt,
-                    );
+                    let se_score = with_real_child(eval_state, board, &new_board, |child_state| {
+                        -ab_search(
+                            &new_board, se_depth.saturating_sub(1), -se_beta, -se_beta + 1,
+                            ply + 1, killers, history, counter_moves, None, child_state, false,
+                            nodes, node_limit, deadline, stop, tt,
+                        )
+                    });
                     if se_score >= se_beta {
                         se_best = se_score;
                         break 'se;
@@ -1344,12 +1458,7 @@ fn ab_search(
         && depth <= 2
         && alpha.abs() < CHECKMATE - 1000
         && {
-            let static_eval = if let Some(net) = network {
-                let acc = nnue::Accumulator::from_board(net, board);
-                net.evaluate(&acc, board.side_to_move)
-            } else {
-                evaluate(board)
-            };
+            let static_eval = eval_state.evaluate(board);
             let margin: i32 = if depth == 1 {
                 TUNE_FUTILITY_MARGIN_D1.load(Ordering::Relaxed)
             } else {
@@ -1391,31 +1500,31 @@ fn ab_search(
             0
         };
 
-        let score;
-
         let mv_prev = Some((mv.from_sq, mv.to_sq));
-        if move_index == 0 {
-            // PV move: full window + full depth, plus singular extension if applicable.
-            score = -ab_search(&new_board, depth - 1 + singular_extension as u32, -beta, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
-        } else {
-            // Non-PV moves: null window first (cheap probe), re-search on fail-high.
-            let null_score;
-
-            // --- Late Move Reductions (applied on top of null window) ---
-            if depth >= 3 && move_index > TUNE_LMR_MOVE_INDEX.load(Ordering::Relaxed) as usize && !is_capture && !is_killer && !in_check {
-                null_score = -ab_search(&new_board, depth - 2, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
+        let score = with_real_child(eval_state, board, &new_board, |child_state| {
+            if move_index == 0 {
+                // PV move: full window + full depth, plus singular extension if applicable.
+                -ab_search(&new_board, depth - 1 + singular_extension as u32, -beta, -alpha, ply + 1, killers, history, counter_moves, mv_prev, child_state, true, nodes, node_limit, deadline, stop, tt)
             } else {
-                null_score = -ab_search(&new_board, depth - 1, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
-            }
+                // Non-PV moves: null window first (cheap probe), re-search on fail-high.
+                let null_score;
 
-            // Fail-high on null window: this move might be genuinely better.
-            // Re-search at full depth + full window to get the real score.
-            if null_score > alpha && null_score < beta {
-                score = -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, counter_moves, mv_prev, network, true, nodes, node_limit, deadline, stop, tt);
-            } else {
-                score = null_score;
+                // --- Late Move Reductions (applied on top of null window) ---
+                if depth >= 3 && move_index > TUNE_LMR_MOVE_INDEX.load(Ordering::Relaxed) as usize && !is_capture && !is_killer && !in_check {
+                    null_score = -ab_search(&new_board, depth - 2, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, child_state, true, nodes, node_limit, deadline, stop, tt);
+                } else {
+                    null_score = -ab_search(&new_board, depth - 1, -alpha - 1, -alpha, ply + 1, killers, history, counter_moves, mv_prev, child_state, true, nodes, node_limit, deadline, stop, tt);
+                }
+
+                // Fail-high on null window: this move might be genuinely better.
+                // Re-search at full depth + full window to get the real score.
+                if null_score > alpha && null_score < beta {
+                    -ab_search(&new_board, depth - 1, -beta, -alpha, ply + 1, killers, history, counter_moves, mv_prev, child_state, true, nodes, node_limit, deadline, stop, tt)
+                } else {
+                    null_score
+                }
             }
-        }
+        });
 
         if score >= beta {
             if !is_capture {
@@ -1451,12 +1560,7 @@ fn ab_search(
     // If truncated before any move improved alpha, we have no real search result.
     // Return static eval instead of the original alpha (which could be -INF).
     if !searched_all && alpha == original_alpha {
-        return if let Some(net) = network {
-            let acc = nnue::Accumulator::from_board(net, board);
-            net.evaluate(&acc, board.side_to_move)
-        } else {
-            evaluate(board)
-        };
+        return eval_state.evaluate(board);
     }
 
     // Only store TT entries from complete searches.
@@ -1477,10 +1581,29 @@ fn ab_search(
 /// Search for the best move at the given depth.
 /// Returns None if no legal moves exist (checkmate or stalemate).
 pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> Option<SearchOutcome> {
-    let mut moves = generate_moves(board);
+    let moves = generate_moves(board);
     if moves.is_empty() {
         return None;
     }
+
+    match network {
+        Some(network) => best_move_with_state(
+            board,
+            depth,
+            moves,
+            NnueSearchState::from_root(network, board),
+        ),
+        None => best_move_with_state(board, depth, moves, PestoSearchState),
+    }
+}
+
+fn best_move_with_state<E: SearchEvaluation>(
+    board: &Board,
+    depth: u32,
+    mut moves: Vec<Move>,
+    mut eval_state: E,
+) -> Option<SearchOutcome> {
+    let root_stack_depth = eval_state.stack_depth();
 
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
     let mut history: History = [[[0i32; 64]; 64]; 2];
@@ -1500,7 +1623,27 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 
     for mv in moves {
         let new_board = make_move(board, &mv);
-        let score = -ab_search(&new_board, depth - 1, -beta, -alpha, 1, &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, true, &nodes, u64::MAX, None, &stop, &tt);
+        let score = with_real_child(&mut eval_state, board, &new_board, |child_state| {
+            -ab_search(
+                &new_board,
+                depth - 1,
+                -beta,
+                -alpha,
+                1,
+                &mut killers,
+                &mut history,
+                &mut counter_moves,
+                Some((mv.from_sq, mv.to_sq)),
+                child_state,
+                true,
+                &nodes,
+                u64::MAX,
+                None,
+                &stop,
+                &tt,
+            )
+        });
+        debug_assert_eq!(eval_state.stack_depth(), root_stack_depth);
         if score > alpha {
             alpha = score;
             best = Some((mv, score));
@@ -1518,13 +1661,13 @@ pub fn best_move(board: &Board, depth: u32, network: Option<&nnue::Network>) -> 
 /// Worker thread for Lazy SMP. Runs a simplified iterative-deepening
 /// loop with no aspiration windows, warming the shared TTable.
 /// Exits when `stop` is set to true by the main thread.
-fn smp_worker(
+fn smp_worker<E: SearchEvaluation>(
     board: &Board,
     tt: &TTable,
     stop: &AtomicBool,
     deadline: Option<std::time::Instant>,
     node_limit: u64,
-    network: Option<&nnue::Network>,
+    mut eval_state: E,
     thread_id: usize,
 ) -> u64 {
     let mut killers: Killers = [[None; 2]; MAX_DEPTH];
@@ -1535,6 +1678,7 @@ fn smp_worker(
     if moves.is_empty() {
         return 0;
     }
+    let root_stack_depth = eval_state.stack_depth();
 
     // Each worker starts at a slightly different depth to ensure
     // diverse TT entries. Odd workers start at depth 2, even at 1.
@@ -1559,11 +1703,27 @@ fn smp_worker(
                 return nodes.load(Ordering::Relaxed);
             }
             let new_board = make_move(board, mv);
-            let score = -ab_search(
-                &new_board, depth - 1, -beta, -alpha, 1,
-                &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, true,
-                &nodes, node_limit, deadline, stop, tt,
-            );
+            let score = with_real_child(&mut eval_state, board, &new_board, |child_state| {
+                -ab_search(
+                    &new_board,
+                    depth - 1,
+                    -beta,
+                    -alpha,
+                    1,
+                    &mut killers,
+                    &mut history,
+                    &mut counter_moves,
+                    Some((mv.from_sq, mv.to_sq)),
+                    child_state,
+                    true,
+                    &nodes,
+                    node_limit,
+                    deadline,
+                    stop,
+                    tt,
+                )
+            });
+            debug_assert_eq!(eval_state.stack_depth(), root_stack_depth);
             if score > alpha {
                 alpha = score;
             }
@@ -1571,6 +1731,7 @@ fn smp_worker(
                 break;
             }
         }
+        debug_assert_eq!(eval_state.stack_depth(), root_stack_depth);
     }
 
     nodes.load(Ordering::Relaxed)
@@ -1727,13 +1888,41 @@ mod root_budget_test_hook {
 }
 
 pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::time::Instant>, network: Option<&nnue::Network>, num_threads: usize) -> Option<SearchOutcome> {
-    let asp_delta = TUNE_ASPIRATION_DELTA.load(Ordering::Relaxed);
-    const MATE_THRESHOLD: i32 = CHECKMATE - 1000;
-
     let moves = generate_moves(board);
     if moves.is_empty() {
         return None;
     }
+
+    match network {
+        Some(network) => best_move_nodes_with_state(
+            board,
+            node_limit,
+            deadline,
+            num_threads,
+            moves,
+            NnueSearchState::from_root(network, board),
+        ),
+        None => best_move_nodes_with_state(
+            board,
+            node_limit,
+            deadline,
+            num_threads,
+            moves,
+            PestoSearchState,
+        ),
+    }
+}
+
+fn best_move_nodes_with_state<E: SearchEvaluation>(
+    board: &Board,
+    node_limit: u64,
+    deadline: Option<std::time::Instant>,
+    num_threads: usize,
+    moves: Vec<Move>,
+    mut eval_state: E,
+) -> Option<SearchOutcome> {
+    let asp_delta = TUNE_ASPIRATION_DELTA.load(Ordering::Relaxed);
+    const MATE_THRESHOLD: i32 = CHECKMATE - 1000;
 
     let tt = TTable::new();
     let stop = AtomicBool::new(false);
@@ -1752,8 +1941,17 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
         let num_workers = num_threads.saturating_sub(1);
         let mut worker_handles = Vec::with_capacity(num_workers);
         for thread_id in 1..=num_workers {
+            let worker_eval_state = eval_state.fork_root();
             worker_handles.push(s.spawn(move || {
-                smp_worker(board, tt_ref, stop_ref, deadline, node_limit, network, thread_id)
+                smp_worker(
+                    board,
+                    tt_ref,
+                    stop_ref,
+                    deadline,
+                    node_limit,
+                    worker_eval_state,
+                    thread_id,
+                )
             }));
         }
 
@@ -1763,6 +1961,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
         let root_hash = board.zobrist_hash();
         let mut prev_score: Option<i32> = None;
         let mut main_nodes = 0u64;
+        let root_stack_depth = eval_state.stack_depth();
 
         for depth in 1..=MAX_DEPTH as u32 {
             // Soft check: don't start a new iteration if the deadline has
@@ -1816,11 +2015,32 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                     };
 
                     let new_board = make_move(board, mv);
-                    let score = -ab_search(
-                        &new_board, depth - 1, -beta, -alpha, 1,
-                        &mut killers, &mut history, &mut counter_moves, Some((mv.from_sq, mv.to_sq)), network, true,
-                        &nodes, node_limit, deadline, &stop, &tt,
+                    let score = with_real_child(
+                        &mut eval_state,
+                        board,
+                        &new_board,
+                        |child_state| {
+                            -ab_search(
+                                &new_board,
+                                depth - 1,
+                                -beta,
+                                -alpha,
+                                1,
+                                &mut killers,
+                                &mut history,
+                                &mut counter_moves,
+                                Some((mv.from_sq, mv.to_sq)),
+                                child_state,
+                                true,
+                                &nodes,
+                                node_limit,
+                                deadline,
+                                &stop,
+                                &tt,
+                            )
+                        },
                     );
+                    debug_assert_eq!(eval_state.stack_depth(), root_stack_depth);
 
                     let budget_exhausted =
                         nodes.load(Ordering::Relaxed) >= node_limit || time_up(deadline, &stop);
@@ -1880,6 +2100,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                         break;
                     }
                 }
+                debug_assert_eq!(eval_state.stack_depth(), root_stack_depth);
 
                 // Node budget exhausted mid-iteration — bail out of re-search loop.
                 if !completed {
@@ -1906,6 +2127,7 @@ pub fn best_move_nodes(board: &Board, node_limit: u64, deadline: Option<std::tim
                 // Clean completion within the window.
                 break (best, true);
             };
+            debug_assert_eq!(eval_state.stack_depth(), root_stack_depth);
 
             // The main-thread counter is intentionally still per depth so
             // `go nodes` retains its historical budget behavior.  Aggregate
@@ -2085,6 +2307,18 @@ mod tests {
             "Queen should move, got {}",
             outcome.best_move.to_uci()
         );
+    }
+
+    #[test]
+    fn nnue_search_stacks_balance_on_fixed_iterative_and_helper_paths() {
+        let board = Board::startpos();
+        let network = nnue::Network::from_random();
+
+        let fixed = best_move(&board, 2, Some(&network));
+        assert!(fixed.is_some(), "fixed-depth NNUE search returned no move");
+
+        let iterative = best_move_nodes(&board, 1_000, None, Some(&network), 2);
+        assert!(iterative.is_some(), "iterative NNUE search returned no move");
     }
 
     struct RootHookReset;

@@ -54,6 +54,26 @@ const ROOK: u8 = 3;
 const QUEEN: u8 = 4;
 const KING: u8 = 5;
 
+/// Return the twelve piece planes in the single authoritative order used by
+/// both full accumulator construction and parent/child delta discovery.
+#[inline]
+fn piece_planes(board: &Board) -> [(u64, u8, bool); 12] {
+    [
+        (board.white_pawns,   PAWN,   true),
+        (board.white_knights, KNIGHT, true),
+        (board.white_bishops, BISHOP, true),
+        (board.white_rooks,   ROOK,   true),
+        (board.white_queens,  QUEEN,  true),
+        (board.white_kings,   KING,   true),
+        (board.black_pawns,   PAWN,   false),
+        (board.black_knights, KNIGHT, false),
+        (board.black_bishops, BISHOP, false),
+        (board.black_rooks,   ROOK,   false),
+        (board.black_queens,  QUEEN,  false),
+        (board.black_kings,   KING,   false),
+    ]
+}
+
 // ---------------------------------------------------------------------------
 // Network weights
 // ---------------------------------------------------------------------------
@@ -139,23 +159,7 @@ impl Accumulator {
     pub fn from_board(network: &Network, board: &Board) -> Self {
         let mut acc = Accumulator::new(network);
 
-        // (bitboard, piece_type, is_white)
-        let pieces: [(u64, u8, bool); 12] = [
-            (board.white_pawns,   PAWN,   true),
-            (board.white_knights, KNIGHT, true),
-            (board.white_bishops, BISHOP, true),
-            (board.white_rooks,   ROOK,   true),
-            (board.white_queens,  QUEEN,  true),
-            (board.white_kings,   KING,   true),
-            (board.black_pawns,   PAWN,   false),
-            (board.black_knights, KNIGHT, false),
-            (board.black_bishops, BISHOP, false),
-            (board.black_rooks,   ROOK,   false),
-            (board.black_queens,  QUEEN,  false),
-            (board.black_kings,   KING,   false),
-        ];
-
-        for &(mut bb, piece_type, is_white) in &pieces {
+        for (mut bb, piece_type, is_white) in piece_planes(board) {
             while bb != 0 {
                 let sq = bb.trailing_zeros() as u8;
                 bb &= bb - 1;
@@ -164,6 +168,45 @@ impl Accumulator {
         }
 
         acc
+    }
+
+    /// Derive an owned child accumulator from the authoritative parent and
+    /// child piece placements.  NNUE deliberately does not decode move flags:
+    /// captures, en passant, promotions, and castling are already reflected in
+    /// the child board returned by move application.
+    pub(crate) fn updated_for_child(
+        &self,
+        network: &Network,
+        parent: &Board,
+        child: &Board,
+    ) -> Self {
+        let mut child_acc = self.clone();
+        let parent_planes = piece_planes(parent);
+        let child_planes = piece_planes(child);
+
+        for (parent_plane, child_plane) in parent_planes.into_iter().zip(child_planes) {
+            let (parent_bb, piece_type, piece_color) = parent_plane;
+            let (child_bb, child_piece_type, child_piece_color) = child_plane;
+            debug_assert_eq!(piece_type, child_piece_type);
+            debug_assert_eq!(piece_color, child_piece_color);
+
+            let changed = parent_bb ^ child_bb;
+            let mut removed = changed & parent_bb;
+            let mut added = changed & child_bb;
+
+            while removed != 0 {
+                let sq = removed.trailing_zeros() as u8;
+                removed &= removed - 1;
+                child_acc.remove_feature(network, sq, piece_type, piece_color);
+            }
+            while added != 0 {
+                let sq = added.trailing_zeros() as u8;
+                added &= added - 1;
+                child_acc.add_feature(network, sq, piece_type, piece_color);
+            }
+        }
+
+        child_acc
     }
 }
 
@@ -423,6 +466,28 @@ fn screlu_square(value: i32) -> i64 {
 mod tests {
     use super::*;
 
+    fn assert_incremental_move(network: &Network, label: &str, fen: &str, uci: &str) {
+        let board = Board::from_fen(fen).unwrap_or_else(|error| {
+            panic!("{label}: invalid test FEN {fen}: {error}")
+        });
+        let mv = crate::movegen::generate_moves(&board)
+            .into_iter()
+            .find(|mv| mv.to_uci() == uci)
+            .unwrap_or_else(|| panic!("{label}: move {uci} is not legal from {fen}"));
+        let parent = Accumulator::from_board(network, &board);
+        let child = crate::movegen::make_move(&board, &mv);
+        let incremental = parent.updated_for_child(network, &board, &child);
+        let full = Accumulator::from_board(network, &child);
+
+        assert_eq!(incremental.white, full.white, "{label}: white lanes");
+        assert_eq!(incremental.black, full.black, "{label}: black lanes");
+        assert_eq!(
+            network.evaluate(&incremental, child.side_to_move),
+            network.evaluate(&full, child.side_to_move),
+            "{label}: centipawn output"
+        );
+    }
+
     #[test]
     fn feature_index_in_range() {
         // Every valid (perspective, sq, piece_type, piece_color) gives index < 768
@@ -489,6 +554,65 @@ mod tests {
         for i in 0..HIDDEN_SIZE {
             assert_eq!(acc.white[i], original.white[i], "white[{}] mismatch", i);
             assert_eq!(acc.black[i], original.black[i], "black[{}] mismatch", i);
+        }
+    }
+
+    #[test]
+    fn incremental_matches_full_reconstruction_for_all_move_classes() {
+        let network = Network::from_random();
+        let cases = [
+            ("quiet pawn", "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1", "e2e3"),
+            ("double pawn", "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1", "e2e4"),
+            ("quiet piece", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "g1f3"),
+            ("capture", "4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1", "e4d5"),
+            ("white en passant", "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", "e5d6"),
+            ("black en passant", "4k3/8/8/8/3Pp3/8/8/4K3 b - d3 0 1", "e4d3"),
+            ("white queen promotion", "4k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7a8q"),
+            ("white rook promotion", "4k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7a8r"),
+            ("white bishop promotion", "4k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7a8b"),
+            ("white knight promotion", "4k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7a8n"),
+            ("black queen promotion", "4k3/8/8/8/8/8/p7/4K3 b - - 0 1", "a2a1q"),
+            ("black rook promotion", "4k3/8/8/8/8/8/p7/4K3 b - - 0 1", "a2a1r"),
+            ("black bishop promotion", "4k3/8/8/8/8/8/p7/4K3 b - - 0 1", "a2a1b"),
+            ("black knight promotion", "4k3/8/8/8/8/8/p7/4K3 b - - 0 1", "a2a1n"),
+            ("white promotion capture", "1r2k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7b8n"),
+            ("black promotion capture", "4k3/8/8/8/8/8/p7/1R2K3 b - - 0 1", "a2b1b"),
+            ("white kingside castling", "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "e1g1"),
+            ("white queenside castling", "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1", "e1c1"),
+            ("black kingside castling", "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1", "e8g8"),
+            ("black queenside castling", "r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1", "e8c8"),
+            ("corner rook a1", "4k3/8/8/8/8/8/1b6/R3K3 b Q - 0 1", "b2a1"),
+            ("corner rook h1", "4k3/8/8/8/8/8/6b1/4K2R b K - 0 1", "g2h1"),
+            ("corner rook a8", "r3k3/1B6/8/8/8/8/8/4K3 w q - 0 1", "b7a8"),
+            ("corner rook h8", "4k2r/6B1/8/8/8/8/8/4K3 w k - 0 1", "g7h8"),
+            ("king move", "4k3/8/8/8/8/8/8/4K3 w - - 0 1", "e1d1"),
+            ("white rook rights move", "4k3/8/8/8/8/8/8/R3K3 w Q - 0 1", "a1a2"),
+            ("black rook rights move", "r3k3/8/8/8/8/8/8/4K3 b q - 0 1", "a8a7"),
+        ];
+
+        for (label, fen, uci) in cases {
+            assert_incremental_move(&network, label, fen, uci);
+        }
+    }
+
+    #[test]
+    fn null_move_reuses_identical_raw_lanes() {
+        let network = Network::from_random();
+        for fen in [
+            "4k3/8/8/8/8/8/8/4K3 w - - 0 1",
+            "4k3/8/8/8/8/8/8/4K3 b - - 0 1",
+        ] {
+            let board = Board::from_fen(fen).unwrap();
+            let null_board = board.make_null_move();
+            let current = Accumulator::from_board(&network, &board);
+            let rebuilt = Accumulator::from_board(&network, &null_board);
+            assert_eq!(current.white, rebuilt.white, "white null lanes: {fen}");
+            assert_eq!(current.black, rebuilt.black, "black null lanes: {fen}");
+            assert_eq!(
+                network.evaluate(&current, null_board.side_to_move),
+                network.evaluate(&rebuilt, null_board.side_to_move),
+                "null centipawn output: {fen}"
+            );
         }
     }
 

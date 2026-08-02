@@ -3235,3 +3235,72 @@ and both live NNUE files remained SHA-256
 Ticket #19 is instrumentation-only: it makes no Elo claim and no
 speed-improvement claim. Benchmark wall-time outliers reflected host
 contention and are not optimization evidence.
+
+## Ticket #1 COMPLETE — incremental SCReLU-512 NNUE accumulators (August 2, 2026)
+
+Ticket #1 replaced recursive full NNUE accumulator reconstruction with
+incremental maintenance derived from authoritative parent/child piece
+bitboards. The reviewed implementation centralizes the twelve feature planes,
+clones the parent accumulator for each searched child, removes parent-only
+features, adds child-only features, and updates both fixed perspectives. This
+single delta mechanism covers quiet moves, captures, en passant, promotions
+and underpromotions, castling, corner-rook captures, king moves, and rook moves
+without duplicating move-flag decoding inside NNUE.
+
+Each independent NNUE root constructs exactly one full accumulator. The main
+search and every Lazy SMP helper then use private search-local stacks; helpers
+receive independent root clones, PVS/LMR re-searches reuse the same child
+accumulator, and null moves reuse unchanged raw lanes while changing the output
+perspective. PeSTO retains a zero-sized path with no NNUE accumulator work. No
+recursive production path rebuilds an accumulator with
+`Accumulator::from_board`.
+
+The final deterministic corpus used seed `20260802` and is retained at
+`C:\torch_data\pyro_ticket1_20260802_1bf38f4\corpus\incremental_sequences_10000_exact_ep.tsv`.
+It is 72,038 bytes with SHA-256
+`3DD95476383233A63667C05FED8FBCD5702E3193266C971C99F2AAE2A17EC909`.
+Its 246 cases contain 10,330 transitions: 10,202 legal non-null transitions,
+10,107 canonical non-null positions, and 128 canonical null sources split
+64/64 by side to move. Representative-FEN round-trip mismatches were zero.
+
+Three-way comparison between Rust incremental evaluation, Rust full
+reconstruction, and an independent Python full reconstruction was exact:
+10,577,920 raw accumulator lanes, 21,155,840 raw-value comparisons, and 10,330
+final-centipawn comparisons produced zero illegal transitions and zero
+mismatches. The 84,850,685-byte raw evidence file is
+`C:\torch_data\pyro_ticket1_20260802_1bf38f4\incremental_exactness\exact_ep_results.bin`,
+SHA-256
+`B5161B04F0ABFFE9B4DCDC88B01DFEAF64C3178B67AE90F773E38B83313B73CD`;
+the JSON report SHA-256 is
+`351E961EC77273098E39501864F3D4B0A09DA7E27BA91259826B9BF25C0A0716`.
+The frozen SCReLU proof also remained 10,000/10,000 exact plus 8/8 synthetic
+boundary cases.
+
+Correctness validation passed debug and release suites (34 verifier tests + 49
+engine tests in each mode), the release all-binaries build, perft
+`20 / 400 / 8,902`, and 40/40 fixed-depth equivalence. Deterministic fixed work
+remained exactly 5,065,087 nodes / `a8df66621c8eb452` for NNUE and 4,900,866
+nodes / `18bd8f3c9614b0db` for PeSTO. The strict PeSTO no-op transcript proof,
+preceding-position checks, and the timed-root incident gate all passed: 50/50
+legal immediate mates at Threads=1 and 50/50 at Threads=2, with no illegal or
+non-mating result. Final independent review found no issue.
+
+On the controlled Ticket #19 fixed-work comparison, NNUE median elapsed time
+fell from 18,945 ms to 10,711 ms, a **43.463%** improvement; median NPS rose
+from 267,362 to 472,918.5, and the candidate won 10/10 paired comparisons. The
+4.600% baseline three-MAD/median contamination measure cleared the
+precommitted 5.406% acceptance threshold. Nodes, checksums, decisions, scores,
+and depths remained exact. PeSTO moved from 7,858.5 ms to 7,653.5 ms median
+(2.609% improvement) with no regression and unchanged fixed work.
+
+The isolated candidate is 356,864 bytes, MD5
+`0096EAFE3395EBB14A7AD543694651A0`, SHA-256
+`D9B378DFCD61225311C94FB481E7FC8FB9582D9F3AE358892B812E222E009119`,
+at `C:\torch_data\pyro_ticket1_20260802_1bf38f4\artifacts\candidate\pyro.exe`.
+It was not deployed during validation. The live executable remained SHA-256
+`6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`,
+and both live NNUE files remained
+`A06CFEBD7C22D0B45F08BA94A276FD2A7CF8B3CD76C54DD308B2EEAA1A579591`.
+Ticket #1 is a verified same-work NNUE throughput improvement, not an Elo
+result: no chess gauntlet was run, higher NPS alone does not prove playing
+strength, and deployment remains a separate decision.

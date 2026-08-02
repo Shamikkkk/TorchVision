@@ -1,9 +1,10 @@
 # Pyro project state
 
-Pre-commit verification baseline: **August 2, 2026** at
-`46d8c36c5d2a910b55e060db83c0cecedb8471a8`. This identifies the repository
-immediately before Git preservation of the reviewed Ticket #19 set; it is not
-an enduring statement of the latest committed HEAD.
+Ticket #1 pre-commit verification baseline: **August 2, 2026**, branch
+`feat/incremental-screlu512-accumulators` at
+`1bf38f449b5efe1879818522a4a5771a10e8eb32`. This identifies the repository
+immediately before Git preservation of the reviewed Ticket #1 set; it is not
+an enduring statement of the latest branch or committed HEAD.
 
 Labels used below:
 
@@ -16,10 +17,11 @@ Labels used below:
 
 ## Repository
 
-- **August 2, 2026 pre-commit verification fact:** repository
-  `C:\Users\shami\OneDrive\Documents\torch` was on branch `main` at
-  `46d8c36c5d2a910b55e060db83c0cecedb8471a8`. Current branch and HEAD must be
-  checked from Git after preservation.
+- **August 2, 2026 Ticket #1 pre-commit verification fact:** repository
+  `C:\Users\shami\OneDrive\Documents\torch` was on branch
+  `feat/incremental-screlu512-accumulators` at
+  `1bf38f449b5efe1879818522a4a5771a10e8eb32`. Current branch, HEAD, and Ticket
+  #1 preservation status must be checked from Git.
 - **Historically reported fact:** local and remote `main` matched at the prior
   context-baseline audit. This task did not query the remote repository.
 - **Verified current fact:** the relevant ancestry is
@@ -28,13 +30,15 @@ Labels used below:
   `203b60856fd0b651c73ce814926fb3266c31bf9d` -> incident docs
   `181f679709c82625172355d1ef34f9d8685fb654` -> context baseline
   `1ecbc83842941e00c006f31fa718af97f618f6ac` -> live-shakedown docs
-  `46d8c36c5d2a910b55e060db83c0cecedb8471a8`.
+  `46d8c36c5d2a910b55e060db83c0cecedb8471a8` -> Ticket #19 preservation
+  `1bf38f449b5efe1879818522a4a5771a10e8eb32`.
 - **Verified current fact:** `203b608...` is a two-parent merge of
   `b6c3277...` and `5469931...`; therefore the timed-root fix is present in
-  current `main`.
-- **August 2, 2026 pre-commit verification fact:** the worktree contained the
-  five reviewed Ticket #19 implementation files, these five documentation
-  updates, and the pre-existing ` m bullet`, with nothing staged. The parent
+  the feature branch's base history.
+- **August 2, 2026 Ticket #1 pre-commit verification fact:** the worktree
+  contained the eight reviewed Ticket #1 implementation/verification files,
+  these five documentation updates, and the pre-existing ` m bullet`, with
+  nothing staged. The parent
   index stores `bullet` as gitlink mode `160000` at
   `cebc78a093d92cbc87e56cfef049184c225270b0`;
   its nested HEAD is unchanged at that commit. The lowercase `m` means the
@@ -79,6 +83,50 @@ Labels used below:
   327,168 bytes, SHA-256
   `906E06247DE3D68D80639E7CDF63519DFD7167D191BB1E401FC0D2CB551ABF00`.
   It has not been deployed. Ticket #19 makes no Elo or speed-improvement claim.
+
+## Ticket #1 incremental SCReLU-512 accumulators
+
+- **Verified current fact:** Ticket #1 is complete and final independent review
+  found no issue in the complete eight-file implementation and verification
+  set. Its Git preservation status must be checked from the repository.
+- **Verified current fact:** incremental state is derived from authoritative
+  parent/child piece-bitboard differences across the centralized twelve NNUE
+  planes. A searched child clones its parent accumulator, removes parent-only
+  features, adds child-only features, and updates both fixed perspectives.
+  Private per-thread search stacks provide one full construction per independent
+  NNUE root, independent Lazy SMP helper roots/stacks, reused child state across
+  PVS/LMR re-searches, and unchanged raw lanes for null moves. PeSTO has no NNUE
+  accumulator work, and recursive production evaluation performs no full
+  reconstruction.
+- **Verified current fact:** the seed-`20260802` corpus at
+  `C:\torch_data\pyro_ticket1_20260802_1bf38f4\corpus\incremental_sequences_10000_exact_ep.tsv`
+  is 72,038 bytes, SHA-256
+  `3DD95476383233A63667C05FED8FBCD5702E3193266C971C99F2AAE2A17EC909`.
+  It contains 10,330 transitions, 10,107 canonical non-null positions, and 128
+  canonical null sources split 64/64 by side to move, with zero representative-
+  FEN round-trip mismatch.
+- **Verified current fact:** Rust incremental, Rust full, and independent Python
+  full reconstruction agreed exactly on 10,577,920 raw lanes, 21,155,840 raw
+  comparisons, and 10,330 final-cp comparisons, with zero illegal transition or
+  mismatch. Frozen SCReLU verification remained 10,000/10,000 exact plus 8/8
+  boundary cases.
+- **Verified current fact:** debug and release tests each passed 34 verifier +
+  49 engine tests; release binaries built; perft remained `20 / 400 / 8,902`;
+  fixed-depth equivalence passed 40/40; and deterministic work remained NNUE
+  5,065,087 / `a8df66621c8eb452` and PeSTO 4,900,866 /
+  `18bd8f3c9614b0db`. Strict PeSTO no-op, preceding-position checks, and the
+  timed-root gate (50/50 at Threads=1 and 50/50 at Threads=2) all passed.
+- **Verified current fact:** controlled identical-work NNUE timing improved
+  from 18,945 ms to 10,711 ms median (**43.463%**), with median NPS increasing
+  from 267,362 to 472,918.5 and 10/10 paired wins. The result cleared the
+  precommitted timing-noise threshold. PeSTO improved 2.609% with no regression.
+  Decisions, scores, depths, nodes, and checksums remained exact.
+- **Verified current fact:** the 356,864-byte isolated candidate at
+  `C:\torch_data\pyro_ticket1_20260802_1bf38f4\artifacts\candidate\pyro.exe`
+  has MD5 `0096EAFE3395EBB14A7AD543694651A0` and SHA-256
+  `D9B378DFCD61225311C94FB481E7FC8FB9582D9F3AE358892B812E222E009119`.
+  It was not deployed during validation. This is a verified same-work NNUE
+  throughput improvement, not an Elo result; no chess gauntlet was run.
 
 ## Timed-root-completion fix
 
@@ -204,33 +252,39 @@ Labels used below:
 - **Verified current fact:** the native lichess-bot bridge is running and
   PyroBotTorch is online. No game-engine `pyro.exe` is expected while the bot
   is idle. Docker remains unused for this deployment.
-- **August 2, 2026 pre-commit verification fact:** HEAD was `46d8c36...` and
-  the reviewed Ticket #19 implementation and documentation had not yet been
-  preserved in Git. That hash is a verification baseline, not an enduring
-  latest-HEAD claim; current preservation status must be checked from Git.
+- **August 2, 2026 Ticket #1 pre-commit verification fact:** branch
+  `feat/incremental-screlu512-accumulators` was at `1bf38f4...`, and the reviewed
+  Ticket #1 implementation and documentation had not yet been preserved in
+  Git. That hash is a verification baseline, not an enduring latest-HEAD claim;
+  current preservation status must be checked from Git.
 - **Verified current fact:** the live bot remains on executable SHA-256
   `6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`;
   the Ticket #19 candidate was not deployed.
 - **Verified current fact:** deterministic search-throughput measurement is now
   available for future exact-work comparisons.
+- **Verified current fact:** Ticket #1 completed those exact-work comparisons,
+  passed final independent review, and produced a 43.463% median NNUE
+  elapsed-time improvement without changing fixed work. Its isolated candidate
+  remains distinct from the live executable unless a separate deployment action
+  occurs.
 - **Verified current fact:** open, unscheduled product issues remain in
   `CLAUDE.md`: eager loading of an unused Python NNUE model, client-only voice
   state, and the old `python-chess` dependency.
 - **Historically reported fact:** Pyro still emits mate-range UCI scores as
   centipawns rather than `score mate N`; this cosmetic issue was outside the
   timed-root fix.
-- **Not started:** Ticket #1 incremental SCReLU-512 NNUE accumulator
-  integration. It is the next separate Plan-mode investigation only after the
-  reviewed Ticket #19 implementation and documentation are preserved.
+- **Not started:** Ticket #2, removing repeated move scoring inside the sort
+  comparator. It is the next separate Plan-mode investigation only after the
+  reviewed Ticket #1 implementation and documentation are preserved.
 
 ## Next decision
 
-- **Immediate check:** confirm from Git that the complete reviewed Ticket #19
+- **Immediate check:** confirm from Git that the complete reviewed Ticket #1
   implementation and documentation set has been preserved. If it has not,
   review and preserve it through user-controlled staging, commit, and push.
 - **Once preservation is confirmed:** the next engineering phase is a
-  separate Plan-mode investigation for Ticket #1. Planning does not authorize
-  implementation, and incremental NNUE work has not begun.
+  separate Plan-mode investigation for Ticket #2. Planning does not authorize
+  implementation, and the ordering-cost change has not begun.
 - Branch cleanup, lichess-bot upstream updates, README corrections, persistent
   autostart/watchdog work, and all other roadmap items remain separate,
   non-authorized decisions.

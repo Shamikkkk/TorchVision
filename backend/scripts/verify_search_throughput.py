@@ -13,6 +13,7 @@ import csv
 import hashlib
 import json
 import re
+import statistics
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -103,6 +104,49 @@ class BenchRun:
     nps: int
     checksum: str
     recomputed_checksum: str
+
+
+@dataclass(frozen=True)
+class PairedBenchSample:
+    mode: str
+    phase: str
+    execution_index: int
+    artifact: str
+    artifact_sample: int
+    nodes: int
+    time_ms: int
+    nps: int
+    checksum: str
+
+
+@dataclass(frozen=True)
+class PairedBenchPosition:
+    mode: str
+    artifact: str
+    execution_index: int
+    artifact_sample: int
+    index: int
+    label: str
+    bestmove: str
+    score: int
+    depth: int
+    nodes: int
+
+
+@dataclass(frozen=True)
+class PairedBenchDelta:
+    mode: str
+    pair: int
+    baseline_time_ms: int
+    candidate_time_ms: int
+    candidate_minus_baseline_ms: int
+    elapsed_improvement_percent: float
+    baseline_nps: int
+    candidate_nps: int
+    nps_improvement_percent: float
+    candidate_won: bool
+    contaminated: bool
+    contamination_reason: str
 
 
 def digest(path: Path, algorithm: str) -> str:
@@ -470,6 +514,227 @@ def file_metadata(path: Path, expected_sha256: str | None = None) -> dict[str, o
     }
 
 
+def median_mad(values: list[int]) -> tuple[float, float, float]:
+    if not values:
+        raise ValueError("cannot summarize an empty sample")
+    median_value = float(statistics.median(values))
+    mad = float(statistics.median(abs(value - median_value) for value in values))
+    noise_percent = 0.0 if median_value == 0 else 300.0 * mad / median_value
+    return median_value, mad, noise_percent
+
+
+def parse_contaminated_pairs(values: list[str], repetitions: int) -> dict[tuple[str, int], str]:
+    contaminated: dict[tuple[str, int], str] = {}
+    for value in values:
+        fields = value.split(":", 2)
+        if len(fields) != 3:
+            raise ValueError(
+                "--contaminated-pair must be MODE:PAIR:RECORDED_REASON"
+            )
+        mode, pair_text, reason = fields
+        if mode not in {"nnue", "pesto"}:
+            raise ValueError(f"invalid contaminated-pair mode {mode!r}")
+        try:
+            pair = int(pair_text)
+        except ValueError as error:
+            raise ValueError(f"invalid contaminated-pair index {pair_text!r}") from error
+        if not 1 <= pair <= repetitions:
+            raise ValueError(
+                f"contaminated-pair index {pair} outside 1..{repetitions}"
+            )
+        if not reason.strip():
+            raise ValueError("contaminated-pair reason must not be empty")
+        key = (mode, pair)
+        if key in contaminated:
+            raise ValueError(f"duplicate contaminated-pair declaration {mode}:{pair}")
+        contaminated[key] = reason.strip()
+    return contaminated
+
+
+def run_paired_performance(
+    baseline: Path,
+    candidate: Path,
+    timeout_seconds: float,
+    repetitions: int,
+    contaminated: dict[tuple[str, int], str],
+    output_dir: Path,
+) -> tuple[
+    list[PairedBenchSample],
+    list[PairedBenchPosition],
+    list[PairedBenchDelta],
+    dict[str, object],
+]:
+    samples: list[PairedBenchSample] = []
+    positions_out: list[PairedBenchPosition] = []
+    deltas: list[PairedBenchDelta] = []
+    summaries: dict[str, object] = {}
+
+    for mode in ("nnue", "pesto"):
+        reference_signature: tuple[object, ...] | None = None
+        print(f"Running excluded paired {mode} warm-ups...", flush=True)
+        for artifact, engine in (("baseline", baseline), ("candidate", candidate)):
+            run, positions = run_bench(engine, mode, 0, timeout_seconds)
+            signature = deterministic_signature(run, positions)
+            if reference_signature is None:
+                reference_signature = signature
+            elif signature != reference_signature:
+                raise AssertionError(
+                    f"paired bench {mode}: warm-up deterministic signature differs "
+                    f"for {artifact}"
+                )
+            samples.append(
+                PairedBenchSample(
+                    mode=mode,
+                    phase="warmup",
+                    execution_index=0,
+                    artifact=artifact,
+                    artifact_sample=0,
+                    nodes=run.nodes,
+                    time_ms=run.time_ms,
+                    nps=run.nps,
+                    checksum=run.checksum,
+                )
+            )
+
+        order = ["baseline", "candidate", "candidate", "baseline"] * (
+            repetitions // 2
+        )
+        if repetitions % 2:
+            order.extend(("baseline", "candidate"))
+        artifact_counts = {"baseline": 0, "candidate": 0}
+        measured_runs: dict[str, list[BenchRun]] = {"baseline": [], "candidate": []}
+
+        for execution_index, artifact in enumerate(order, 1):
+            artifact_counts[artifact] += 1
+            artifact_sample = artifact_counts[artifact]
+            engine = baseline if artifact == "baseline" else candidate
+            run, positions = run_bench(
+                engine, mode, artifact_sample, timeout_seconds
+            )
+            signature = deterministic_signature(run, positions)
+            if signature != reference_signature:
+                raise AssertionError(
+                    f"paired bench {mode} execution {execution_index} artifact {artifact}: "
+                    "deterministic signature changed"
+                )
+            measured_runs[artifact].append(run)
+            positions_out.extend(
+                PairedBenchPosition(
+                    mode=position.mode,
+                    artifact=artifact,
+                    execution_index=execution_index,
+                    artifact_sample=artifact_sample,
+                    index=position.index,
+                    label=position.label,
+                    bestmove=position.bestmove,
+                    score=position.score,
+                    depth=position.depth,
+                    nodes=position.nodes,
+                )
+                for position in positions
+            )
+            samples.append(
+                PairedBenchSample(
+                    mode=mode,
+                    phase="measured",
+                    execution_index=execution_index,
+                    artifact=artifact,
+                    artifact_sample=artifact_sample,
+                    nodes=run.nodes,
+                    time_ms=run.time_ms,
+                    nps=run.nps,
+                    checksum=run.checksum,
+                )
+            )
+            print(
+                f"mode={mode} execution={execution_index:02d} artifact={artifact} "
+                f"sample={artifact_sample:02d} nodes={run.nodes} time={run.time_ms} "
+                f"nps={run.nps} checksum={run.checksum}",
+                flush=True,
+            )
+
+        if artifact_counts != {"baseline": repetitions, "candidate": repetitions}:
+            raise AssertionError(
+                f"paired bench {mode}: incorrect ABBA sample counts {artifact_counts}"
+            )
+
+        for pair in range(1, repetitions + 1):
+            baseline_run = measured_runs["baseline"][pair - 1]
+            candidate_run = measured_runs["candidate"][pair - 1]
+            reason = contaminated.get((mode, pair), "")
+            elapsed_improvement = (
+                100.0 * (baseline_run.time_ms - candidate_run.time_ms)
+                / max(baseline_run.time_ms, 1)
+            )
+            nps_improvement = (
+                100.0 * (candidate_run.nps - baseline_run.nps)
+                / max(baseline_run.nps, 1)
+            )
+            deltas.append(
+                PairedBenchDelta(
+                    mode=mode,
+                    pair=pair,
+                    baseline_time_ms=baseline_run.time_ms,
+                    candidate_time_ms=candidate_run.time_ms,
+                    candidate_minus_baseline_ms=(
+                        candidate_run.time_ms - baseline_run.time_ms
+                    ),
+                    elapsed_improvement_percent=round(elapsed_improvement, 6),
+                    baseline_nps=baseline_run.nps,
+                    candidate_nps=candidate_run.nps,
+                    nps_improvement_percent=round(nps_improvement, 6),
+                    candidate_won=candidate_run.time_ms < baseline_run.time_ms,
+                    contaminated=bool(reason),
+                    contamination_reason=reason,
+                )
+            )
+
+        mode_deltas = [delta for delta in deltas if delta.mode == mode]
+        valid_deltas = [delta for delta in mode_deltas if not delta.contaminated]
+        baseline_times = [delta.baseline_time_ms for delta in valid_deltas]
+        candidate_times = [delta.candidate_time_ms for delta in valid_deltas]
+        baseline_nps = [delta.baseline_nps for delta in valid_deltas]
+        candidate_nps = [delta.candidate_nps for delta in valid_deltas]
+        baseline_median, baseline_mad, baseline_noise = median_mad(baseline_times)
+        candidate_median, candidate_mad, candidate_noise = median_mad(candidate_times)
+        summaries[mode] = {
+            "execution_order": order,
+            "measured_samples_per_artifact": repetitions,
+            "valid_pairs": len(valid_deltas),
+            "contaminated_pairs": [
+                {"pair": delta.pair, "reason": delta.contamination_reason}
+                for delta in mode_deltas
+                if delta.contaminated
+            ],
+            "baseline_times_ms": baseline_times,
+            "candidate_times_ms": candidate_times,
+            "baseline_nps": baseline_nps,
+            "candidate_nps": candidate_nps,
+            "baseline_median_time_ms": baseline_median,
+            "baseline_mad_time_ms": baseline_mad,
+            "baseline_three_mad_over_median_percent": baseline_noise,
+            "candidate_median_time_ms": candidate_median,
+            "candidate_mad_time_ms": candidate_mad,
+            "candidate_three_mad_over_median_percent": candidate_noise,
+            "elapsed_median_improvement_percent": (
+                100.0 * (baseline_median - candidate_median)
+                / max(baseline_median, 1.0)
+            ),
+            "baseline_median_nps": float(statistics.median(baseline_nps)),
+            "candidate_median_nps": float(statistics.median(candidate_nps)),
+            "candidate_pair_wins": sum(delta.candidate_won for delta in valid_deltas),
+            "nodes": reference_signature[5],
+            "checksum": reference_signature[6],
+            "python_recomputed_checksum": reference_signature[7],
+            "deterministic_signature_equal": True,
+        }
+
+    write_tsv(output_dir / "paired_bench_samples.tsv", samples)
+    write_tsv(output_dir / "paired_bench_positions.tsv", positions_out)
+    write_tsv(output_dir / "paired_bench_deltas.tsv", deltas)
+    return samples, positions_out, deltas, summaries
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline", type=Path, required=True)
@@ -480,10 +745,44 @@ def main() -> None:
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--expected-baseline-sha256")
     parser.add_argument("--expected-candidate-sha256")
+    parser.add_argument(
+        "--paired-performance",
+        action="store_true",
+        help="run pinned baseline/candidate warm-ups and measured ABBA pairs",
+    )
+    parser.add_argument(
+        "--contaminated-pair",
+        action="append",
+        default=[],
+        metavar="MODE:PAIR:RECORDED_REASON",
+        help="retain but exclude an externally contaminated whole pair",
+    )
     args = parser.parse_args()
 
     if args.repetitions < 5:
         raise ValueError("--repetitions must be at least 5")
+    if args.paired_performance and args.repetitions != 10:
+        raise ValueError("paired performance mode requires exactly 10 repetitions")
+    if args.paired_performance:
+        missing_pins = [
+            option
+            for option, value in (
+                ("--expected-baseline-sha256", args.expected_baseline_sha256),
+                ("--expected-candidate-sha256", args.expected_candidate_sha256),
+            )
+            if value is None
+        ]
+        if missing_pins:
+            raise ValueError(
+                "paired performance mode requires both artifact SHA-256 pins; "
+                f"missing {', '.join(missing_pins)}"
+            )
+        normalize_expected_sha256(
+            args.expected_baseline_sha256, "expected baseline SHA-256"
+        )
+        normalize_expected_sha256(
+            args.expected_candidate_sha256, "expected candidate SHA-256"
+        )
     baseline_path, candidate_path, baseline_sha256, candidate_sha256 = (
         resolve_distinct_artifacts(
             args.baseline,
@@ -529,35 +828,76 @@ def main() -> None:
                 or candidate_result.nps is None
             ):
                 raise AssertionError(f"{mode}/{label}: candidate omitted search statistics")
+            if args.paired_performance:
+                if (
+                    baseline_result.nodes is None
+                    or baseline_result.time_ms is None
+                    or baseline_result.nps is None
+                ):
+                    raise AssertionError(
+                        f"{mode}/{label}: metric-bearing baseline omitted search statistics"
+                    )
+                if baseline_result.nodes != candidate_result.nodes:
+                    raise AssertionError(
+                        f"{mode}/{label}: fixed-depth nodes changed: "
+                        f"baseline={baseline_result.nodes} candidate={candidate_result.nodes}"
+                    )
             fixed_rows.extend((baseline_result, candidate_result))
     write_tsv(output_dir / "fixed_depth_equivalence.tsv", fixed_rows)
 
-    bench_runs: list[BenchRun] = []
-    bench_positions: list[BenchPosition] = []
-    signatures: dict[str, tuple[object, ...]] = {}
-    for mode in ("nnue", "pesto"):
-        print(f"Running excluded {mode} warm-up...", flush=True)
-        run_bench(candidate_path, mode, 0, args.timeout_seconds)
-        for repetition in range(1, args.repetitions + 1):
-            run, positions = run_bench(
-                candidate_path, mode, repetition, args.timeout_seconds
+    if args.paired_performance:
+        contaminated = parse_contaminated_pairs(
+            args.contaminated_pair, args.repetitions
+        )
+        _samples, _positions, _deltas, performance_summary = run_paired_performance(
+            baseline_path,
+            candidate_path,
+            args.timeout_seconds,
+            args.repetitions,
+            contaminated,
+            output_dir,
+        )
+        signatures = {
+            mode: (
+                None,
+                None,
+                None,
+                None,
+                None,
+                performance_summary[mode]["nodes"],
+                performance_summary[mode]["checksum"],
+                performance_summary[mode]["python_recomputed_checksum"],
             )
-            signature = deterministic_signature(run, positions)
-            if mode in signatures and signature != signatures[mode]:
-                raise AssertionError(
-                    f"bench {mode} repetition {repetition}: deterministic fields changed"
+            for mode in ("nnue", "pesto")
+        }
+    else:
+        performance_summary = None
+        bench_runs: list[BenchRun] = []
+        bench_positions: list[BenchPosition] = []
+        signatures: dict[str, tuple[object, ...]] = {}
+        for mode in ("nnue", "pesto"):
+            print(f"Running excluded {mode} warm-up...", flush=True)
+            run_bench(candidate_path, mode, 0, args.timeout_seconds)
+            for repetition in range(1, args.repetitions + 1):
+                run, positions = run_bench(
+                    candidate_path, mode, repetition, args.timeout_seconds
                 )
-            signatures.setdefault(mode, signature)
-            bench_runs.append(run)
-            bench_positions.extend(positions)
-            print(
-                f"mode={mode} repetition={repetition} nodes={run.nodes} "
-                f"time={run.time_ms} nps={run.nps} checksum={run.checksum}",
-                flush=True,
-            )
+                signature = deterministic_signature(run, positions)
+                if mode in signatures and signature != signatures[mode]:
+                    raise AssertionError(
+                        f"bench {mode} repetition {repetition}: deterministic fields changed"
+                    )
+                signatures.setdefault(mode, signature)
+                bench_runs.append(run)
+                bench_positions.extend(positions)
+                print(
+                    f"mode={mode} repetition={repetition} nodes={run.nodes} "
+                    f"time={run.time_ms} nps={run.nps} checksum={run.checksum}",
+                    flush=True,
+                )
 
-    write_tsv(output_dir / "bench_runs.tsv", bench_runs)
-    write_tsv(output_dir / "bench_positions.tsv", bench_positions)
+        write_tsv(output_dir / "bench_runs.tsv", bench_runs)
+        write_tsv(output_dir / "bench_positions.tsv", bench_positions)
     summary = {
         "baseline": file_metadata(baseline_path, baseline_sha256),
         "candidate": file_metadata(candidate_path, candidate_sha256),
@@ -575,6 +915,7 @@ def main() -> None:
         ),
         "bench_version": 1,
         "bench_repetitions_per_mode": args.repetitions,
+        "paired_performance_mode": args.paired_performance,
         "bench_deterministic": True,
         "python_checksums_match_engine": True,
         "bench": {
@@ -585,6 +926,7 @@ def main() -> None:
             }
             for mode in ("nnue", "pesto")
         },
+        "performance": performance_summary,
     }
     report_path = output_dir / "report.json"
     report_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")

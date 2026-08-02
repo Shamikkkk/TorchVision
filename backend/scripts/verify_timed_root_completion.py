@@ -173,11 +173,43 @@ def parse_search_transcript(
 
 
 def compare_search_transcripts(
-    baseline_lines: list[str], candidate_lines: list[str]
+    baseline_lines: list[str],
+    candidate_lines: list[str],
+    *,
+    metric_bearing_baseline: bool = False,
 ) -> tuple[CompletedInfo, CompletedInfo]:
-    """Compare complete transcripts after removing only candidate metrics."""
-    baseline_info = parse_search_transcript(baseline_lines, require_metrics=False)
+    """Compare strict transcripts after normalizing only permitted metrics."""
+    baseline_info = parse_search_transcript(
+        baseline_lines, require_metrics=metric_bearing_baseline
+    )
     candidate_info = parse_search_transcript(candidate_lines, require_metrics=True)
+
+    if metric_bearing_baseline:
+        if baseline_info.nodes != candidate_info.nodes:
+            raise AssertionError(
+                "fixed-depth node count changed: "
+                f"baseline={baseline_info.nodes} candidate={candidate_info.nodes}"
+            )
+        normalized_baseline = list(baseline_lines)
+        normalized_candidate = list(candidate_lines)
+        normalized_baseline[0] = (
+            f"info depth {baseline_info.depth} score cp {baseline_info.score} "
+            f"nodes {baseline_info.nodes} time <normalized> nps <normalized>"
+        )
+        normalized_candidate[0] = (
+            f"info depth {candidate_info.depth} score cp {candidate_info.score} "
+            f"nodes {candidate_info.nodes} time <normalized> nps <normalized>"
+        )
+        if normalized_baseline != normalized_candidate:
+            raise AssertionError(
+                "search transcript changed outside permitted time/nps fields\n"
+                f"baseline: {baseline_lines!r}\n"
+                f"candidate: {candidate_lines!r}\n"
+                f"normalized baseline: {normalized_baseline!r}\n"
+                f"normalized candidate: {normalized_candidate!r}"
+            )
+        return baseline_info, candidate_info
+
     normalized_candidate = list(candidate_lines)
     normalized_candidate[0] = (
         f"info depth {candidate_info.depth} score cp {candidate_info.score}"
@@ -454,6 +486,8 @@ def verify_semantic_transcripts(
     baseline: Path,
     candidate: Path,
     timeout_seconds: float,
+    *,
+    metric_bearing_baseline: bool = False,
 ) -> list[SearchResult]:
     rows: list[SearchResult] = []
     for mode, no_nnue in (("NNUE", False), ("PeSTO", True)):
@@ -476,13 +510,16 @@ def verify_semantic_transcripts(
                 no_nnue,
                 timeout_seconds,
             )
-            assert_search_ok(baseline_result, require_metrics=False)
+            assert_search_ok(
+                baseline_result, require_metrics=metric_bearing_baseline
+            )
             assert_search_ok(candidate_result, require_metrics=True)
             rows.extend((baseline_result, candidate_result))
             try:
                 compare_search_transcripts(
                     deserialize_lines(baseline_result.search_lines),
                     deserialize_lines(candidate_result.search_lines),
+                    metric_bearing_baseline=metric_bearing_baseline,
                 )
             except AssertionError as error:
                 raise AssertionError(
@@ -511,6 +548,14 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--repetitions", type=int, required=True)
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
+    parser.add_argument(
+        "--metric-bearing-baseline",
+        action="store_true",
+        help=(
+            "require Ticket #19 metrics from both fixed-depth artifacts and "
+            "normalize only time/nps while requiring identical nodes"
+        ),
+    )
     args = parser.parse_args()
 
     if args.repetitions < 1:
@@ -524,7 +569,10 @@ def main() -> None:
 
     print("Checking fixed-depth NNUE and PeSTO transcripts...", flush=True)
     semantic_rows = verify_semantic_transcripts(
-        args.baseline.resolve(), args.candidate.resolve(), args.timeout_seconds
+        args.baseline.resolve(),
+        args.candidate.resolve(),
+        args.timeout_seconds,
+        metric_bearing_baseline=args.metric_bearing_baseline,
     )
     write_tsv(output_dir / "semantic_transcripts.tsv", semantic_rows)
 
@@ -615,6 +663,8 @@ def main() -> None:
         },
         "semantic_positions_per_mode": len(SUITE),
         "semantic_transcripts_strictly_equivalent_after_metric_normalization": True,
+        "metric_bearing_baseline": args.metric_bearing_baseline,
+        "fixed_depth_nodes_required_equal": args.metric_bearing_baseline,
         "candidate_metric_structure_and_arithmetic_valid": True,
         "incident_fixed_depths": list(range(1, 13)),
         "incident_repetitions": timed_counts,
