@@ -5,21 +5,23 @@ Detailed technical rationale and estimates remain in `STRENGTH_AUDIT.md`.
 Every future engine change remains subject to `AGENTS.md` and the mandatory
 timed-root-completion regression gate.
 
-## Next planning item after Ticket #1 preservation
+## Next planning item after Ticket #1 closure
 
 The sole next planning candidate is Ticket #2: remove repeated move-order
-scoring inside the sort comparator. Planning may begin only after Git confirms
-preservation of the reviewed Ticket #1 implementation and documentation.
-Implementation is not automatically authorized and must not begin from this
-roadmap entry.
+scoring inside the sort comparator. Ticket #1 implementation, independent
+review, Git preservation, merge, controlled deployment, deterministic
+post-deployment validation, and real-world shakedown gates are complete.
+Planning may begin only after this deployment-and-shakedown documentation is
+independently reviewed and preserved. Implementation is not automatically
+authorized and must not begin from this roadmap entry.
 
 Ticket #2 must be a one-variable change. Its plan and any later implementation
 must remain isolated from incremental Zobrist (#16), pruning, LMR, SIMD, NNUE
-changes, or any other optimization. Required proof must preserve exact
-fixed-work decisions, scores, completed depths, node totals, and checksums in
-both NNUE and PeSTO modes; preserve strict PeSTO transcript behavior; pass the
-timed-root incident gate at Threads=1 and Threads=2; and retain the standing
-style safeguards for any subsequent game validation.
+changes, move-generation work, or any other optimization. Required proof must
+preserve exact fixed-work decisions, scores, completed depths, node totals, and
+checksums in both NNUE and PeSTO modes; preserve strict PeSTO transcript
+behavior; pass the timed-root incident gate at Threads=1 and Threads=2; and
+retain the standing style safeguards for any subsequent game validation.
 
 Ticket #16 and every later change remain separate. No strength implementation
 or deployment is authorized.
@@ -76,13 +78,18 @@ outside the current authorization.
   validation. Fixed-work anchors are NNUE 5,065,087 / `a8df66621c8eb452` and
   PeSTO 4,900,866 / `18bd8f3c9614b0db`. Ticket #19 makes no Elo or
   speed-improvement claim.
-- Completed and independently reviewed: Ticket #1 incremental SCReLU-512
-  accumulators. Parent/child piece-bitboard deltas preserve exact evaluation,
-  deterministic fixed-work anchors remain NNUE 5,065,087 /
-  `a8df66621c8eb452` and PeSTO 4,900,866 / `18bd8f3c9614b0db`, and paired NNUE
-  median elapsed time improved 43.463% with 10/10 wins. This is a same-work
-  throughput result, not an Elo claim. Git preservation must be checked from
-  the repository; the isolated candidate was not deployed during validation.
+- Ticket #1 incremental SCReLU-512 accumulators is operationally closed:
+  implementation and final independent review completed; commit
+  `0aee7d72f89027b14071c1ed90e9595bf5deb215` was preserved; pull request #1
+  merged it into `main` as
+  `a3a997cb366ab95ae7b3926f7588fd41472e392e`; the reviewed executable was
+  deployed; exact NNUE and PeSTO anchors passed after deployment; and casual
+  5+0 shakedown game [`cP0rHVcl`](https://lichess.org/cP0rHVcl) completed with
+  25/25 legal plies, `13.Qf6#`, clean engine exit, bridge recovery, and no
+  process leak. Parent/child deltas preserved exact evaluation, and paired NNUE
+  median elapsed time improved 43.463% with 10/10 wins at identical work. This
+  is a throughput and operational-correctness result, not an Elo claim; no
+  chess gauntlet was run.
 - Rejected and closed: G9 sacrifice ordering bonus, DYNAMIC_BONUS, and
   COMP_BONUS as style mechanisms.
 - Permanently closed by its second/final strike: WDL blending for the Phase D

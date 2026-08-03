@@ -65,8 +65,10 @@ host-contamination evidence, not optimization evidence.
 
 ## TICKET #1 COMPLETE — incremental SCReLU-512 accumulators
 
-Ticket #1 is completed, independently reviewed, and accepted as a same-work
-throughput optimization. Parent/child piece-bitboard deltas now maintain both
+Ticket #1 is completed, independently reviewed, preserved as
+`0aee7d72f89027b14071c1ed90e9595bf5deb215`, merged through pull request #1
+into `main` by `a3a997cb366ab95ae7b3926f7588fd41472e392e`, deployed, and
+operationally verified. Parent/child piece-bitboard deltas now maintain both
 fixed accumulator perspectives on private per-thread search stacks. Each
 independent NNUE root performs one full construction; searched children clone
 and update that state, null moves reuse unchanged raw lanes, Lazy SMP helpers
@@ -88,11 +90,24 @@ noise threshold. PeSTO improved 2.609% with no regression. All fixed decisions,
 scores, depths, nodes, and checksums remained exact, and the full timed-root
 gate passed 50/50 at Threads=1 and 50/50 at Threads=2.
 
-This is measured throughput evidence, not Elo evidence. No gauntlet was run,
-the historical estimated Ticket #1 Elo range is not added to current strength,
-and the candidate was not deployed during validation. Ticket #2 — removing
-repeated move scoring inside the sort comparator — is the next separate
-planning candidate. Planning does not authorize implementation.
+The deployed executable retained the deterministic anchors above in both NNUE
+and PeSTO modes. Its live identity is 356,864 bytes, MD5
+`0096EAFE3395EBB14A7AD543694651A0`, SHA-256
+`D9B378DFCD61225311C94FB481E7FC8FB9582D9F3AE358892B812E222E009119`.
+Post-deployment UCI startup and both deterministic benches passed, followed by
+a complete real-world shakedown in casual 5+0 Blitz game
+[`cP0rHVcl`](https://lichess.org/cP0rHVcl): PyroBotTorch played White and won
+`1-0` by `13.Qf6#`; independent parsing found all 25 plies legal and the final
+position checkmated. The engine exited 0, the bridge freed the game process and
+remained online, and no timeout, illegal move, failed submission, crash, missing
+response, or process leak occurred.
+
+This is measured throughput and operational-correctness evidence, not Elo
+evidence. No gauntlet was run, the historical estimated Ticket #1 Elo range is
+not added to current strength, and the shakedown result is not controlled
+benchmark evidence. Ticket #1 is closed. Ticket #2 — removing repeated move
+scoring inside the sort comparator — is the sole next separate planning
+candidate. Planning does not authorize implementation.
 
 ---
 
@@ -145,7 +160,7 @@ planning candidate. Planning does not authorize implementation.
 | SIMD | **ABSENT** | See §2. All NNUE math is scalar loops over 512/1024 lanes. |
 | TT prefetch | **ABSENT** | — |
 | Copy-make | PRESENT (by design) | `movegen.rs:344-345` clones the Board per move. Fine at this size; the allocations (move Vecs) hurt more. |
-| Measured NPS | — | **~106k (NNUE) / ~242k (PeSTO) single-thread.** Strong single-thread engines at similar feature level: 1-3M. We are 10-25× down on raw speed. |
+| Historical measured NPS (pre-Ticket #1) | — | **~106k (NNUE) / ~242k (PeSTO) single-thread.** This July 26 sample motivated Ticket #1; it is not a current baseline. Strong single-thread engines at similar feature level were cited at 1-3M. |
 
 ### D) Eval / NNUE architecture
 
@@ -302,8 +317,10 @@ per Phase D rules — governed separately).
 
 ## 5. HONEST CEILING
 
-Current: T1 ~1988 / T4 ~2000-class on our internal SF-UCI_Elo yardstick, ~106k nps,
-~394k-param net trained on 42.8M positions.
+Historical pre-Ticket #1 ceiling snapshot: T1 ~1988 / T4 ~2000-class on our
+internal SF-UCI_Elo yardstick, ~106k nps, ~394k-param net trained on 42.8M
+positions. It is retained as the basis of the projections below, not as a
+current throughput baseline.
 
 **(a) Search + speed on the current net:** Tier 1 (+250-400) and Tier 2 (+100-180)
 overlap — speed's plies and pruning's plies buy some of the same depth. Discounted
@@ -330,5 +347,5 @@ constraint, which is exactly what the gauntlet + style floor already measure.
 measurement infrastructure and Ticket #1 incremental SCReLU-512 accumulators
 were completed and independently verified on August 2, 2026. Ticket #1 produced
 a 43.463% median NNUE elapsed-time improvement at identical fixed work, not an
-Elo result. Its Git preservation must be checked from the repository, and its
-deployment remains a separate explicit action.*
+Elo result. It was subsequently preserved, merged, deployed, and operationally
+verified on August 3, 2026; no gauntlet or playing-strength claim was added.*

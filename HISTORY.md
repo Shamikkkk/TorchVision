@@ -3304,3 +3304,79 @@ and both live NNUE files remained
 Ticket #1 is a verified same-work NNUE throughput improvement, not an Elo
 result: no chess gauntlet was run, higher NPS alone does not prove playing
 strength, and deployment remains a separate decision.
+
+## Ticket #1 deployed and operationally closed (August 3, 2026)
+
+The reviewed Ticket #1 implementation was preserved as commit
+`0aee7d72f89027b14071c1ed90e9595bf5deb215`, titled
+`feat(engine): add incremental SCReLU-512 accumulators`, and merged through
+pull request #1 into `main` by merge commit
+`a3a997cb366ab95ae7b3926f7588fd41472e392e`. The complete thirteen-file
+implementation and documentation set had received a final independent verdict
+of **VERIFIED SUCCESS** with no findings before preservation.
+
+The reviewed 356,864-byte executable was then deployed to
+`engine/target/release/pyro.exe`. Its deployed identity is MD5
+`0096EAFE3395EBB14A7AD543694651A0`, SHA-256
+`D9B378DFCD61225311C94FB481E7FC8FB9582D9F3AE358892B812E222E009119`.
+The preceding live executable remains recoverable from both:
+
+- `C:\torch_data\pyro_deploy_backups\pyro_before_ticket1_20260803_013913.exe`;
+- `engine/target/release/pyro.before_ticket1.20260803_014815.replace-backup.exe`.
+
+Both rollback copies retain SHA-256
+`6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`.
+Neither live network changed: `engine/pyro.nnue` and
+`engine/target/release/pyro.nnue` both remained SHA-256
+`A06CFEBD7C22D0B45F08BA94A276FD2A7CF8B3CD76C54DD308B2EEAA1A579591`.
+Rollback was not required, and deployment did not require a lichess-bot bridge
+restart.
+
+Post-deployment validation against the actual live executable passed UCI
+startup with exit 0, `uciok`, `readyok`, and `NNUE loaded`, followed by zero
+residual engine processes. The deterministic depth-8, Threads=1 anchors were
+unchanged:
+
+- NNUE: 10 positions, 5,065,087 nodes, checksum `a8df66621c8eb452`;
+- PeSTO: 10 positions, 4,900,866 nodes, checksum `18bd8f3c9614b0db`.
+
+That deployment-validation run observed 10,674 ms / 474,525 NPS for NNUE and
+7,554 ms / 648,777 NPS for PeSTO. Those elapsed-time and NPS values are
+run-specific observations, not replacement performance baselines. The PeSTO
+probe also confirmed the protected fallback message
+`NNUE disabled (--no-nnue), using PST + Tal`.
+
+The subsequent real-world shakedown passed in casual 5+0 Blitz game
+[`cP0rHVcl`](https://lichess.org/cP0rHVcl). PyroBotTorch played White against
+TorchVision29 and won `1-0` by `13.Qf6#`. The A00 Van Geet Opening: Napoleon
+Attack game lasted 25 plies—12 complete move pairs plus White's thirteenth
+move—and ended at
+`r7/pppq1p1p/3bkQ2/3Np3/4P3/8/PPP2PPP/R1B1K2R b KQ - 4 13`.
+Independent python-chess parsing found all 25 plies legal, no PGN errors, and a
+checkmated final position with White as the winner.
+
+Local lifecycle evidence showed normal challenge acceptance and concurrency
+one; launch of the configured live path; UCI initialization with Threads=2;
+five book moves and eight searched moves; HTTP 200 for all thirteen move
+submissions; exactly one `info` and one `bestmove` for every searched `go`; and
+search times from 7,610 to 9,890 ms. White retained 222.640 seconds after mate.
+The bridge sent `isready`, received `readyok`, sent `quit`, observed engine PID
+30224 exit 0, recorded `Game over` and `Process Freed. Count: 0`, and returned
+online and idle with no orphaned `pyro.exe`. A 377 ms asyncio scheduling warning
+during startup was followed by normal initialization and no operational fault.
+
+The bridge log identifies the configured path but does not contain a
+process-level launch hash or preserve the stderr-only literal `NNUE loaded`
+message. Attribution to Ticket #1 is therefore a strong evidence-based
+conclusion from the pre-game deployed identity, the logged executable path, and
+the unchanged post-game size and hashes—not a directly captured per-process
+hash.
+
+Ticket #1 is now implemented, independently reviewed, preserved, merged,
+deployed, and operationally verified. The shakedown covers startup, NNUE use,
+book integration, timed search, legal move delivery, checkmate recognition,
+orderly shutdown, bridge recovery, and absence of process leaks. The measured
+43.463% improvement remains an identical-work throughput result. One live game
+does not establish Elo, the shakedown is not controlled benchmark evidence, and
+no chess gauntlet has established a playing-strength increase. Ticket #1 is
+closed.
