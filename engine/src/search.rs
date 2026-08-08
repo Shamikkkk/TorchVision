@@ -1183,11 +1183,90 @@ fn score_move(board: &Board, mv: &Move, killers: &Killers, ply: usize, tt_move: 
     history[board.side_to_move as usize][mv.from_sq as usize][mv.to_sq as usize]
 }
 
+const NO_SCORE_ROW: u8 = u8::MAX;
+
+/// Per-sort move-score cache with one compact score row per active origin.
+struct MoveScoreCache {
+    row_for_from: [u8; 64],
+    rows: Vec<[i32; 64]>,
+}
+
+impl MoveScoreCache {
+    fn new<F>(moves: &[Move], mut score: F) -> Self
+    where
+        F: FnMut(&Move) -> i32,
+    {
+        let mut active_origins = [false; 64];
+        for mv in moves {
+            debug_assert!(mv.from_sq < 64 && mv.to_sq < 64);
+            active_origins[mv.from_sq as usize] = true;
+        }
+
+        let mut row_for_from = [NO_SCORE_ROW; 64];
+        let mut rows = Vec::with_capacity(active_origins.iter().filter(|active| **active).count());
+        for (from, active) in active_origins.into_iter().enumerate() {
+            if active {
+                row_for_from[from] = rows.len() as u8;
+                rows.push([0; 64]);
+            }
+        }
+
+        #[cfg(debug_assertions)]
+        let mut populated_destinations = vec![0u64; rows.len()];
+
+        for mv in moves {
+            let move_score = score(mv);
+            let row = row_for_from[mv.from_sq as usize] as usize;
+            let to = mv.to_sq as usize;
+
+            #[cfg(debug_assertions)]
+            {
+                let destination = 1u64 << to;
+                if populated_destinations[row] & destination != 0 {
+                    debug_assert_eq!(
+                        rows[row][to], move_score,
+                        "moves sharing a (from, to) cache key must share an ordering score"
+                    );
+                }
+                populated_destinations[row] |= destination;
+            }
+
+            rows[row][to] = move_score;
+        }
+
+        Self { row_for_from, rows }
+    }
+
+    #[inline]
+    fn score(&self, mv: &Move) -> i32 {
+        let row = self.row_for_from[mv.from_sq as usize];
+        debug_assert_ne!(row, NO_SCORE_ROW);
+        self.rows[row as usize][mv.to_sq as usize]
+    }
+}
+
+#[allow(clippy::unnecessary_sort_by)] // Ticket #2 preserves the exact comparator relation.
+fn sort_moves_by_cached_score<F>(moves: &mut [Move], score: F)
+where
+    F: FnMut(&Move) -> i32,
+{
+    let cache = MoveScoreCache::new(moves, score);
+    moves.sort_unstable_by(|a, b| cache.score(b).cmp(&cache.score(a)));
+}
+
 /// Sort moves in-place: TT move → captures (MVV-LVA) → killers → countermove → history → quiet.
 fn order_moves(board: &Board, moves: &mut [Move], killers: &Killers, ply: usize, tt_move: Option<(u8, u8)>, history: &History, counter_moves: &CounterMoves, prev_move: Option<(u8, u8)>) {
-    moves.sort_unstable_by(|a, b| {
-        score_move(board, b, killers, ply, tt_move, history, counter_moves, prev_move)
-            .cmp(&score_move(board, a, killers, ply, tt_move, history, counter_moves, prev_move))
+    sort_moves_by_cached_score(moves, |mv| {
+        score_move(
+            board,
+            mv,
+            killers,
+            ply,
+            tt_move,
+            history,
+            counter_moves,
+            prev_move,
+        )
     });
 }
 
@@ -1252,24 +1331,13 @@ fn quiescence<E: SearchEvaluation>(board: &Board, mut alpha: i32, beta: i32, ply
         .into_iter()
         .filter(|m| m.flags & movegen::FLAG_CAPTURE != 0 && see(board, m) >= 0)
         .collect();
-    captures.sort_unstable_by(|a, b| {
-        let sa = {
-            let victim = if a.flags & movegen::FLAG_EN_PASSANT != 0 {
-                MVV_LVA_VAL[0]
-            } else {
-                piece_val_on(board, a.to_sq, !board.side_to_move)
-            };
-            victim - piece_val_on(board, a.from_sq, board.side_to_move) / 10
+    sort_moves_by_cached_score(&mut captures, |mv| {
+        let victim = if mv.flags & movegen::FLAG_EN_PASSANT != 0 {
+            MVV_LVA_VAL[0]
+        } else {
+            piece_val_on(board, mv.to_sq, !board.side_to_move)
         };
-        let sb = {
-            let victim = if b.flags & movegen::FLAG_EN_PASSANT != 0 {
-                MVV_LVA_VAL[0]
-            } else {
-                piece_val_on(board, b.to_sq, !board.side_to_move)
-            };
-            victim - piece_val_on(board, b.from_sq, board.side_to_move) / 10
-        };
-        sb.cmp(&sa)
+        victim - piece_val_on(board, mv.from_sq, board.side_to_move) / 10
     });
 
     for mv in &captures {
@@ -2214,6 +2282,449 @@ pub fn parse_uci_move(board: &Board, uci: &str) -> Option<Move> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    type MoveSignature = (u8, u8, Option<u8>, u8);
+
+    fn move_signature(mv: &Move) -> MoveSignature {
+        (mv.from_sq, mv.to_sq, mv.promotion, mv.flags)
+    }
+
+    fn move_signatures(moves: &[Move]) -> Vec<MoveSignature> {
+        moves.iter().map(move_signature).collect()
+    }
+
+    fn synthetic_moves(len: usize) -> Vec<Move> {
+        (0..len)
+            .map(|index| Move {
+                from_sq: (index / 8) as u8,
+                to_sq: (index % 8) as u8,
+                promotion: None,
+                flags: 0,
+            })
+            .collect()
+    }
+
+    fn synthetic_score(mv: &Move) -> i32 {
+        ((mv.from_sq as i32 * 11) + (mv.to_sq as i32 * 7)) % 5
+    }
+
+    #[allow(clippy::unnecessary_sort_by)] // This is the comparator being proved equivalent.
+    fn legacy_sort<F>(moves: &mut [Move], score: F)
+    where
+        F: Fn(&Move) -> i32,
+    {
+        moves.sort_unstable_by(|a, b| score(b).cmp(&score(a)));
+    }
+
+    struct OrderingContext<'a> {
+        board: &'a Board,
+        killers: &'a Killers,
+        ply: usize,
+        tt_move: Option<(u8, u8)>,
+        history: &'a History,
+        counter_moves: &'a CounterMoves,
+        prev_move: Option<(u8, u8)>,
+    }
+
+    impl OrderingContext<'_> {
+        fn score(&self, mv: &Move) -> i32 {
+            score_move(
+                self.board,
+                mv,
+                self.killers,
+                self.ply,
+                self.tt_move,
+                self.history,
+                self.counter_moves,
+                self.prev_move,
+            )
+        }
+    }
+
+    fn assert_general_order_equivalence(context: &OrderingContext<'_>, moves: &[Move]) {
+        let direct_scores: Vec<i32> = moves.iter().map(|mv| context.score(mv)).collect();
+        let scorer_calls = Cell::new(0usize);
+        let cache = MoveScoreCache::new(moves, |mv| {
+            scorer_calls.set(scorer_calls.get() + 1);
+            context.score(mv)
+        });
+
+        assert_eq!(scorer_calls.get(), moves.len());
+        for (index, mv) in moves.iter().enumerate() {
+            assert_eq!(cache.score(mv), direct_scores[index]);
+        }
+        for (a_index, a) in moves.iter().enumerate() {
+            for (b_index, b) in moves.iter().enumerate() {
+                assert_eq!(
+                    direct_scores[b_index].cmp(&direct_scores[a_index]),
+                    cache.score(b).cmp(&cache.score(a)),
+                    "comparator mismatch for {} and {}",
+                    a.to_uci(),
+                    b.to_uci()
+                );
+            }
+        }
+
+        let mut legacy = moves.to_vec();
+        legacy_sort(&mut legacy, |mv| context.score(mv));
+        let mut cached = moves.to_vec();
+        order_moves(
+            context.board,
+            &mut cached,
+            context.killers,
+            context.ply,
+            context.tt_move,
+            context.history,
+            context.counter_moves,
+            context.prev_move,
+        );
+        assert_eq!(move_signatures(&cached), move_signatures(&legacy));
+    }
+
+    fn legacy_quiescence_score(board: &Board, mv: &Move) -> i32 {
+        let victim = if mv.flags & movegen::FLAG_EN_PASSANT != 0 {
+            MVV_LVA_VAL[0]
+        } else {
+            piece_val_on(board, mv.to_sq, !board.side_to_move)
+        };
+        victim - piece_val_on(board, mv.from_sq, board.side_to_move) / 10
+    }
+
+    fn legacy_quiescence_moves(board: &Board) -> Vec<Move> {
+        let mut captures: Vec<Move> = generate_moves(board)
+            .into_iter()
+            .filter(|mv| mv.flags & movegen::FLAG_CAPTURE != 0 && see(board, mv) >= 0)
+            .collect();
+        legacy_sort(&mut captures, |mv| legacy_quiescence_score(board, mv));
+        captures
+    }
+
+    fn cached_quiescence_moves(board: &Board) -> Vec<Move> {
+        let mut captures: Vec<Move> = generate_moves(board)
+            .into_iter()
+            .filter(|mv| mv.flags & movegen::FLAG_CAPTURE != 0 && see(board, mv) >= 0)
+            .collect();
+        sort_moves_by_cached_score(&mut captures, |mv| legacy_quiescence_score(board, mv));
+        captures
+    }
+
+    fn empty_ordering_state() -> (Killers, History, CounterMoves) {
+        (
+            [[None; 2]; MAX_DEPTH],
+            [[[0i32; 64]; 64]; 2],
+            [[None; 64]; 2],
+        )
+    }
+
+    #[test]
+    fn move_order_cache_scores_once_and_matches_every_pair() {
+        let moves = synthetic_moves(40);
+        let direct_scores: Vec<i32> = moves.iter().map(synthetic_score).collect();
+        let scorer_calls = Cell::new(0usize);
+        let cache = MoveScoreCache::new(&moves, |mv| {
+            scorer_calls.set(scorer_calls.get() + 1);
+            synthetic_score(mv)
+        });
+
+        assert_eq!(scorer_calls.get(), moves.len());
+        assert_eq!(cache.rows.len(), 5, "one row is required per active origin");
+        for (index, mv) in moves.iter().enumerate() {
+            assert_eq!(cache.score(mv), direct_scores[index]);
+        }
+        for (a_index, a) in moves.iter().enumerate() {
+            for (b_index, b) in moves.iter().enumerate() {
+                assert_eq!(
+                    direct_scores[b_index].cmp(&direct_scores[a_index]),
+                    cache.score(b).cmp(&cache.score(a))
+                );
+            }
+        }
+
+        let mut legacy = moves.clone();
+        legacy_sort(&mut legacy, synthetic_score);
+        let mut cached = moves;
+        sort_moves_by_cached_score(&mut cached, synthetic_score);
+        assert_eq!(move_signatures(&cached), move_signatures(&legacy));
+    }
+
+    #[test]
+    fn move_order_cache_equal_score_lists_match_across_sort_boundaries() {
+        for len in [
+            0usize, 1, 2, 3, 7, 8, 12, 13, 16, 17, 20, 21, 31, 32, 33, 40, 63, 64,
+        ] {
+            let moves = synthetic_moves(len);
+            let mut legacy = moves.clone();
+            legacy_sort(&mut legacy, |_| 0);
+
+            let scorer_calls = Cell::new(0usize);
+            let mut cached = moves;
+            sort_moves_by_cached_score(&mut cached, |_| {
+                scorer_calls.set(scorer_calls.get() + 1);
+                0
+            });
+
+            assert_eq!(
+                scorer_calls.get(),
+                len,
+                "wrong scorer count at length {len}",
+            );
+            assert_eq!(
+                move_signatures(&cached),
+                move_signatures(&legacy),
+                "equal-score order changed at length {len}"
+            );
+        }
+    }
+
+    #[test]
+    fn move_order_cache_promotion_collisions_have_equal_scores() {
+        let (killers, history, counter_moves) = empty_ordering_state();
+        let quiet_board = Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1").unwrap();
+        let quiet_promotions: Vec<Move> = generate_moves(&quiet_board)
+            .into_iter()
+            .filter(|mv| mv.from_sq == 48 && mv.to_sq == 56)
+            .collect();
+        assert_eq!(quiet_promotions.len(), 4);
+        let quiet_context = OrderingContext {
+            board: &quiet_board,
+            killers: &killers,
+            ply: 0,
+            tt_move: None,
+            history: &history,
+            counter_moves: &counter_moves,
+            prev_move: None,
+        };
+        assert_general_order_equivalence(&quiet_context, &quiet_promotions);
+        let quiet_scores: Vec<i32> = quiet_promotions
+            .iter()
+            .map(|mv| quiet_context.score(mv))
+            .collect();
+        assert!(quiet_scores.windows(2).all(|pair| pair[0] == pair[1]));
+
+        let capture_board = Board::from_fen("4k3/8/8/8/8/8/1p6/R3K3 b - - 0 1").unwrap();
+        let capture_promotions: Vec<Move> = generate_moves(&capture_board)
+            .into_iter()
+            .filter(|mv| mv.from_sq == 9 && mv.to_sq == 0)
+            .collect();
+        assert_eq!(capture_promotions.len(), 4);
+        assert!(capture_promotions
+            .iter()
+            .all(|mv| mv.flags & movegen::FLAG_CAPTURE != 0));
+        let capture_context = OrderingContext {
+            board: &capture_board,
+            killers: &killers,
+            ply: 0,
+            tt_move: None,
+            history: &history,
+            counter_moves: &counter_moves,
+            prev_move: None,
+        };
+        assert_general_order_equivalence(&capture_context, &capture_promotions);
+        let capture_scores: Vec<i32> = capture_promotions
+            .iter()
+            .map(|mv| capture_context.score(mv))
+            .collect();
+        assert!(capture_scores.windows(2).all(|pair| pair[0] == pair[1]));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "moves sharing a (from, to) cache key")]
+    fn move_order_cache_rejects_unequal_duplicate_endpoint_scores() {
+        let moves = vec![
+            Move {
+                from_sq: 48,
+                to_sq: 56,
+                promotion: Some(movegen::KNIGHT),
+                flags: 0,
+            },
+            Move {
+                from_sq: 48,
+                to_sq: 56,
+                promotion: Some(movegen::QUEEN),
+                flags: 0,
+            },
+        ];
+        let _ = MoveScoreCache::new(&moves, |mv| mv.promotion.unwrap() as i32);
+    }
+
+    #[test]
+    fn move_order_cache_preserves_tt_killer_countermove_and_history() {
+        let board = Board::startpos();
+        let mut moves = generate_moves(&board);
+        let mut killers: Killers = [[None; 2]; MAX_DEPTH];
+        let mut history: History = [[[0i32; 64]; 64]; 2];
+        let mut counter_moves: CounterMoves = [[None; 64]; 2];
+        let tt_move = parse_uci_move(&board, "e2e4").unwrap();
+        let killer = parse_uci_move(&board, "g1f3").unwrap();
+        let counter = parse_uci_move(&board, "b1c3").unwrap();
+        let history_high = parse_uci_move(&board, "d2d4").unwrap();
+        let history_low = parse_uci_move(&board, "e2e3").unwrap();
+        let ply = 3;
+        let previous_to = 20usize;
+        let side = board.side_to_move as usize;
+
+        killers[ply][0] = Some((killer.from_sq, killer.to_sq));
+        counter_moves[side][previous_to] = Some((counter.from_sq, counter.to_sq));
+        history[side][history_high.from_sq as usize][history_high.to_sq as usize] = 777;
+        history[side][history_low.from_sq as usize][history_low.to_sq as usize] = 222;
+        let context = OrderingContext {
+            board: &board,
+            killers: &killers,
+            ply,
+            tt_move: Some((tt_move.from_sq, tt_move.to_sq)),
+            history: &history,
+            counter_moves: &counter_moves,
+            prev_move: Some((0, previous_to as u8)),
+        };
+
+        assert_eq!(context.score(&tt_move), 100_000);
+        assert_eq!(context.score(&killer), 5_000);
+        assert_eq!(context.score(&counter), 4_500);
+        assert_eq!(context.score(&history_high), 777);
+        assert_eq!(context.score(&history_low), 222);
+        assert_general_order_equivalence(&context, &moves);
+
+        order_moves(
+            &board,
+            &mut moves,
+            &killers,
+            ply,
+            context.tt_move,
+            &history,
+            &counter_moves,
+            context.prev_move,
+        );
+        let ordered = move_signatures(&moves);
+        for pair in [
+            (&tt_move, &killer),
+            (&killer, &counter),
+            (&counter, &history_high),
+            (&history_high, &history_low),
+        ] {
+            let earlier = ordered
+                .iter()
+                .position(|sig| *sig == move_signature(pair.0))
+                .unwrap();
+            let later = ordered
+                .iter()
+                .position(|sig| *sig == move_signature(pair.1))
+                .unwrap();
+            assert!(earlier < later);
+        }
+    }
+
+    #[test]
+    fn move_order_cache_preserves_captures_en_passant_castling_and_see_filtering() {
+        let (killers, history, counter_moves) = empty_ordering_state();
+        let positive_board = Board::from_fen("4k3/8/8/3q4/2P5/8/8/4K3 w - - 0 1").unwrap();
+        let positive_capture = parse_uci_move(&positive_board, "c4d5").unwrap();
+        assert!(see(&positive_board, &positive_capture) >= 0);
+
+        let negative_board = Board::from_fen("4k3/8/5n2/3p4/8/8/8/3QK3 w - - 0 1").unwrap();
+        let negative_capture = parse_uci_move(&negative_board, "d1d5").unwrap();
+        assert!(see(&negative_board, &negative_capture) < 0);
+
+        for board in [&positive_board, &negative_board] {
+            let moves = generate_moves(board);
+            let context = OrderingContext {
+                board,
+                killers: &killers,
+                ply: 0,
+                tt_move: None,
+                history: &history,
+                counter_moves: &counter_moves,
+                prev_move: None,
+            };
+            assert_general_order_equivalence(&context, &moves);
+            assert_eq!(
+                move_signatures(&cached_quiescence_moves(board)),
+                move_signatures(&legacy_quiescence_moves(board))
+            );
+        }
+        assert!(legacy_quiescence_moves(&positive_board)
+            .iter()
+            .any(|mv| move_signature(mv) == move_signature(&positive_capture)));
+        assert!(!legacy_quiescence_moves(&negative_board)
+            .iter()
+            .any(|mv| move_signature(mv) == move_signature(&negative_capture)));
+
+        let ep_board = Board::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1").unwrap();
+        let ep_move = parse_uci_move(&ep_board, "e5d6").unwrap();
+        assert_ne!(ep_move.flags & movegen::FLAG_EN_PASSANT, 0);
+        assert!(legacy_quiescence_moves(&ep_board)
+            .iter()
+            .any(|mv| move_signature(mv) == move_signature(&ep_move)));
+        assert_eq!(
+            move_signatures(&cached_quiescence_moves(&ep_board)),
+            move_signatures(&legacy_quiescence_moves(&ep_board))
+        );
+
+        let castle_board = Board::from_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1").unwrap();
+        let castle_moves = generate_moves(&castle_board);
+        assert!(castle_moves
+            .iter()
+            .any(|mv| mv.flags & movegen::FLAG_CASTLING != 0));
+        let castle_context = OrderingContext {
+            board: &castle_board,
+            killers: &killers,
+            ply: 0,
+            tt_move: None,
+            history: &history,
+            counter_moves: &counter_moves,
+            prev_move: None,
+        };
+        assert_general_order_equivalence(&castle_context, &castle_moves);
+    }
+
+    #[test]
+    fn move_order_cache_quiescence_matches_legacy_exactly() {
+        let fens = [
+            "4k3/8/8/3q4/2P5/8/8/4K3 w - - 0 1",
+            "4k3/8/5n2/3p4/8/8/8/3QK3 w - - 0 1",
+            "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1",
+            "4k3/8/8/8/8/8/1p6/R3K3 b - - 0 1",
+        ];
+        for fen in fens {
+            let board = Board::from_fen(fen).unwrap();
+            assert_eq!(
+                move_signatures(&cached_quiescence_moves(&board)),
+                move_signatures(&legacy_quiescence_moves(&board)),
+                "quiescence order changed for {fen}"
+            );
+        }
+    }
+
+    #[test]
+    fn move_order_cache_instances_are_independent_and_thread_local() {
+        let moves = synthetic_moves(40);
+        let first = MoveScoreCache::new(&moves, synthetic_score);
+        let second = MoveScoreCache::new(&moves, |mv| -synthetic_score(mv));
+        for mv in &moves {
+            assert_eq!(first.score(mv), synthetic_score(mv));
+            assert_eq!(second.score(mv), -synthetic_score(mv));
+        }
+
+        let handles: Vec<_> = (0..4)
+            .map(|thread_id| {
+                let thread_moves = moves.clone();
+                std::thread::spawn(move || {
+                    let offset = thread_id * 17;
+                    let score = |mv: &Move| synthetic_score(mv) + offset;
+                    let mut legacy = thread_moves.clone();
+                    legacy_sort(&mut legacy, score);
+                    let mut cached = thread_moves;
+                    sort_moves_by_cached_score(&mut cached, score);
+                    (move_signatures(&legacy), move_signatures(&cached))
+                })
+            })
+            .collect();
+        for handle in handles {
+            let (legacy, cached) = handle.join().unwrap();
+            assert_eq!(cached, legacy);
+        }
+    }
 
     #[test]
     fn startpos_eval_is_zero() {
