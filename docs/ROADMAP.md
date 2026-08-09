@@ -5,34 +5,26 @@ Detailed technical rationale and estimates remain in `STRENGTH_AUDIT.md`.
 Every future engine change remains subject to `AGENTS.md` and the mandatory
 timed-root-completion regression gate.
 
-## Next planning item after Ticket #1 closure
+## Planning state after Ticket #2 closure
 
-The sole next planning candidate is Ticket #2: remove repeated move-order
-scoring inside the sort comparator. Ticket #1 implementation, independent
-review, Git preservation, merge, controlled deployment, deterministic
-post-deployment validation, and real-world shakedown gates are complete.
-Planning may begin only after this deployment-and-shakedown documentation is
-independently reviewed and preserved. Implementation is not automatically
-authorized and must not begin from this roadmap entry.
+Ticket #2—cache move-order scores—is implemented, independently reviewed,
+throughput-accepted, merged, deployed, operationally verified, and closed. Its
+exact-work NNUE median elapsed-time improvement was 16.5693516238715% with
+10/10 pair wins; PeSTO passed its protection gate; and deterministic decisions,
+depths, nodes, and checksums remained exact. This is a throughput result, not an
+Elo or measured playing-strength result.
 
-Ticket #2 must be a one-variable change. Its plan and any later implementation
-must remain isolated from incremental Zobrist (#16), pruning, LMR, SIMD, NNUE
-changes, move-generation work, or any other optimization. Required proof must
-preserve exact fixed-work decisions, scores, completed depths, node totals, and
-checksums in both NNUE and PeSTO modes; preserve strict PeSTO transcript
-behavior; pass the timed-root incident gate at Threads=1 and Threads=2; and
-retain the standing style safeguards for any subsequent game validation.
-
-Ticket #16 and every later change remain separate. No strength implementation
-or deployment is authorized.
+No next engine ticket is unambiguously selected or authorized by the closure.
+Any further engine change requires a separate planning decision and explicit
+implementation authorization. Existing roadmap order remains advisory; Ticket
+#16 and every later candidate stay isolated and unauthorized.
 
 ## Candidate future work
 
 These are documented candidates, not approved tasks:
 
-1. Incremental Zobrist (#16), only after Ticket #2 is separately planned,
-   implemented, reviewed, and preserved; it requires its own controlled
-   equivalence gates.
+1. Incremental Zobrist (#16), if separately selected and authorized; it requires
+   its own controlled equivalence gates.
 2. Search improvements in the documented dependency order: log LMR (#3), RFP
    (#4), dynamic-R NMP (#6), QS TT/delta/captures-only work (#5), gradual
    aspiration (#7), TT/Hash improvements (#11), continuation history (#8), SEE
@@ -90,6 +82,19 @@ outside the current authorization.
   median elapsed time improved 43.463% with 10/10 wins at identical work. This
   is a throughput and operational-correctness result, not an Elo claim; no
   chess gauntlet was run.
+- Ticket #2 cached move-order scores is operationally closed: implementation
+  commit `ce1aa5aaeb7c9d57dd2a8a37c1546f5213d097e6` was independently
+  reviewed with verdict **VERIFIED SUCCESS** and no findings, then merged into
+  `main` by `876632c875338a89a013d380f7fb7c3f5de958f5`. The frozen same-work
+  gate accepted a 16.5693516238715% NNUE median elapsed-time improvement with
+  10/10 pair wins, while PeSTO passed protection and both deterministic anchors
+  remained exact. The 354,816-byte merged-main artifact, SHA-256
+  `B3E075A46DA72335F40E822A9EAA65B9219D20F7FDA8269B9A619D588F26AA40`,
+  is deployed; casual 3+2 shakedown game
+  [`0B5jsiKu`](https://lichess.org/0B5jsiKu) completed with 73/73 legal plies,
+  `37.e8=Q#`, clean exit, bridge recovery, and no process leak. No rollback or
+  further Ticket #2 engine work is pending. These are throughput and
+  operational-health results, not an Elo claim.
 - Rejected and closed: G9 sacrifice ordering bonus, DYNAMIC_BONUS, and
   COMP_BONUS as style mechanisms.
 - Permanently closed by its second/final strike: WDL blending for the Phase D

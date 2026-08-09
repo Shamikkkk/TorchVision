@@ -3380,3 +3380,84 @@ orderly shutdown, bridge recovery, and absence of process leaks. The measured
 does not establish Elo, the shakedown is not controlled benchmark evidence, and
 no chess gauntlet has established a playing-strength increase. Ticket #1 is
 closed.
+
+## Ticket #2 deployed and operationally closed (August 9, 2026)
+
+Ticket #2, cache move-order scores, removed repeated scoring from move-sort
+comparators while retaining the original `Move` collection,
+`sort_unstable_by`, descending score relation, and all ordering formulas. Each
+move is scored once per sort into a private sparse-row `(from_sq, to_sq)` cache;
+promotion variants sharing endpoints are protected by equality checks. The
+change is confined to `engine/src/search.rs`, is thread-private under Lazy SMP,
+and does not alter move generation, SEE, search policy, evaluation, timing,
+node accounting, UCI, or benchmark definitions.
+
+Implementation commit `ce1aa5aaeb7c9d57dd2a8a37c1546f5213d097e6`
+(`perf(search): cache move ordering scores`) was independently reviewed with
+verdict **VERIFIED SUCCESS** and no findings, then merged into `main` by
+`876632c875338a89a013d380f7fb7c3f5de958f5`. The authoritative merged
+`engine/src/search.rs` blob is `78d289ae38432b7d425aa4271ffbe0766b7e3c26`;
+its canonical raw Git-blob SHA-256 is
+`0707E5767F9C77EC553CDAFC9445F9C1DAFE8265183557A343D71700ED6B3D37`.
+
+Correctness gates passed: focused tests 8/8; debug `nnue_verify` 34/34 and
+`pyro` 57/57; release 34/34 and 56/56; perft `20 / 400 / 8,902`; Ticket #1
+incremental-NNUE protection over 246 cases, 10,330 transitions, and 10,577,920
+raw lanes with zero discrepancy; and canonical fixed-work comparison 40/40
+with zero move, score, depth, or node mismatch. Repeated depth-8 anchors passed
+5/5 in both modes: NNUE 5,065,087 nodes / `a8df66621c8eb452`, and PeSTO
+4,900,866 nodes / `18bd8f3c9614b0db`. The full timed-root gate also passed:
+strict transcripts matched over 40 rows, incident depths 1-12 returned `Qg1#`
+at score 49999, Threads=1 passed 50/50, Threads=2 passed 50/50, and the
+preceding position remained `Nh3+` at score 49995. An earlier isolated
+fixed-work timeout was diagnosed as **TIMEOUT NOT REPRODUCED** and did not
+recur in the diagnostic, canonical, timed-root, or binding performance runs.
+
+Performance acceptance was frozen before candidate measurement. The binding
+metric was complete engine-benchmark `time_ms`; the frozen NNUE threshold was
+4.892464430694045% and the PeSTO protection threshold was
+5.3297336690075525%. In the uncontaminated ten-pair, five-block B-C-C-B
+Threads=1 campaign, NNUE median elapsed time fell from 21,322.5 ms to 17,789.5
+ms, a **16.5693516238715%** improvement, with 10/10 pair wins at exact work.
+PeSTO median elapsed time fell from 12,456.5 ms to 8,754.5 ms, so its regression
+metric was -29.7194235941075%, also at exact work. The late PeSTO timing drift
+affected both artifacts and was retained as common-mode host drift after
+independent sensitivity review. The final experimental verdict was
+**TICKET #2 THROUGHPUT ACCEPTED**. These are same-work throughput results, not
+an Elo or measured playing-strength result.
+
+A fresh merged-main release from `876632c...` was deployed atomically with
+`System.IO.File.Replace`. The live executable is 354,816 bytes, MD5
+`62D0D6F024CFFF580538E174BB8BA779`, SHA-256
+`B3E075A46DA72335F40E822A9EAA65B9219D20F7FDA8269B9A619D588F26AA40`.
+Post-deployment UCI and both deterministic anchors passed; observed deployment
+timings were non-binding. Both NNUE files remained SHA-256
+`A06CFEBD7C22D0B45F08BA94A276FD2A7CF8B3CD76C54DD308B2EEAA1A579591`.
+The previous Ticket #1 executable is retained, with SHA-256
+`D9B378DFCD61225311C94FB481E7FC8FB9582D9F3AE358892B812E222E009119`,
+at `C:\torch_data\pyro_deploy_backups\pyro_before_ticket2_20260809_092641.exe`
+and `engine/target/release/pyro.before_ticket2.20260809_092641.replace-backup.exe`.
+No rollback or bridge restart was required.
+
+The live shakedown passed in casual 3+2 Standard Blitz game
+[`0B5jsiKu`](https://lichess.org/0B5jsiKu). PyroBotTorch played White against
+TorchVision29 and won `1-0` by `37.e8=Q#` (`e7e8q`) after 73 legal plies. The
+final position was
+`4Q2k/6p1/1p4p1/6N1/p7/P5PP/5P2/4n1K1 b - - 0 37`. Independent
+python-chess validation found 73/73 legal moves, zero parse errors, and
+checkmate with White the winner. The retained PGN SHA-256 is
+`53381BEC7E32DB6BBECBFA0AFA0970D9DCBBB7C6051115CD9FED2162816618D2`.
+The bridge used Threads=2 and concurrency one;
+two moves came from the book and 35 from search. All 35 searches produced
+results, the engine exited 0, the bridge recorded `Game over` and
+`Process Freed. Count: 0`, and no timeout, illegal response, failed submission,
+API error, duplicate, missing response, nonzero exit, or orphan remained.
+
+The launch log names the configured executable path but did not capture PID
+8912's binary hash or a game-specific literal `NNUE loaded` line. Attribution
+is therefore strong evidence-based attribution to the deployed Ticket #2
+artifact, not direct per-process hash capture; NNUE use is likewise strongly
+inferred from the normal launch, authenticated sibling net, and deployed
+default. The shakedown is operational-health evidence, not benchmark or Elo
+evidence. **TICKET #2 OPERATIONALLY CLOSED.** No further Ticket #2 engine work
+or rollback is pending.

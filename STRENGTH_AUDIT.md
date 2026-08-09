@@ -33,8 +33,8 @@ deployment.
 
 **Historical measured baseline (original audit, single thread, midgame FEN,
 300k nodes):**
-- NNUE path: **~106k nps** · PeSTO path: **~242k nps** → the current NNUE integration
-  costs ~56% of total search time.
+- NNUE path: **~106k nps** · PeSTO path: **~242k nps**. At that snapshot,
+  the NNUE path was estimated to account for ~56% of total search time.
 - Ticket #19 has since supplied deterministic fixed-work measurement. The
   historical wall-clock sample remains motivation, not a current controlled
   benchmark or optimization result.
@@ -90,8 +90,8 @@ noise threshold. PeSTO improved 2.609% with no regression. All fixed decisions,
 scores, depths, nodes, and checksums remained exact, and the full timed-root
 gate passed 50/50 at Threads=1 and 50/50 at Threads=2.
 
-The deployed executable retained the deterministic anchors above in both NNUE
-and PeSTO modes. Its live identity is 356,864 bytes, MD5
+The Ticket #1 deployed executable retained the deterministic anchors above in
+both NNUE and PeSTO modes. Its then-live identity was 356,864 bytes, MD5
 `0096EAFE3395EBB14A7AD543694651A0`, SHA-256
 `D9B378DFCD61225311C94FB481E7FC8FB9582D9F3AE358892B812E222E009119`.
 Post-deployment UCI startup and both deterministic benches passed, followed by
@@ -105,9 +105,69 @@ response, or process leak occurred.
 This is measured throughput and operational-correctness evidence, not Elo
 evidence. No gauntlet was run, the historical estimated Ticket #1 Elo range is
 not added to current strength, and the shakedown result is not controlled
-benchmark evidence. Ticket #1 is closed. Ticket #2 — removing repeated move
-scoring inside the sort comparator — is the sole next separate planning
-candidate. Planning does not authorize implementation.
+benchmark evidence. Ticket #1 is closed.
+
+## TICKET #2 COMPLETE — cached move-order scores
+
+Ticket #2 is implemented, independently reviewed, merged, deployed, and
+operationally closed. Implementation commit
+`ce1aa5aaeb7c9d57dd2a8a37c1546f5213d097e6` was merged into `main` by
+`876632c875338a89a013d380f7fb7c3f5de958f5`. It computes each supplied move's
+existing ordering score once per sort and looks it up through a private sparse
+`(from_sq, to_sq)` cache: a `[u8; 64]` origin-to-row map and one `[i32; 64]`
+score row per active origin. The original move collection, `sort_unstable_by`,
+descending relation, ordering formulas, and quiescence capture/SEE filter are
+unchanged. Promotion endpoint equality is protected by tests and debug checks;
+quiescence caches only the existing post-filter ordering score; and each sort
+has a fresh cache, so Lazy SMP remains thread-private.
+
+Correctness and deterministic work remained exact: focused tests passed 8/8;
+debug and release suites, perft `20 / 400 / 8,902`, and Ticket #1's 10,577,920
+raw-lane protection all passed; the canonical comparison matched 40/40 rows;
+and five repeated runs reproduced each fixed-work anchor:
+
+- NNUE: **5,065,087 nodes**, checksum `a8df66621c8eb452`;
+- PeSTO: **4,900,866 nodes**, checksum `18bd8f3c9614b0db`.
+
+The timed-root gate passed strict baseline/candidate transcript comparison over
+40 rows, incident depths 1-12, 50/50 fresh Threads=1 processes, 50/50 fresh
+Threads=2 processes, and both protected preceding-position checks. An isolated
+earlier fixed-work timeout was investigated as **TIMEOUT NOT REPRODUCED** and
+did not recur in the later diagnostic, correctness, timed-root, or binding
+performance campaigns.
+
+Performance acceptance was precommitted from A/A measurements before the
+candidate ran. The first NNUE A/A window measured 26,009.5 ms median and 533.5
+ms MAD (6.153521% noise) and was rejected under the predeclared >5% rule. The
+single permitted replacement measured 25,373.0 ms median and 371.5 ms MAD
+(4.392464% noise); PeSTO A/A measured 15,094.0 ms median and 243.0 ms MAD
+(4.829734% noise). The frozen complete-benchmark `time_ms` thresholds were
+4.892464430694045% for NNUE improvement and 5.3297336690075525% maximum PeSTO
+regression. They are preserved in
+`C:\torch_data\pyro_ticket2_20260808_731824c\reports\noise\ticket2_frozen_thresholds.json`
+(SHA-256
+`C88C2C7EAC8FFB2857B4120D37A2E735E0118C2928B7192B8B32061F9C387852`).
+In the binding ten-pair B-C-C-B campaign, at identical depth-8
+work, NNUE median elapsed time improved from 21,322.5 ms to 17,789.5 ms
+(**16.5693516238715%**) with 10/10 pair wins. PeSTO median elapsed time improved
+from 12,456.5 ms to 8,754.5 ms, a -29.7194235941075% regression metric, and
+therefore passed its protection gate. Independent review examined and retained
+the late common-mode PeSTO timing drift; final verdict: **VERIFIED SUCCESS**, no
+findings, and **TICKET #2 THROUGHPUT ACCEPTED**.
+The binding report under
+`C:\torch_data\pyro_ticket2_20260808_731824c\reports\paired\abba-01` has
+SHA-256
+`FFD1C1C94D6216FF279BC8BDE45594D6C0A730506D78E109B5FF8E319724FBEA`.
+
+The merged-main executable is live at 354,816 bytes, MD5
+`62D0D6F024CFFF580538E174BB8BA779`, and SHA-256
+`B3E075A46DA72335F40E822A9EAA65B9219D20F7FDA8269B9A619D588F26AA40`.
+It reproduced both deterministic anchors after deployment. Casual 3+2
+shakedown game [`0B5jsiKu`](https://lichess.org/0B5jsiKu) then completed with
+73/73 legal plies, `37.e8=Q#`, clean engine exit, bridge recovery, and no
+process leak. This game is operational-health evidence only. Ticket #2 has no
+Elo result, no measured playing-strength claim, and required no rollback.
+**TICKET #2 OPERATIONALLY CLOSED.**
 
 ---
 
@@ -146,7 +206,7 @@ candidate. Planning does not authorize implementation.
 | Capture history | **ABSENT** | — |
 | Staged movegen / MovePicker | **ABSENT** | Every node: full `Vec<Move>` allocation (`movegen.rs:446-447`) + full sort. |
 | Correction history | **ABSENT** | — |
-| **Ordering cost bug** | — | `order_moves` (`search.rs:1053-1058`) calls `score_move` **inside the sort comparator** — 2·n·log(n) score computations per node, each possibly running full SEE. Standard: score once into an array (n SEE calls), or better, staged picking with lazy scoring. Pure speed loss, zero behavior change to fix. |
+| **Ordering-score recomputation** | **RESOLVED by Ticket #2** | Historical audit finding: `order_moves` previously called `score_move` inside the sort comparator, causing repeated score and SEE work. Ticket #2 now computes each supplied move's existing score once per sort and performs cached comparator lookups. Full sorting and a future staged MovePicker remain separate possible costs. |
 
 ### C) Speed / NPS
 
@@ -227,10 +287,10 @@ try: cast accumulator to i16, iterate fixed-size chunks — check `--emit=asm`);
 incrementalization. **Combined incremental+SIMD projection: ~400-600k nps, i.e. ~2-2.5
 plies ≈ +100-170 Elo, before any search-feature work.**
 
-Also in the hot path and worth naming: Zobrist recomputed from scratch per node
-(`search.rs:1211`), ray-walk sliding attacks under everything (`movegen.rs:117-134`),
-`score_move`-in-comparator sorting (`search.rs:1053-1058`), per-node `Vec` allocations,
-and make-and-test legality filtering. Each is a pure-speed fix with a perft/bench
+Also remaining in the hot path and worth naming: Zobrist recomputed from scratch
+per node (`search.rs:1211`), ray-walk sliding attacks under everything
+(`movegen.rs:117-134`), per-node `Vec` allocations, and make-and-test legality
+filtering. Each remaining item is a pure-speed candidate with a perft/bench
 equivalence check — no search-behavior change, minimal SPRT risk.
 
 ---
@@ -247,7 +307,7 @@ kz_sac/aggression floors (every gauntlet keeps the style gate regardless).
 | # | Change | Est. Elo | Effort | Risk | Style risk |
 |---|---|---|---|---|---|
 | 1 | **COMPLETE, independently reviewed:** incremental NNUE accumulator | Historical estimate only; no Elo claim | M | Exact same-work implementation verified; 43.463% median NNUE elapsed-time improvement | None (identical evals) |
-| 2 | **Fix move-ordering cost** (score once per node, not per comparison) | +10-25 (speed) | S | Trivial | None |
+| 2 | **COMPLETE, independently reviewed, deployed:** cache move-order scores once per sort | Historical estimate only; no Elo claim | S | Exact same-work implementation verified; 16.569% median NNUE elapsed-time improvement, 10/10 pair wins | None (identical ordering/tree) |
 | 3 | **Log-formula LMR** + re-search on fail-high above reduced depth | +50-90 | S-M | Low; biggest single search gap | **Yes — flag.** Deeper reductions of "quiet junk" can prune speculative attacking quiets. Gauntlet must check kz_sac. |
 | 4 | **RFP** (eval − 70·depth ≥ beta → return, depth ≤ ~7, not in PV/check) | +25-50 | S | Low | Mild — prunes when *winning*, rarely style-relevant |
 | 5 | **QS: TT probe/store + delta pruning + captures-only generation** | +20-40 | M | Medium (QS TT bugs are subtle) | None |
@@ -296,7 +356,7 @@ a fixed position suite + perft) and can batch into one SPRT since behavior is un
 
 1. ⚡ `bench` + aggregate nodes/time/NPS output (#19) — **COMPLETE** and independently reviewed.
 2. ⚡ Incremental accumulator (#1) — **COMPLETE**, independently reviewed, 43.463% median NNUE elapsed-time improvement at identical fixed work.
-3. ⚡ Ordering-cost fix (#2) — next separate planning candidate after Git preservation; planning does not authorize implementation. Incremental Zobrist (#16) remains a later, isolated change.
+3. ⚡ Ordering-cost fix (#2) — **COMPLETE**, independently reviewed, throughput-accepted, merged, deployed, and operationally closed. Incremental Zobrist (#16) remains a later, isolated candidate, not an authorized implementation.
 4. Log-LMR (#3) — **style-gated gauntlet**.
 5. RFP (#4).
 6. NMP dynamic R (#6).

@@ -1,11 +1,10 @@
 # Pyro project state
 
-Ticket #1 deployment and shakedown snapshot: **August 3, 2026**. Ticket #1 was
-preserved as `0aee7d72f89027b14071c1ed90e9595bf5deb215` and merged through
-pull request #1 into `main` by
-`a3a997cb366ab95ae7b3926f7588fd41472e392e`. This records the verified
-deployment-time state; current Git and runtime state must still be checked
-rather than inferred from this snapshot.
+Ticket #2 deployment and shakedown snapshot: **August 9, 2026**. Ticket #2 was
+preserved as `ce1aa5aaeb7c9d57dd2a8a37c1546f5213d097e6` and merged into
+`main` by `876632c875338a89a013d380f7fb7c3f5de958f5`. This records the
+verified documentation-time state; current Git and runtime state must still be
+checked rather than inferred from this snapshot.
 
 Labels used below:
 
@@ -18,6 +17,19 @@ Labels used below:
 
 ## Repository
 
+- **August 9, 2026 Ticket #2 closure fact:** repository
+  `C:\Users\shami\OneDrive\Documents\torch` was on `main`; local `HEAD`, local
+  `main`, and `origin/main` all matched merge commit
+  `876632c875338a89a013d380f7fb7c3f5de958f5`. The complete initial status was
+  only the pre-existing lowercase ` m bullet`, with nothing staged. Current
+  state must be checked from Git.
+- **Verified fact:** Ticket #2 implementation commit
+  `ce1aa5aaeb7c9d57dd2a8a37c1546f5213d097e6`, titled
+  `perf(search): cache move ordering scores`, was merged by `876632c...`. Its
+  sole production source change is `engine/src/search.rs`; the authoritative
+  Git blob is `78d289ae38432b7d425aa4271ffbe0766b7e3c26`, with canonical raw
+  Git-blob SHA-256
+  `0707E5767F9C77EC553CDAFC9445F9C1DAFE8265183557A343D71700ED6B3D37`.
 - **August 3, 2026 deployment-documentation fact:** repository
   `C:\Users\shami\OneDrive\Documents\torch` was on `main`; local `HEAD`, local
   `main`, and remote `origin/main` all matched merge commit
@@ -136,6 +148,42 @@ Labels used below:
   same-work NNUE throughput improvement, not an Elo result; no chess gauntlet
   was run.
 
+## Ticket #2 cached move-order scores
+
+- **Verified current fact:** Ticket #2 is implemented, independently reviewed,
+  merged, deployed, and operationally closed. It scores each supplied move once
+  per sort into a fresh private sparse-row cache indexed by `(from_sq, to_sq)`.
+  The original move collection, `sort_unstable_by`, descending score relation,
+  ordering and SEE formulas, search policy, evaluation, timing, node accounting,
+  UCI, and deterministic benchmark definitions remain unchanged.
+- **Verified current fact:** focused tests passed 8/8; debug suites passed 34/34
+  and 57/57; release suites passed 34/34 and 56/56; perft remained
+  `20 / 400 / 8,902`; Ticket #1's 10,577,920 raw-lane protection had zero
+  discrepancy; and canonical fixed-work comparison passed 40/40 with zero
+  move, score, depth, or node mismatch.
+- **Verified current fact:** five repeated runs reproduced each depth-8 anchor:
+  NNUE 5,065,087 nodes / `a8df66621c8eb452`, and PeSTO 4,900,866 nodes /
+  `18bd8f3c9614b0db`.
+- **Verified current fact:** the complete timed-root gate passed. Strict
+  baseline/candidate transcripts matched over 40 rows; incident depths 1-12
+  returned `Qg1#`, score 49999; Threads=1 passed 50/50; Threads=2 passed 50/50
+  (43 `Qg1#`, 7 `Qf2#`); and both preceding-position probes returned `Nh3+`,
+  score 49995. An isolated earlier fixed-work timeout was investigated as
+  **TIMEOUT NOT REPRODUCED** and did not recur.
+- **Verified current fact:** performance acceptance was frozen before candidate
+  measurement from A/A noise. The binding complete-benchmark `time_ms`
+  thresholds were 4.892464430694045% NNUE improvement and
+  5.3297336690075525% maximum PeSTO regression. In ten predeclared B-C-C-B
+  pairs at exact fixed work, NNUE median elapsed time improved 16.5693516238715%
+  (21,322.5 ms to 17,789.5 ms) with 10/10 pair wins. PeSTO improved
+  29.7194235941075% (12,456.5 ms to 8,754.5 ms), passing its protection gate.
+  Independent review retained the late common-mode PeSTO timing drift and
+  returned **VERIFIED SUCCESS**, no findings, and **TICKET #2 THROUGHPUT
+  ACCEPTED**.
+- **Interpretation boundary:** Ticket #2 is an exact-work throughput result. It
+  has no Elo or measured playing-strength claim. Deployment observations and
+  the one-game shakedown are not benchmark or strength evidence.
+
 ## Timed-root-completion fix
 
 - **Verified current fact:** commit
@@ -162,8 +210,25 @@ Labels used below:
 
 ## Deployment and NNUE
 
-- **August 3, 2026 deployment fact:** live executable
-  `engine/target/release/pyro.exe` is 356,864 bytes, MD5
+- **August 9, 2026 current deployment fact:** live executable
+  `engine/target/release/pyro.exe` is 354,816 bytes, MD5
+  `62D0D6F024CFFF580538E174BB8BA779`, SHA-256
+  `B3E075A46DA72335F40E822A9EAA65B9219D20F7FDA8269B9A619D588F26AA40`.
+  It is the fresh authoritative release built from merged `main` at
+  `876632c...`, and it passed UCI plus both deterministic anchors before and
+  after atomic deployment. Deployment-time elapsed values are non-binding.
+- **Verified deployment artifact:** the preserved merged-main release is
+  `C:\torch_data\pyro_ticket2_20260808_731824c\artifacts\merged-main\pyro.exe`;
+  it has the same 354,816-byte size, MD5, and SHA-256 as the live executable.
+- **Verified deployment fact:** the previous Ticket #1 executable is retained
+  at `C:\torch_data\pyro_deploy_backups\pyro_before_ticket2_20260809_092641.exe`
+  and
+  `engine/target/release/pyro.before_ticket2.20260809_092641.replace-backup.exe`.
+  Both have SHA-256
+  `D9B378DFCD61225311C94FB481E7FC8FB9582D9F3AE358892B812E222E009119`.
+  No rollback was required and the bridge was not restarted.
+- **August 3, 2026 historical Ticket #1 deployment fact:** the then-live executable
+  `engine/target/release/pyro.exe` was 356,864 bytes, MD5
   `0096EAFE3395EBB14A7AD543694651A0`, SHA-256
   `D9B378DFCD61225311C94FB481E7FC8FB9582D9F3AE358892B812E222E009119`.
 - **Verified deployment fact:** the preceding live executable is preserved at
@@ -172,7 +237,7 @@ Labels used below:
   `engine/target/release/pyro.before_ticket1.20260803_014815.replace-backup.exe`.
   Both rollback copies have SHA-256
   `6966D4B7A9715FA14C3DA4B67AB2187FC0BDEA956A7786E93D89AF3B076EB56B`.
-- **Verified deployment fact:** the live executable passed exit-0 UCI startup
+- **Verified August 3 deployment fact:** the Ticket #1 executable passed exit-0 UCI startup
   with `uciok`, `readyok`, and `NNUE loaded`; no residual engine process
   remained. At Threads=1, deployment validation reproduced NNUE 5,065,087
   nodes / `a8df66621c8eb452` and PeSTO 4,900,866 nodes /
@@ -213,6 +278,10 @@ Labels used below:
   logical bridge as a venv-launcher/interpreter process chain. There is no
   persistent watchdog or autostart; sleep, logout, reboot, or process failure
   will take the bot offline.
+- **August 9, 2026 process snapshot:** the unchanged bridge was PID 42132 at
+  `C:\lichess-bot\venv\Scripts\python.exe`, with start time
+  `2026-07-31T23:59:41.8779771+05:30`; no `pyro.exe` process was active while
+  idle. PIDs are observational, not permanent identifiers.
 - **Verified current fact:** the bridge uses the same deployed SCReLU-512 NNUE
   executable but configures Threads=2. This is intentional and separate from
   the application's Threads=4 default. While waiting for challenges, no
@@ -253,6 +322,31 @@ Labels used below:
   line. Ticket #1 attribution is the strong evidence-based conclusion from the
   pre-game deployed identity, logged path, and unchanged post-game artifact—not
   a directly captured launch hash.
+- **August 9, 2026 Ticket #2 shakedown fact:** casual 3+2 Standard Blitz game
+  [`0B5jsiKu`](https://lichess.org/0B5jsiKu) completed successfully against
+  TorchVision29. PyroBotTorch played White and won `1-0` by `37.e8=Q#`
+  (`e7e8q`) after 73 plies. Independent python-chess parsing found 73/73 legal
+  moves, zero errors, and checkmate at
+  `4Q2k/6p1/1p4p1/6N1/p7/P5PP/5P2/4n1K1 b - - 0 37`.
+  The local PGN is
+  `C:\lichess-bot\game_records\PyroBotTorch vs TorchVision29 - 0B5jsiKu.pgn`,
+  SHA-256
+  `53381BEC7E32DB6BBECBFA0AFA0970D9DCBBB7C6051115CD9FED2162816618D2`.
+- **Verified Ticket #2 lifecycle fact:** the bridge used Threads=2, book on,
+  Syzygy on, ponder off, and concurrency one. Two Pyro moves came from the book
+  and 35 from search; all 35 searches produced parsed results. Engine PID 8912
+  exited 0, the bridge recorded `Game over` and `Process Freed. Count: 0`, and
+  no timeout, illegal response, failed submission, missing/duplicate response,
+  API error, nonzero exit, or orphan remained. The 3.639/5.181/7.998-second
+  min/median/max search durations are operational observations, not benchmark
+  evidence. The one 0.117-second asyncio startup warning was benign.
+- **Ticket #2 attribution boundary:** the launch log records the configured
+  live executable path but not PID 8912's binary hash or a game-specific
+  literal `NNUE loaded` line. Attribution is strong evidence-based attribution
+  to the deployed Ticket #2 artifact from the pinned before/after live hash,
+  logged path, and absence of replacement—not direct per-process hash capture.
+  NNUE use is strongly inferred from normal launch without `--no-nnue`, the
+  authenticated sibling net, and deployed default behavior.
 
 ## Verification evidence
 
@@ -296,9 +390,9 @@ Labels used below:
 - **Verified current fact:** the native lichess-bot bridge is running and
   PyroBotTorch is online. No game-engine `pyro.exe` is expected while the bot
   is idle. Docker remains unused for this deployment.
-- **August 3, 2026 deployment-documentation fact:** Ticket #1 is implemented,
+- **August 3, 2026 deployment-documentation fact:** Ticket #1 was implemented,
   independently reviewed, preserved, merged into `main`, deployed, and
-  operationally verified. Its live executable SHA-256 is
+  operationally verified. Its then-live executable SHA-256 was
   `D9B378DFCD61225311C94FB481E7FC8FB9582D9F3AE358892B812E222E009119`.
   Ticket #1 is operationally closed; current Git and runtime state must still
   be checked before future work.
@@ -315,20 +409,18 @@ Labels used below:
 - **Historically reported fact:** Pyro still emits mate-range UCI scores as
   centipawns rather than `score mate N`; this cosmetic issue was outside the
   timed-root fix.
-- **Not started:** Ticket #2, removing repeated move scoring inside the sort
-  comparator. It is the sole next separate Plan-mode investigation after this
-  deployment documentation is reviewed and preserved. Planning does not
-  authorize implementation.
+- **August 9, 2026 closure fact:** Ticket #2 is merged, throughput-accepted,
+  deployed, operationally verified, and closed. The live executable SHA-256 is
+  `B3E075A46DA72335F40E822A9EAA65B9219D20F7FDA8269B9A619D588F26AA40`;
+  both NNUE files remain
+  `A06CFEBD7C22D0B45F08BA94A276FD2A7CF8B3CD76C54DD308B2EEAA1A579591`.
+  No Ticket #2 engine work or rollback remains pending.
 
 ## Next decision
 
-- **Immediate check:** confirm from Git whether this five-file Ticket #1
-  deployment and shakedown documentation update has been reviewed and
-  preserved. If it has not, preserve it first through user-controlled review,
-  staging, commit, and push.
-- **Once preservation is confirmed:** the next engineering phase is a separate
-  Plan-mode investigation for Ticket #2. Planning does not authorize
-  implementation, and the ordering-cost change has not begun.
+- No next engine ticket is authorized or unambiguously selected by this
+  closure. Any further engine change requires a separate planning decision and
+  explicit authorization; the existing roadmap order remains advisory only.
 - Branch cleanup, lichess-bot upstream updates, README corrections, persistent
   autostart/watchdog work, and all other roadmap items remain separate,
   non-authorized decisions.
